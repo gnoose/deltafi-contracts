@@ -166,6 +166,8 @@ impl AdminInstruction {
 pub struct LpDepositData {
     /// Lp Token amount to deposit
     pub lp_amount: u64,
+    /// Minimum amount of lp token
+    pub minimum_token_amount: u64,
 }
 
 /// LpWithdraw instruction data

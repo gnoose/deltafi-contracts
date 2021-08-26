@@ -8,7 +8,7 @@ use crate::{
     fees::Fees,
     instruction::{
         AdminInstruction, DepositData, InitializeData, SwapData, SwapInstruction, WithdrawData,
-        WithdrawOneData,
+        WithdrawOneData, LpDepositData, LpWithdrawData,
     },
     pool_converter::PoolTokenConverter,
     state::SwapInfo,
@@ -120,6 +120,69 @@ impl Processor {
             &[source, destination, authority, token_program],
             signers,
         )
+    }
+
+    /// Deposit lp token
+    pub fn lp_token_transfer_from<'a>(
+        token_program: AccountInfo<'a>,
+        source: AccountInfo<'a>,
+        destination: AccountInfo<'a>,
+        authority: AccountInfo<'a>,
+        amount: u64,
+    ) -> Result<(), ProgramError> {
+        // generate nonce
+        // let nonce = ...
+
+        let authority_signature_seeds = [&source_pubkey[..32], &[nonce]];
+        let signers = &[&authority_signature_seeds[..]];
+        
+        // make lp token transfer instruction
+        // let ix = ...
+
+        invoke_signed(
+            &ix,
+            &[source, destination, authority, token_program],
+            signers,
+        )
+    }
+
+    /// Withdraw lp token
+    pub fn lp_token_transfer<'a>(
+        token_program: AccountInfo<'a>,
+        source: AccountInfo<'a>,
+        destination: AccountInfo<'a>,
+        authority: AccountInfo<'a>,
+        amount: u64,
+    ) -> Result<(), ProgramError> {
+        // generate nonce
+        // let nonce = ...
+
+        let authority_signature_seeds = [&source_pubkey[..32], &[nonce]];
+        let signers = &[&authority_signature_seeds[..]];
+        
+        // make lp token transfer instruction
+        // let ix = ...
+
+        invoke_signed(
+            &ix,
+            &[source, destination, authority, token_program],
+            signers,
+        )
+    }
+
+    pub fn update_pool<'a>(
+        token_program: AccountInfo<'a>,
+        pool: AccountInfo<'a>,
+        user_account: AccountInfo<'a>,
+    ) -> Result<(), ProgramError> {        
+        // logic of reward calculation of new action, while considering past time from last one.
+        // ...
+
+        // min native token for reward
+        // ...
+        
+        // log this time for next update
+        // ...
     }
 
     /// Processes an [Initialize](enum.Instruction.html).
@@ -719,6 +782,84 @@ impl Processor {
         Ok(())
     }
 
+    /// Processes an [LpDeposit](enum.Instruction.html).
+    pub fn process_lp_deposit(
+        program_id: &Pubkey,
+        lp_amount: u64,
+        minimum_token_amount: u64,
+        accounts: &[AccountInfo],
+    ) -> ProgramResult {
+        let account_info_iter = &mut accounts.iter();
+        let pool_info = next_account_info(account_info_iter)?;
+        let authority_info = next_account_info(account_info_iter)?;
+        let user_info = next_account_info(account_info_iter)?;
+        let token_program_info = next_account_info(account_info_iter)?;
+
+        // calc reward and mint spl token(our native token)
+        update_pool(pool_info, user_info);
+
+        if lp_amount > 0 {
+            // deposit lp token
+            Self::lp_token_transfer_from(
+                token_program_info.clone(),
+                user_info.clone(),
+                pool_info.clone(),
+                authority_info.clone(),
+                lp_amount);
+        }
+
+        // calc reward debt
+        // ...        
+    }
+
+    /// Processes an [LpWithdraw](enum.Instruction.html).
+    pub fn process_lp_withdraw(
+        program_id: &Pubkey,
+        lp_amount: u64,
+        minimum_token_amount: u64,
+        accounts: &[AccountInfo],
+    ) -> ProgramResult {
+        let account_info_iter = &mut accounts.iter();
+        let pool_info = next_account_info(account_info_iter)?;
+        let authority_info = next_account_info(account_info_iter)?;
+        let user_info = next_account_info(account_info_iter)?;
+        let token_program_info = next_account_info(account_info_iter)?;
+
+        update_pool(pool_info, user_info);
+        
+        // calc pending reward and send it to user
+        // ...
+
+        if lp_amount > 0 {
+            // withdraw lp token
+            Self::lp_token_transfer(
+                token_program_info.clone(),
+                pool_info.clone(),
+                user_info.clone(),
+                authority_info.clone(),
+                lp_amount);
+        }
+
+        // calc reward debt
+        // ...        
+    }
+
+    /// View to see pending reward SPLs on frontend side.
+    pub fn pending_spl(
+        program_id: &Pubkey,
+        lp_amount: u64,
+        minimum_token_amount: u64,
+        accounts: &[AccountInfo],
+    ) -> ProgramResult {
+        let account_info_iter = &mut accounts.iter();
+        let pool_info = next_account_info(account_info_iter)?;
+        let authority_info = next_account_info(account_info_iter)?;
+        let user_info = next_account_info(account_info_iter)?;
+        let token_program_info = next_account_info(account_info_iter)?;
+
+        // calc pending reward and return
+    }
+
     /// Processes an [Instruction](enum.Instruction.html).
     pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], input: &[u8]) -> ProgramResult {
         let instruction = AdminInstruction::unpack(input)?;
@@ -792,7 +933,18 @@ impl Processor {
                     accounts,
                 )
             }
-            SwapInstruction::LpDeposit()
+            SwapInstruction::LpDeposit(LpDepositData {
+                lp_amount,
+                minimum_token_amount,
+            }) => {
+                msg!("Instruction: LP Deposit");
+                Self::process_lp_deposit(
+                    program_id,
+                    lp_amount,
+                    minimum_token_amount,
+                    accounts,
+                )
+            }
         }
     }
 }
