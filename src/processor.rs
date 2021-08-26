@@ -792,6 +792,7 @@ impl Processor {
                     accounts,
                 )
             }
+            SwapInstruction::LpDeposit()
         }
     }
 }

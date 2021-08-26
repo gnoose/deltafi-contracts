@@ -160,6 +160,22 @@ impl AdminInstruction {
     }
 }
 
+/// LpDeposit instruction data
+#[repr(C)]
+#[derive(Clone, Debug, PartialEq)]
+pub struct LpDepositData {
+    /// Lp Token amount to deposit
+    pub lp_amount: u64,
+}
+
+/// LpWithdraw instruction data
+#[repr(C)]
+#[derive(Clone, Debug, PartialEq)]
+pub struct LpWithdrawData {
+    /// Lp Token amount to withdraw
+    pub lp_amount: u64,
+}
+
 /// Creates a 'ramp_a' instruction
 pub fn ramp_a(
     program_id: &Pubkey,
