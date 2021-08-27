@@ -98,7 +98,8 @@ impl Pack for SwapInfo {
             admin_fee_key_a,
             admin_fee_key_b,
             fees,
-        ) = array_refs![input, 1, 1, 1, 8, 8, 8, 8, 8, 32, 32, 32, 32, 32, 32, 32, 32, 32, 64];
+            oracle
+        ) = array_refs![input, 1, 1, 1, 8, 8, 8, 8, 8, 32, 32, 32, 32, 32, 32, 32, 32, 32, 64, 320];
         Ok(Self {
             is_initialized: match is_initialized {
                 [0] => false,
@@ -126,6 +127,7 @@ impl Pack for SwapInfo {
             admin_fee_key_a: Pubkey::new_from_array(*admin_fee_key_a),
             admin_fee_key_b: Pubkey::new_from_array(*admin_fee_key_b),
             fees: Fees::unpack_from_slice(fees)?,
+            oracle: ()
         })
     }
 

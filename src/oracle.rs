@@ -1,18 +1,20 @@
 //! Moving Average = Oracle Price on Solana
 use solana_program::{
     pubkey::Pubkey,
+    program_error::ProgramError,
 };
 use std::time::{SystemTime, UNIX_EPOCH};
+use std::alloc::System;
 
 pub struct Oracle {
     // Period for moving aveage
     pub PERIOD: u32,
 
     // Program id for token0
-    pub token0: &Pubkey,
+    pub token0: Pubkey,
 
     // Program id for token1
-    pub token1: &Pubkey,
+    pub token1: Pubkey,
 
     // cumulative price for token0
     pub price0CumulativeLast: u32,
@@ -32,8 +34,8 @@ pub struct Oracle {
 
 impl Oracle {
     pub fn new(
-        token0: &Pubkey,
-        token1: &Pubkey,
+        token0: Pubkey,
+        token1: Pubkey,
     ) -> Self {
         Self {
             PERIOD: 24,
@@ -48,7 +50,7 @@ impl Oracle {
     }
 
     pub fn update(
-        &self,
+        &mut self,
         price0Cumulative: f64,
         price1Cumulative: f64,
         blockTimestamp: u32
@@ -106,6 +108,31 @@ impl Oracle {
         } else {
             0.into()
         }
+    }
+
+    pub fn unpack_from_slice(input: &[u8]) -> Result<Self, ProgramError> {
+        let input = array_ref![input, 0, 64];
+        #[allow(clippy::ptr_offset_with_cast)]
+        let (
+            PERIOD,
+            token0,
+            token1,
+            price0CumulativeLast,
+            price1CumulativeLast,
+            blockTimestampLast,
+            price0Average,
+            price1Average,
+        ) = array_refs![input, 4, 4, 4, 4, 4, 4, 8, 8];
+        Ok(Self {
+            PERIOD: u32::from(*PERIOD),
+            token0: Pubkey::from(*token0),
+            token1: Pubkey::from(*token1),
+            price0CumulativeLast: u32::from(price0CumulativeLast),
+            price1CumulativeLast: u32::from(price1CumulativeLast),
+            blockTimestampLast: u32::from(blockTimestampLast),
+            price0Average: f64::from(price0Average),
+            price1Average: f64::from(price1Average),
+        })
     }
 
 }

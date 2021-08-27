@@ -13,6 +13,7 @@ use crate::{
     pool_converter::PoolTokenConverter,
     state::SwapInfo,
     utils,
+    oracle::Oracle,
 };
 use num_traits::FromPrimitive;
 use solana_program::{
@@ -258,6 +259,7 @@ impl Processor {
             admin_fee_key_a: *admin_fee_a_info.key,
             admin_fee_key_b: *admin_fee_b_info.key,
             fees,
+            oracle: Oracle::new(*token_a_info.key, *token_b_info.key),
         };
         SwapInfo::pack(obj, &mut swap_info.data.borrow_mut())?;
         Ok(())
@@ -337,6 +339,12 @@ impl Processor {
         if amount_swapped < minimum_amount_out {
             return Err(SwapError::ExceededSlippage.into());
         }
+
+        let currentTimestamp: u32 = System::now();
+        let (price0Cumulative, price1Cumulative, blockTimestamp) = token_swap.oracle.currentCumulativePrice(token_swap.token_a.amount, token_swap.token_b.amount, currentTimestamp)?;
+        let &mut swap = token_swap?;
+
+        swap.oracle.update(price0Cumulative, price1Cumulative, blockTimestamp).unwrap()?;
 
         Self::token_transfer(
             swap_info.key,
