@@ -13,6 +13,7 @@ pub mod pool_converter;
 pub mod processor;
 pub mod state;
 pub mod utils;
+pub mod oracle;
 
 // Export current solana-program types for downstream users who may also be
 // building with a different solana-program version

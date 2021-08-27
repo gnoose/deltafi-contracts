@@ -1,6 +1,7 @@
 //! State transition types
 
 use crate::fees::Fees;
+use crate::oracle::Oracle;
 use arrayref::{array_mut_ref, array_ref, array_refs, mut_array_refs};
 use solana_program::{
     program_error::ProgramError,
@@ -60,6 +61,8 @@ pub struct SwapInfo {
     pub admin_fee_key_b: Pubkey,
     /// Fees
     pub fees: Fees,
+    /// Oracle
+    pub oracle: Oracle,
 }
 
 impl Sealed for SwapInfo {}
