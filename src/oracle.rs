@@ -6,6 +6,9 @@ use solana_program::{
 use log::{ trace };
 use arrayref::{ array_ref, array_refs };
 
+/// Oracle struct
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Oracle {
     // Period for moving aveage
     pub PERIOD: u32,
