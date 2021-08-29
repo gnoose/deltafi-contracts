@@ -78,10 +78,10 @@ impl Oracle {
         price1: f64,
         currentTimestamp: u32,
     ) -> (f64, f64, u32) {
-        let price0Cumulative: f64 = self.price0CumulativeLast?;
-        let price1Cumulative: f64 = self.price1CumulativeLast?;
+        let mut price0Cumulative: f64 = self.price0CumulativeLast?;
+        let mut price1Cumulative: f64 = self.price1CumulativeLast?;
 
-        let blockTimestamp: u32 = self.blockTimestampLast?;
+        let mut blockTimestamp: u32 = self.blockTimestampLast?;
 
         if blockTimestamp != currentTimestamp {
             //caculate current cumulative price
