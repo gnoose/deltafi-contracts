@@ -3,7 +3,6 @@ use solana_program::{
     pubkey::Pubkey,
     program_error::ProgramError,
 };
-use std::alloc::System;
 use log::{ trace };
 use arrayref::{ array_ref, array_refs };
 
