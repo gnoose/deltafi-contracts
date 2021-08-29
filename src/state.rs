@@ -127,7 +127,7 @@ impl Pack for SwapInfo {
             admin_fee_key_a: Pubkey::new_from_array(*admin_fee_key_a),
             admin_fee_key_b: Pubkey::new_from_array(*admin_fee_key_b),
             fees: Fees::unpack_from_slice(fees)?,
-            oracle: ()
+            oracle: Oracle::unpack_from_slice(oracle)?
         })
     }
 
@@ -222,6 +222,7 @@ mod tests {
             withdraw_fee_numerator,
             withdraw_fee_denominator,
         };
+        let oracle = Oracle::new(token_a, token_b);
 
         let is_initialized = true;
         let is_paused = false;
@@ -244,6 +245,7 @@ mod tests {
             admin_fee_key_a,
             admin_fee_key_b,
             fees,
+            oracle
         };
 
         let mut packed = [0u8; SwapInfo::LEN];
