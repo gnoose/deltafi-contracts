@@ -5,6 +5,7 @@ use solana_program::{
 };
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::alloc::System;
+use log::{info, trace, warn};
 
 pub struct Oracle {
     // Period for moving aveage
@@ -59,7 +60,7 @@ impl Oracle {
 
         // ensure that at least one full period has passed since the last update
         if timeElapsed >= self.PERIOD {
-            console.log("ExampleOracleSimple: PERIOD_NOT_ELAPSED");
+            trace!("ExampleOracleSimple: PERIOD_NOT_ELAPSED");
         } else {
             // overflow is desired, casting never truncates
             // cumulative price is in (uq112x112 price * seconds) units so we simply wrap it after division by time elapsed
@@ -158,14 +159,14 @@ mod tests {
         let price0: f64 = 1?;
         let price1: f64 = 1?;
 
-        let currentTimestamp: u32 = SystemTime::now() + 1;
+        let currentTimestamp = SystemTime::now().checked_add(1.into());
         let timeElapsed = 1;
         let oracle: Oracle = Oracle::new(token0, token1)?;
 
         let expected: (f64, f64, u32) = (price0, price1, currentTimestamp)?;
 
         assert_eq!(
-          oracle.currentCumulativePrice(price0, price1, currentTimestamp),
+          oracle.currentCumulativePrice(price0, price1, u32::from(currentTimestamp)),
           expected
         );
     }
