@@ -6,6 +6,7 @@ use solana_program::{
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::alloc::System;
 use log::{info, trace, warn};
+use arrayref::{array_mut_ref, array_ref, array_refs, mut_array_refs};
 
 pub struct Oracle {
     // Period for moving aveage
