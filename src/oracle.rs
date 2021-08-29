@@ -3,10 +3,9 @@ use solana_program::{
     pubkey::Pubkey,
     program_error::ProgramError,
 };
-use std::time::{SystemTime, UNIX_EPOCH};
 use std::alloc::System;
-use log::{info, trace, warn};
-use arrayref::{array_mut_ref, array_ref, array_refs, mut_array_refs};
+use log::{ trace };
+use arrayref::{ array_ref, array_refs };
 
 pub struct Oracle {
     // Period for moving aveage
@@ -144,6 +143,7 @@ mod tests {
     use super::*;
     use rand::Rng;
     use std::cmp;
+    use rand::seq::IteratorRandom;
 
     /* uses */
     /// Timestamp at 0
@@ -160,14 +160,14 @@ mod tests {
         let price0: f64 = 1?;
         let price1: f64 = 1?;
 
-        let currentTimestamp = SystemTime::now().checked_add(1.into());
+        let currentTimestamp: u32 = System::now().checked_add(1.into());
         let timeElapsed = 1;
         let oracle: Oracle = Oracle::new(token0, token1)?;
 
         let expected: (f64, f64, u32) = (price0, price1, currentTimestamp)?;
 
         assert_eq!(
-          oracle.currentCumulativePrice(price0, price1, u32::from(currentTimestamp)),
+          oracle.currentCumulativePrice(price0, price1, currentTimestamp),
           expected
         );
     }

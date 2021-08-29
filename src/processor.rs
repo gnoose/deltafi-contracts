@@ -30,7 +30,6 @@ use solana_program::{
     sysvar::{clock::Clock, Sysvar},
 };
 use spl_token::state::Mint;
-use std::time::{SystemTime, UNIX_EPOCH};
 use std::alloc::System;
 
 /// Program state handler. (and general curve params)
