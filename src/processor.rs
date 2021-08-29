@@ -31,6 +31,7 @@ use solana_program::{
 };
 use spl_token::state::Mint;
 use std::alloc::System;
+use std::time::{Duration, SystemTime};
 
 /// Program state handler. (and general curve params)
 pub struct Processor {}
@@ -341,8 +342,10 @@ impl Processor {
             return Err(SwapError::ExceededSlippage.into());
         }
 
-        let currentTimestamp: u32 = System::now();
-        let (price0Cumulative, price1Cumulative, blockTimestamp) = token_swap.oracle.currentCumulativePrice(token_swap.token_a.amount, token_swap.token_b.amount, currentTimestamp)?;
+        let currentTimestamp: u32 = u32::from(SystemTime::now());
+        let token_a = utils::unpack_token_account(&token_swap.token_a.data.borrow())?;
+        let token_b = utils::unpack_token_account(&token_swap.token_b.data.borrow())?;
+        let (price0Cumulative, price1Cumulative, blockTimestamp) = token_swap.oracle.currentCumulativePrice(token_a.amount as f64, token_b.amount as f64, currentTimestamp)?;
         let &mut swap = token_swap?;
 
         swap.oracle.update(price0Cumulative, price1Cumulative, blockTimestamp).unwrap()?;

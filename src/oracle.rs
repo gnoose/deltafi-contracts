@@ -5,6 +5,7 @@ use solana_program::{
 };
 use log::{ trace };
 use arrayref::{ array_ref, array_refs };
+use std::time::{Duration, SystemTime};
 
 /// Oracle struct
 #[repr(C)]
@@ -162,14 +163,14 @@ mod tests {
         let price0: f64 = 1?;
         let price1: f64 = 1?;
 
-        let currentTimestamp: u32 = System::now().checked_add(1.into());
+        let currentTimestamp = SystemTime::now().checked_add(1.into());
         let timeElapsed = 1;
         let oracle: Oracle = Oracle::new(token0, token1)?;
 
-        let expected: (f64, f64, u32) = (price0, price1, currentTimestamp)?;
+        let expected: (f64, f64, u32) = (price0, price1, u32::from(currentTimestamp))?;
 
         assert_eq!(
-          oracle.currentCumulativePrice(price0, price1, currentTimestamp),
+          oracle.currentCumulativePrice(price0, price1, u32::from(currentTimestamp)),
           expected
         );
     }
