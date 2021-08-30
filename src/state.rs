@@ -169,6 +169,70 @@ impl Pack for SwapInfo {
     }
 }
 
+impl Sealed for FarmInfo {}
+impl IsInitialized for FarmInfo {
+    fn is_initialized(&self) -> bool {
+        self.is_initialized
+    }
+}
+
+pub struct FarmInfo {
+    /// Initialized state
+    pub is_initialized: bool,
+
+    /// Paused state
+    pub is_paused: bool,
+
+    /// Nonce used in program address
+    /// The program address is created deterministically with the nonce,
+    /// swap program id, and swap account pubkey.  This program address has
+    /// authority over the swap's token A account, token B account, and pool
+    /// token mint.
+    pub nonce: u8,
+
+    /// Initial amplification coefficient (A)
+    pub initial_amp_factor: u64,
+    /// Target amplification coefficient (A)
+    pub target_amp_factor: u64,
+    /// Ramp A start timestamp
+    pub start_ramp_ts: i64,
+    /// Ramp A stop timestamp
+    pub stop_ramp_ts: i64,
+
+    /// Deadline to transfer admin control to future_admin_key
+    pub future_admin_deadline: i64,
+    /// Public key of the admin account to be applied
+    pub future_admin_key: Pubkey,
+    /// Public key of admin account to execute admin instructions
+    pub admin_key: Pubkey,
+
+    /// Token A
+    pub token_a: Pubkey,
+    /// Token B
+    pub token_b: Pubkey,
+
+    /// Pool tokens are issued when A or B tokens are deposited.
+    /// Pool tokens can be withdrawn back to the original A or B token.
+    pub pool_mint: Pubkey,
+    /// Mint information for token A
+    pub token_deltafi_mint: Pubkey,
+    /// Fees
+    pub fees: Fees,
+    /// the value corresponding accDeltafiPerShare parameter to use in farming
+    pub acc_deltafi_per_share: u64,
+    /// Timestamp when calculate reward last     
+    pub last_reward_timestamp: u64,
+    /// Total allocation points
+    pub total_alloc_point: u64,
+}
+
+impl Sealed for FarmingUserInfo {}
+
+pub struct FarmingUserInfo {
+    pub amount: u64,
+    pub reward_debt: u64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

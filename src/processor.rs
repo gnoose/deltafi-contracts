@@ -3,15 +3,15 @@
 use crate::{
     admin::process_admin_instruction,
     bn::U256,
-    curve::{StableSwap, MAX_AMP, MIN_AMP, ZERO_TS},
+    curve::{StableSwap, Farm, MAX_AMP, MIN_AMP, ZERO_TS},
     error::SwapError,
     fees::Fees,
     instruction::{
         AdminInstruction, DepositData, InitializeData, SwapData, SwapInstruction, WithdrawData,
-        WithdrawOneData, LpDepositData, LpWithdrawData,
+        WithdrawOneData, FarmingInstruction, FarmingInitializeData, FarmingDepositData, FarmingWithdrawData
     },
     pool_converter::PoolTokenConverter,
-    state::SwapInfo,
+    state::{SwapInfo, FarmInfo, FarmingUserInfo},
     utils,
 };
 use num_traits::FromPrimitive;
@@ -122,67 +122,34 @@ impl Processor {
         )
     }
 
-    /// Deposit lp token
-    pub fn lp_token_transfer_from<'a>(
-        token_program: AccountInfo<'a>,
-        source: AccountInfo<'a>,
-        destination: AccountInfo<'a>,
-        authority: AccountInfo<'a>,
-        amount: u64,
-    ) -> Result<(), ProgramError> {
-        // generate nonce
-        // let nonce = ...
-
-        let authority_signature_seeds = [&source_pubkey[..32], &[nonce]];
-        let signers = &[&authority_signature_seeds[..]];
-        
-        // make lp token transfer instruction
-        // let ix = ...
-
-        invoke_signed(
-            &ix,
-            &[source, destination, authority, token_program],
-            signers,
-        )
-    }
-
-    /// Withdraw lp token
-    pub fn lp_token_transfer<'a>(
-        token_program: AccountInfo<'a>,
-        source: AccountInfo<'a>,
-        destination: AccountInfo<'a>,
-        authority: AccountInfo<'a>,
-        amount: u64,
-    ) -> Result<(), ProgramError> {
-        // generate nonce
-        // let nonce = ...
-
-        let authority_signature_seeds = [&source_pubkey[..32], &[nonce]];
-        let signers = &[&authority_signature_seeds[..]];
-        
-        // make lp token transfer instruction
-        // let ix = ...
-
-        invoke_signed(
-            &ix,
-            &[source, destination, authority, token_program],
-            signers,
-        )
-    }
-
     pub fn update_pool<'a>(
         token_program: AccountInfo<'a>,
-        pool: AccountInfo<'a>,
-        user_account: AccountInfo<'a>,
-    ) -> Result<(), ProgramError> {        
-        // logic of reward calculation of new action, while considering past time from last one.
-        // ...
+        farm: FarmInfo,
+        user: FarmingUserInfo,
+    ) -> ProgramResult {
+        let current_time = 0;
+        if current_time <= farm.last_reward_timestamp {
+            Ok(())
+        }
 
-        // min native token for reward
-        // ...
+        if farm.pool_mint.amount == 0 {
+            farm.last_reward_timestamp = current_time;
+            Ok(())
+        }
         
-        // log this time for next update
-        // ...
+        farm.acc_deltafi_per_share = U256::from(
+            invariant
+            .compute_acc_deltafi_per_share(
+                U256::from(farm.pool_mint.amount),
+                U256::from(farm.alloc_point),
+                U256::from(farm.pool_mint.supply),
+            )
+            .ok_or(SwapError::CalculationFailure)?)
+            .ok_or(SwapError::CalculationFailure)?;
+        
+        farm.last_reward_timestamp = current_time;
+
+        Ok(())
     }
 
     /// Processes an [Initialize](enum.Instruction.html).
@@ -782,88 +749,256 @@ impl Processor {
         Ok(())
     }
 
-    /// Processes an [LpDeposit](enum.Instruction.html).
-    pub fn process_lp_deposit(
+    /// Processes an [FarmingInitialize](enum.Instruction.html).
+    pub fn process_farming_initialize(
         program_id: &Pubkey,
-        lp_amount: u64,
-        minimum_token_amount: u64,
+        fees: Fees,
+        accounts: &[AccountInfo],
+    ) -> ProgramResult {
+        Ok(())
+    }    
+
+    /// Processes an [FarmingDeposit](enum.Instruction.html).
+    pub fn process_farming_deposit(
+        program_id: &Pubkey,
+        pool_token_amount: u64,
+        min_mint_amount: u64,
         accounts: &[AccountInfo],
     ) -> ProgramResult {
         let account_info_iter = &mut accounts.iter();
-        let pool_info = next_account_info(account_info_iter)?;
+        let farm_info = next_account_info(account_info_iter)?;
         let authority_info = next_account_info(account_info_iter)?;
-        let user_info = next_account_info(account_info_iter)?;
+        let source_info = next_account_info(account_info_iter)?;
+        let user_farming_info = next_account_info(account_info_iter)?;
+        let pool_token_info = next_account_info(account_info_iter)?;
+        let deltafi_mint_info = next_account_info(account_info_iter)?;
+        let dest_info = next_account_info(account_info_iter)?;
         let token_program_info = next_account_info(account_info_iter)?;
+        let clock_sysvar_info = next_account_info(account_info_iter)?;
 
-        // calc reward and mint spl token(our native token)
-        update_pool(pool_info, user_info);
-
-        if lp_amount > 0 {
-            // deposit lp token
-            Self::lp_token_transfer_from(
-                token_program_info.clone(),
-                user_info.clone(),
-                pool_info.clone(),
-                authority_info.clone(),
-                lp_amount);
+        let farm = FarmInfo::unpack(&farm_info.data.borrow())?;        
+        if farm.is_paused {
+            return Err(SwapError::IsPaused.into());
+        }
+        if *authority_info.key != utils::authority_id(program_id, farm_info.key, farm.nonce)?
+        {
+            return Err(SwapError::InvalidProgramAddress.into());
+        }
+        if *source_info.key != farm.pool_mint {
+            return Err(SwapError::IncorrectSwapAccount.into());
+        }
+        if *pool_token_info.key != farm.pool_mint {
+            return Err(SwapError::IncorrectMint.into());
         }
 
-        // calc reward debt
-    }
-
-    /// Processes an [LpWithdraw](enum.Instruction.html).
-    pub fn process_lp_withdraw(
-        program_id: &Pubkey,
-        lp_amount: u64,
-        minimum_token_amount: u64,
-        accounts: &[AccountInfo],
-    ) -> ProgramResult {
-        let account_info_iter = &mut accounts.iter();
-        let pool_info = next_account_info(account_info_iter)?;
-        let authority_info = next_account_info(account_info_iter)?;
-        let user_info = next_account_info(account_info_iter)?;
-        let token_program_info = next_account_info(account_info_iter)?;
-
-        update_pool(pool_info, user_info);
+        let clock = Clock::from_account_info(clock_sysvar_info)?;
+        let token_lp = utils::unpack_token_account(&pool_token_info.data.borrow())?;
+        let farming_user = FarmingUserInfo::unpack(&user_farming_info.data.borrow())?;
+        /// have to define data structure and define unpack function 
+        let pool_mint = Self::unpack_deltafi(&deltafi_mint_info.data.borrow())?;
         
-        // calc pending reward and send it to user
-        // ...
+        let invariant = Farm::new(
+            clock.unix_timestamp,
+        );
+        // calc reward and mint deltafi token
+        Self::update_pool(token_program_info.clone(), farm, farming_user);
 
-        if lp_amount > 0 {
-            // withdraw lp token
-            Self::lp_token_transfer(
-                token_program_info.clone(),
-                pool_info.clone(),
-                user_info.clone(),
-                authority_info.clone(),
-                lp_amount);
+        if farming_user.amount > 0 {
+            u64 pending = U256::from(
+                invariant
+                .compute_pending_reward(
+                    U256::from(farm.acc_deltafi_per_share),
+                    U256::from(user_farming_info.amount),
+                    U256::from(user_farming_info.reward_debt),
+                )
+                .ok_or(SwapError::CalculationFailure)?)
+                .ok_or(SwapError::CalculationFailure)?;
+            if (pending > 0) {
+                Self::token_transfer(
+                    farm_info.key,
+                    token_program_info.clone(),
+                    deltafi_mint_info.clone(),
+                    dest_info.clone(),
+                    authority_info.clone(),
+                    farm.nonce,
+                    pending,
+                )?;    
+            }
         }
 
-        // calc reward debt
-        // ...        
+        Self::token_transfer(
+            farm_info.key,
+            token_program_info.clone(),
+            source_info.clone(),
+            pool_token_info.clone(),
+            authority_info.clone(),
+            farm.nonce,
+            pool_token_amount,
+        )?;
+        
+        farming_user.last_reward_timestamp = block.number;
+        farming_user.amount = farming_user.ammount + pool_token_amount;
+        farming_user.reward_debt = U256::from(
+            invariant
+            .compute_reward_debt(farm.acc_deltafi_per_share, farming_user.amount)
+            .ok_or(SwapError::CalculationFailure)?)
+            .ok_or(SwapError::CalculationFailure)?;
+        Ok(())
     }
 
-    /// View to see pending reward SPLs on frontend side.
-    pub fn pending_spl(
+    /// Processes an [FarmingWithdraw](enum.Instruction.html).
+    pub fn process_farming_withdraw(
         program_id: &Pubkey,
-        lp_amount: u64,
-        minimum_token_amount: u64,
+        pool_token_amount: u64,
+        minimum_pool_token_amount: u64,
         accounts: &[AccountInfo],
     ) -> ProgramResult {
         let account_info_iter = &mut accounts.iter();
-        let pool_info = next_account_info(account_info_iter)?;
+        let farm_info = next_account_info(account_info_iter)?;
         let authority_info = next_account_info(account_info_iter)?;
-        let user_info = next_account_info(account_info_iter)?;
+        let source_info = next_account_info(account_info_iter)?;
+        let user_farming_info = next_account_info(account_info_iter)?;
+        let pool_token_info = next_account_info(account_info_iter)?;
+        let deltafi_mint_info = next_account_info(account_info_iter)?;
+        let dest_info = next_account_info(account_info_iter)?;
         let token_program_info = next_account_info(account_info_iter)?;
+        let clock_sysvar_info = next_account_info(account_info_iter)?;
 
-        // calc pending reward and return
+        let farm = FarmInfo::unpack(&farm_info.data.borrow())?;        
+        if farm.is_paused {
+            return Err(SwapError::IsPaused.into());
+        }
+        if *authority_info.key != utils::authority_id(program_id, farm_info.key, farm.nonce)?
+        {
+            return Err(SwapError::InvalidProgramAddress.into());
+        }
+        if *source_info.key != farm.pool_mint {
+            return Err(SwapError::IncorrectSwapAccount.into());
+        }
+        if *pool_token_info.key != farm.pool_mint {
+            return Err(SwapError::IncorrectMint.into());
+        }
+
+        let clock = Clock::from_account_info(clock_sysvar_info)?;
+        let token_lp = utils::unpack_token_account(&pool_token_info.data.borrow())?;
+        let farming_user = FarmingUserInfo::unpack(&user_farming_info.data.borrow())?;
+        if (farming_user.amount < pool_token_amount) {
+            return Err(SwapError::InvalidInput);
+        }
+        /// have to define data structure and define unpack function 
+        let pool_mint = Self::unpack_deltafi(&deltafi_mint_info.data.borrow())?;
+        
+        let invariant = Farm::new(
+            clock.unix_timestamp,
+        );
+        // calc reward and mint deltafi token
+        Self::update_pool(token_program_info.clone(), farm, farming_user);
+
+        u64 pending = U256::from(
+            invariant
+            .compute_pending_reward(
+                U256::from(farm.acc_deltafi_per_share),
+                U256::from(user_farming_info.amount),
+                U256::from(user_farming_info.reward_debt),
+            )
+            .ok_or(SwapError::CalculationFailure)?)
+            .ok_or(SwapError::CalculationFailure)?;
+        if (pending > 0) {
+            Self::token_transfer(
+                farm_info.key,
+                token_program_info.clone(),
+                deltafi_mint_info.clone(),
+                dest_info.clone(),
+                authority_info.clone(),
+                farm.nonce,
+                pending,
+            )?;    
+        }
+
+        farming_user.last_reward_timestamp = block.number;
+        farming_user.amount = farming_user.ammount - pool_token_amount;
+        farming_user.reward_debt = U256::from(
+            invariant
+            .compute_reward_debt(farm.acc_deltafi_per_share, farming_user.amount)
+            .ok_or(SwapError::CalculationFailure)?)
+            .ok_or(SwapError::CalculationFailure)?;
+        
+        Self::token_transfer(
+            farm_info.key,
+            token_program_info.clone(),
+            pool_token_info.clone(),
+            source_info.clone(),
+            authority_info.clone(),
+            farm.nonce,
+            pool_token_amount,
+        )?;        
+
+        Ok(())      
     }
+
+    /// Processes an [FarmingWithdraw](enum.Instruction.html).
+    pub fn process_farming_emergency_withdraw(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+    ) -> ProgramResult {
+        let account_info_iter = &mut accounts.iter();
+        let farm_info = next_account_info(account_info_iter)?;
+        let authority_info = next_account_info(account_info_iter)?;
+        let source_info = next_account_info(account_info_iter)?;
+        let user_farming_info = next_account_info(account_info_iter)?;
+        let pool_token_info = next_account_info(account_info_iter)?;
+        let deltafi_mint_info = next_account_info(account_info_iter)?;
+        let dest_info = next_account_info(account_info_iter)?;
+        let token_program_info = next_account_info(account_info_iter)?;
+        let clock_sysvar_info = next_account_info(account_info_iter)?;
+
+        let farm = FarmInfo::unpack(&farm_info.data.borrow())?;        
+        if farm.is_paused {
+            return Err(SwapError::IsPaused.into());
+        }
+        if *authority_info.key != utils::authority_id(program_id, farm_info.key, farm.nonce)?
+        {
+            return Err(SwapError::InvalidProgramAddress.into());
+        }
+        if *source_info.key != farm.pool_mint {
+            return Err(SwapError::IncorrectSwapAccount.into());
+        }
+        if *pool_token_info.key != farm.pool_mint {
+            return Err(SwapError::IncorrectMint.into());
+        }
+
+        let clock = Clock::from_account_info(clock_sysvar_info)?;
+        let token_lp = utils::unpack_token_account(&pool_token_info.data.borrow())?;
+        let farming_user = FarmingUserInfo::unpack(&user_farming_info.data.borrow())?;
+        
+        Self::token_transfer(
+            farm_info.key,
+            token_program_info.clone(),
+            pool_token_info.clone(),
+            source_info.clone(),
+            authority_info.clone(),
+            farm.nonce,
+            farming_user.amount,
+        )?;
+        farming_user.amount = 0;
+        farming_user.reward_debt = 0;
+
+        Ok(())      
+    }    
 
     /// Processes an [Instruction](enum.Instruction.html).
     pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], input: &[u8]) -> ProgramResult {
         let instruction = AdminInstruction::unpack(input)?;
         match instruction {
-            None => Self::process_swap_instruction(program_id, accounts, input),
+            None => {
+                let result = Self::process_swap_instruction(program_id, accounts, input);
+                match result {
+                    Ok(r) => r,
+                    Err(e) => {
+                        Self::process_farming_instruction(program_id, accounts, input)
+                    }
+                }
+            }
             Some(admin_instruction) => {
                 process_admin_instruction(&admin_instruction, program_id, accounts)
             }
@@ -944,6 +1079,57 @@ impl Processor {
                     accounts,
                 )
             }
+            _ => {
+                Err(SwapError::NoSwapInstruction.into())
+            }
+        }
+    }
+
+    fn process_farming_instruction(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        input: &[u8],
+    ) -> ProgramResult {
+        let instruction = FarmingInstruction::unpack(input)?;
+        match instruction {
+            FarmingInstruction::Initialize(FarmingInitializeData {
+                fees,
+            }) => {
+                msg!("Instruction: Init Farm");
+                Self::process_farming_initialize(program_id, fees, accounts)
+            }
+            FarmingInstruction::Deposit(FarmingDepositData {
+                pool_token_amount,
+                min_mint_amount,
+            }) => {
+                msg!("Instruction: Farm Deposit");
+                Self::process_farming_deposit(
+                    program_id,
+                    pool_token_amount,
+                    min_mint_amount,
+                        accounts,
+                )
+            }
+            FarmingInstruction::Withdraw(FarmingWithdrawData {
+                pool_token_amount,
+                minimum_pool_token_amount,
+            }) => {
+                msg!("Instruction: Farm Withdraw");
+                Self::process_farming_withdraw(
+                    program_id,
+                    pool_token_amount,
+                    minimum_pool_token_amount,
+                    accounts,
+                )
+            }
+            FarmingInstruction::EmergencyWithdraw() => {
+                msg!("Instruction: Farm Withdraw");
+                Self::process_farming_emergency_withdraw(
+                    program_id,
+                    accounts,
+                )
+            }
+            _ => Err(SwapError::InvalidInstruction.into())         
         }
     }
 }

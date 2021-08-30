@@ -1,6 +1,10 @@
 //! Swap calculations and curve invariant implementation
 
-use crate::{bn::U256, fees::Fees};
+use crate::{
+    bn::U256, 
+    fees::Fees,
+    state::{FarmInfo, FarmingUserInfo},
+};
 
 /// Number of coins
 const N_COINS: u64 = 2;
@@ -293,6 +297,58 @@ impl StableSwap {
         })
     }
 }
+
+pub struct Farm {
+    /// Current unix timestamp
+    current_ts: i64,
+    /// Withdraw reward rate when depositing, can be set 1e36
+    rate: i64,
+}
+
+impl Farm {
+    /// New Farm calculator
+    pub fn new(
+        current_ts: i64,
+        rate: i64,
+    ) -> Self {
+        Self {
+            current_ts,
+            rate,
+        }
+    }
+
+    pub fn compute_pending_reward(
+        &self,
+        acc_deltafi_per_share: U256,
+        amount: U256,
+        reward_debt: U256,
+        // maybe need some other factors
+    ) -> Option<U256> {
+        amount.checked_mul(acc_deltafi_per_share)?
+        .checked_div(U256::from(self.rate))?
+        .checked_sub(reward_debt)
+    }
+
+    pub fn compute_reward_debt(
+        &self,
+        acc_deltafi_per_share: U256,
+        amount: U256,
+    ) -> Option<U256> {
+        amount.checked_mul(acc_deltafi_per_share)?
+        .checked_div(U256::from(self.rate))
+    }
+
+    pub fn compute_acc_deltafi_per_share(
+        &self,
+        acc_deltafi_per_share: U256,
+        supply: U256,
+    ) -> Option<U256> {
+        /// Update acc_deltafi_per_share through delta of time, allocation point, total allocation point, reward unit for time slot.
+        Ok(())
+    }
+}
+
+/// The StableFarm invariant calculator
 
 #[cfg(test)]
 mod tests {

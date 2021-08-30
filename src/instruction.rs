@@ -14,6 +14,7 @@ use solana_program::{
 use std::convert::TryInto;
 use std::mem::size_of;
 
+/// SWAP INSTRUNCTION DATA
 /// Initialize instruction data
 #[repr(C)]
 #[derive(Debug, PartialEq)]
@@ -72,6 +73,8 @@ pub struct WithdrawOneData {
     pub minimum_token_amount: u64,
 }
 
+
+/// ADMIN INSTRUCTION DATA
 /// RampA instruction data
 #[repr(C)]
 #[derive(Clone, Debug, PartialEq)]
@@ -80,6 +83,35 @@ pub struct RampAData {
     pub target_amp: u64,
     /// Unix timestamp to stop ramp
     pub stop_ramp_ts: i64,
+}
+
+/// FARM INSTRUCTION DATA
+/// Farm Initialize instruction data
+#[repr(C)]
+#[derive(Debug, PartialEq)]
+pub struct FarmingInitializeData {
+    /// Fees
+    pub fees: Fees,
+}
+
+/// Farm Deposit instruction data
+#[repr(C)]
+#[derive(Clone, Debug, PartialEq)]
+pub struct FarmingWithdrawData {
+    /// Amount of pool tokens to withdraw.
+    pub pool_token_amount: u64,
+    /// Minimum amount of LP token to receive, prevents excessive slippage
+    pub minimum_pool_token_amount: u64,
+}
+
+/// Farm Deposit instruction data
+#[repr(C)]
+#[derive(Clone, Debug, PartialEq)]
+pub struct FarmingDepositData {
+    /// LP token amount to deposit
+    pub pool_token_amount: u64,
+    /// Minimum detafi tokens to mint, prevents excessive slippage
+    pub min_mint_amount: u64,
 }
 
 /// Admin only instructions.
@@ -158,24 +190,6 @@ impl AdminInstruction {
         }
         buf
     }
-}
-
-/// LpDeposit instruction data
-#[repr(C)]
-#[derive(Clone, Debug, PartialEq)]
-pub struct LpDepositData {
-    /// Lp Token amount to deposit
-    pub lp_amount: u64,
-    /// Minimum amount of lp token
-    pub minimum_token_amount: u64,
-}
-
-/// LpWithdraw instruction data
-#[repr(C)]
-#[derive(Clone, Debug, PartialEq)]
-pub struct LpWithdrawData {
-    /// Lp Token amount to withdraw
-    pub lp_amount: u64,
 }
 
 /// Creates a 'ramp_a' instruction
@@ -494,7 +508,7 @@ impl SwapInstruction {
                     minimum_token_amount,
                 })
             }
-            _ => return Err(SwapError::InvalidInstruction.into()),
+            _ => return Err(SwapError::NoSwapInstruction.into()),
         })
     }
 
@@ -770,6 +784,137 @@ pub fn withdraw_one(
         accounts,
         data,
     })
+}
+
+/// Instructions supported by the Farming feature.
+#[repr(C)]
+#[derive(Debug, PartialEq)]
+pub enum FarmingInstruction {
+    ///   Initializes a new SwapInfo.
+    ///
+    ///   0. `[writable, signer]` New Token-swap to create.
+    ///   1. `[]` $authority derived from `create_program_address(&[Token-swap account])`
+    ///   2. `[]` admin Account.
+    ///   3. `[]` admin_fee_a admin fee Account for token_a.
+    ///   4. `[]` admin_fee_b admin fee Account for token_b.
+    ///   5. `[]` token_a Account. Must be non zero, owned by $authority.
+    ///   6. `[]` token_b Account. Must be non zero, owned by $authority.
+    ///   7. `[writable]` Pool Token Mint. Must be empty, owned by $authority.
+    Initialize(FarmingInitializeData),
+
+    ///   Deposit some tokens into the pool.  The output is a "pool" token representing ownership
+    ///   into the pool. Inputs are converted to the current ratio.
+    ///
+    ///   0. `[]` Token-swap
+    ///   1. `[]` $authority
+    ///   2. `[writable]` token_a $authority can transfer amount,
+    ///   3. `[writable]` token_b $authority can transfer amount,
+    ///   4. `[writable]` token_a Base Account to deposit into.
+    ///   5. `[writable]` token_b Base Account to deposit into.
+    ///   6. `[writable]` Pool MINT account, $authority is the owner.
+    ///   7. `[writable]` Pool Account to deposit the generated tokens, user is the owner.
+    ///   8. `[]` Token program id
+    ///   9. `[]` Clock sysvar
+    Deposit(FarmingDepositData),
+
+    ///   Withdraw tokens from the pool at the current ratio.
+    ///
+    ///   0. `[]` Token-swap
+    ///   1. `[]` $authority
+    ///   2. `[writable]` Pool mint account, $authority is the owner
+    ///   3. `[writable]` SOURCE Pool account, amount is transferable by $authority.
+    ///   4. `[writable]` token_a Swap Account to withdraw FROM.
+    ///   5. `[writable]` token_b Swap Account to withdraw FROM.
+    ///   6. `[writable]` token_a user Account to credit.
+    ///   7. `[writable]` token_b user Account to credit.
+    ///   8. `[writable]` admin_fee_a admin fee Account for token_a.
+    ///   9. `[writable]` admin_fee_b admin fee Account for token_b.
+    ///   10. `[]` Token program id
+    Withdraw(FarmingWithdrawData),
+
+    ///   Withdraw tokens from the pool at the current ratio forceful.
+    ///
+    ///   0. `[]` Token-swap
+    ///   1. `[]` $authority
+    ///   2. `[writable]` Pool mint account, $authority is the owner
+    ///   3. `[writable]` SOURCE Pool account, amount is transferable by $authority.
+    ///   4. `[writable]` token_a Swap Account to withdraw FROM.
+    ///   5. `[writable]` token_b Swap Account to withdraw FROM.
+    ///   6. `[writable]` token_a user Account to credit.
+    ///   7. `[writable]` token_b user Account to credit.
+    ///   8. `[writable]` admin_fee_a admin fee Account for token_a.
+    ///   9. `[writable]` admin_fee_b admin fee Account for token_b.
+    ///   10. `[]` Token program id
+    EmergencyWithdraw(),    
+}
+
+impl FarmingInstruction {
+    /// Unpacks a byte buffer into a [FarmingInstruction](enum.FarmingInstruction.html).
+    pub fn unpack(input: &[u8]) -> Result<Self, ProgramError> {
+        let (&tag, rest) = input.split_first().ok_or(SwapError::InvalidInstruction)?;
+        Ok(match tag {
+            30 => {
+                let (&nonce, rest) = rest.split_first().ok_or(SwapError::InvalidInstruction)?;
+                let (amp_factor, rest) = unpack_u64(rest)?;
+                let fees = Fees::unpack_unchecked(rest)?;
+                Self::Initialize(FarmingInitializeData {
+                    fees,
+                })
+            }
+            31 => {
+                let (pool_token_amount, rest) = unpack_u64(rest)?;
+                let (min_mint_amount, _rest) = unpack_u64(rest)?;
+                Self::Deposit(FarmingDepositData {
+                    pool_token_amount,
+                    min_mint_amount,
+                })
+            }
+            32 => {
+                let (pool_token_amount, rest) = unpack_u64(rest)?;
+                let (minimum_pool_token_amount, rest) = unpack_u64(rest)?;
+                Self::Withdraw(FarmingWithdrawData {
+                    pool_token_amount,
+                    minimum_pool_token_amount,
+                })
+            }
+            33 => {
+                Self::EmergencyWithdraw()
+            }
+            _ => return Err(SwapError::InvalidInstruction.into()),
+        })
+    }
+
+    /// Packs a [FarmingInstruction](enum.FarmingInstruction.html) into a byte buffer.
+    pub fn pack(&self) -> Vec<u8> {
+        let mut buf = Vec::with_capacity(size_of::<Self>());
+        match *self {
+            Self::Initialize(FarmingInitializeData {
+                fees,
+            }) => {
+                buf.push(0);
+                let mut fees_slice = [0u8; Fees::LEN];
+                Pack::pack_into_slice(&fees, &mut fees_slice[..]);
+                buf.extend_from_slice(&fees_slice);
+            }
+            Self::Deposit(FarmingDepositData {
+                pool_token_amount,
+                min_mint_amount,
+            }) => {
+                buf.push(2);
+                buf.extend_from_slice(&pool_token_amount.to_le_bytes());
+                buf.extend_from_slice(&min_mint_amount.to_le_bytes());
+            }
+            Self::Withdraw(FarmingWithdrawData {
+                pool_token_amount,
+                minimum_pool_token_amount
+            }) => {
+                buf.push(3);
+                buf.extend_from_slice(&pool_token_amount.to_le_bytes());
+                buf.extend_from_slice(&minimum_pool_token_amount.to_le_bytes());
+            }
+        }
+        buf
+    }
 }
 
 fn unpack_i64(input: &[u8]) -> Result<(i64, &[u8]), ProgramError> {
