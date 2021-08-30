@@ -1,11 +1,12 @@
 //! Moving Average = Oracle Price on Solana
 use solana_program::{
     pubkey::Pubkey,
-    program_error::ProgramError,
+    program_error::ProgramError
 };
 use log::{ trace };
 use arrayref::{ array_ref, array_refs };
-use std::time::{Duration, SystemTime};
+use std::time::{SystemTime, UNIX_EPOCH};
+use crate::{bn::U256, fees::Fees};
 
 /// Oracle struct
 #[repr(C)]
@@ -21,19 +22,19 @@ pub struct Oracle {
     pub token1: Pubkey,
 
     // cumulative price for token0
-    pub price0CumulativeLast: u32,
+    pub price0CumulativeLast: U256,
 
     // cumulative price for token1
-    pub price1CumulativeLast: u32,
+    pub price1CumulativeLast: U256,
 
     // last block timestamp
-    pub blockTimestampLast: u32,
+    pub blockTimestampLast: u64,
 
     // average price for token0
-    price0Average: f64,
+    price0Average: U256,
 
     // average price for token1
-    price1Average: f64,
+    price1Average: U256,
 }
 
 impl Oracle {
@@ -45,24 +46,24 @@ impl Oracle {
             PERIOD: 24,
             token0: Pubkey::from(token0),
             token1: Pubkey::from(token1),
-            price0CumulativeLast: 0,
-            price1CumulativeLast: 0,
-            blockTimestampLast: 0,
-            price0Average: 0.0,
-            price1Average: 0.0
+            price0CumulativeLast: U256::from(0),
+            price1CumulativeLast: U256::from(0),
+            blockTimestampLast: u64::from(SystemTime::now().duration_since(UNIX_EPOCH).expect("Time went backward")),
+            price0Average: U256::from(0),
+            price1Average: U256::from(0),
         }
     }
 
     pub fn update(
         &mut self,
-        price0Cumulative: f64,
-        price1Cumulative: f64,
-        blockTimestamp: u32
+        price0Cumulative: U256,
+        price1Cumulative: U256,
+        blockTimestamp: u64
     ) {
-        let timeElapsed: u32 = blockTimestamp - self.blockTimestampLast?; // overflow is desired
+        let timeElapsed = blockTimestamp - self.blockTimestampLast; // overflow is desired
 
         // ensure that at least one full period has passed since the last update
-        if timeElapsed >= self.PERIOD {
+        if timeElapsed >= self.PERIOD as u64 {
             trace!("ExampleOracleSimple: PERIOD_NOT_ELAPSED");
         } else {
             // overflow is desired, casting never truncates
@@ -78,21 +79,21 @@ impl Oracle {
 
     pub fn currentCumulativePrice(
         &self,
-        price0: f64,
-        price1: f64,
-        currentTimestamp: u32,
-    ) -> (f64, f64, u32) {
-        let mut price0Cumulative: f64 = self.price0CumulativeLast?;
-        let mut price1Cumulative: f64 = self.price1CumulativeLast?;
+        price0: U256,
+        price1: U256,
+        currentTimestamp: u64,
+    ) -> (U256, U256, u64) {
+        let mut price0Cumulative = self.price0CumulativeLast;
+        let mut price1Cumulative = self.price1CumulativeLast;
 
-        let mut blockTimestamp: u32 = self.blockTimestampLast?;
+        let mut blockTimestamp = self.blockTimestampLast;
 
         if blockTimestamp != currentTimestamp {
             //caculate current cumulative price
             let timeElapsed = currentTimestamp - blockTimestamp;
 
-            price0Cumulative = f64::from(price0.checked_mul(timeElapsed)?).checked_add(price0Cumulative)?;
-            price1Cumulative = f64::from(price1.checked_mul(timeElapsed)?).checked_add(price1Cumulative)?;
+            price0Cumulative = U256::from(price0.checked_mul(timeElapsed as U256)?).checked_add(price0Cumulative)?;
+            price1Cumulative = U256::from(price1.checked_mul(timeElapsed as U256)?).checked_add(price1Cumulative)?;
 
             blockTimestamp = currentTimestamp;
         }
@@ -103,8 +104,8 @@ impl Oracle {
     pub fn consult(
         &self,
         token: &Pubkey,
-        amountIn: f64
-    ) -> f64 {
+        amountIn: U256
+    ) -> Option<U256> {
         if token == self.token0 {
             self.price0Average.checked_mul(amountIn)
         } else if token == self.token1 {
@@ -115,7 +116,7 @@ impl Oracle {
     }
 
     pub fn unpack_from_slice(input: &[u8]) -> Result<Self, ProgramError> {
-        let input = array_ref![input, 0, 64];
+        let input = array_ref![input, 0, 204];
         #[allow(clippy::ptr_offset_with_cast)]
         let (
             PERIOD,
@@ -126,16 +127,16 @@ impl Oracle {
             blockTimestampLast,
             price0Average,
             price1Average,
-        ) = array_refs![input, 4, 4, 4, 4, 4, 4, 8, 8];
+        ) = array_refs![input, 4, 32, 32, 32, 32, 8, 32, 32];
         Ok(Self {
             PERIOD: u32::from(*PERIOD),
-            token0: Pubkey::from(*token0),
-            token1: Pubkey::from(*token1),
-            price0CumulativeLast: u32::from(price0CumulativeLast),
-            price1CumulativeLast: u32::from(price1CumulativeLast),
-            blockTimestampLast: u32::from(blockTimestampLast),
-            price0Average: f64::from(price0Average),
-            price1Average: f64::from(price1Average),
+            token0: Pubkey::new_from_array(*token0),
+            token1: Pubkey::new_from_array(*token1),
+            price0CumulativeLast: U256::from(price0CumulativeLast),
+            price1CumulativeLast: U256::from(price1CumulativeLast),
+            blockTimestampLast: u64::from(blockTimestampLast),
+            price0Average: U256::from(price0Average),
+            price1Average: U256::from(price1Average),
         })
     }
 
@@ -147,6 +148,7 @@ mod tests {
     use rand::Rng;
     use std::cmp;
     use rand::seq::IteratorRandom;
+    use std::time::SystemTime;
 
     /* uses */
     /// Timestamp at 0
@@ -160,17 +162,17 @@ mod tests {
 
     #[test]
     fn test_currentCumulativePrice() {
-        let price0: f64 = 1?;
-        let price1: f64 = 1?;
+        let price0: U256 = U256::from(1);
+        let price1: U256 = U256::from(1);
 
         let currentTimestamp = SystemTime::now().checked_add(1.into());
         let timeElapsed = 1;
         let oracle: Oracle = Oracle::new(token0, token1)?;
 
-        let expected: (f64, f64, u32) = (price0, price1, u32::from(currentTimestamp))?;
+        let expected: (U256, U256, u64) = (price0, price1, u64::from(currentTimestamp))?;
 
         assert_eq!(
-          oracle.currentCumulativePrice(price0, price1, u32::from(currentTimestamp)),
+          oracle.currentCumulativePrice(price0, price1, u64::from(currentTimestamp)),
           expected
         );
     }
@@ -182,7 +184,7 @@ mod tests {
 
         let oracle: Oracle = Oracle::new(token0, token1)?;
 
-        let expected: f64 = 0.into()?;
+        let expected: u64 = 0.into()?;
 
         assert_eq!(
             oracle.consult(token, amountIn),

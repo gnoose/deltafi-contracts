@@ -77,7 +77,7 @@ impl Pack for SwapInfo {
 
     /// Unpacks a byte buffer into a [SwapInfo](struct.SwapInfo.html).
     fn unpack_from_slice(input: &[u8]) -> Result<Self, ProgramError> {
-        let input = array_ref![input, 0, 395];
+        let input = array_ref![input, 0, 599];
         #[allow(clippy::ptr_offset_with_cast)]
         let (
             is_initialized,
@@ -99,7 +99,7 @@ impl Pack for SwapInfo {
             admin_fee_key_b,
             fees,
             oracle
-        ) = array_refs![input, 1, 1, 1, 8, 8, 8, 8, 8, 32, 32, 32, 32, 32, 32, 32, 32, 32, 64, 320];
+        ) = array_refs![input, 1, 1, 1, 8, 8, 8, 8, 8, 32, 32, 32, 32, 32, 32, 32, 32, 32, 64, 204];
         Ok(Self {
             is_initialized: match is_initialized {
                 [0] => false,
