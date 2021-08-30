@@ -433,7 +433,7 @@ impl Processor {
 
     /// Processes an [Deposit](enum.Instruction.html).
     pub fn process_deposit(
-        program_id: &Pubkey,
+    program_id: &Pubkey,
         token_a_amount: u64,
         token_b_amount: u64,
         min_mint_amount: u64,
@@ -809,7 +809,6 @@ impl Processor {
         }
 
         // calc reward debt
-        // ...        
     }
 
     /// Processes an [LpWithdraw](enum.Instruction.html).
