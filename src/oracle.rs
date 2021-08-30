@@ -6,7 +6,7 @@ use solana_program::{
 use log::{ trace };
 use arrayref::{ array_ref, array_refs };
 use std::time::{SystemTime, UNIX_EPOCH};
-use crate::{bn::U256, fees::Fees};
+use crate::{ bn::U256 };
 
 /// Oracle struct
 #[repr(C)]
@@ -68,12 +68,12 @@ impl Oracle {
         } else {
             // overflow is desired, casting never truncates
             // cumulative price is in (uq112x112 price * seconds) units so we simply wrap it after division by time elapsed
-            self.price0Average = f64::from(price0Cumulative.checked_sub(self.price0CumulativeLast)?).checked_div(timeElapsed)?;
-            self.price1Average = f64::from(price1Cumulative.checked_sub(self.price1CumulativeLast)?).checked_div(timeElapsed)?;
+            self.price0Average = U256::from(U256::from(price0Cumulative.checked_sub(self.price0CumulativeLast)).checked_div(U256::from(timeElapsed)));
+            self.price1Average = U256::from(U256::from(price1Cumulative.checked_sub(self.price1CumulativeLast)).checked_div(U256::from(timeElapsed)));
 
-            self.price0CumulativeLast = price0Cumulative?;
-            self.price1CumulativeLast = price1Cumulative?;
-            self.blockTimestampLast = blockTimestamp?;
+            self.price0CumulativeLast = price0Cumulative;
+            self.price1CumulativeLast = price1Cumulative;
+            self.blockTimestampLast = blockTimestamp;
         }
     }
 
@@ -90,10 +90,10 @@ impl Oracle {
 
         if blockTimestamp != currentTimestamp {
             //caculate current cumulative price
-            let timeElapsed = currentTimestamp - blockTimestamp;
+            let timeElapsed = U256::from(currentTimestamp - blockTimestamp);
 
-            price0Cumulative = U256::from(price0.checked_mul(timeElapsed as U256)?).checked_add(price0Cumulative)?;
-            price1Cumulative = U256::from(price1.checked_mul(timeElapsed as U256)?).checked_add(price1Cumulative)?;
+            price0Cumulative = U256::from((U256::from(price0.checked_mul(timeElapsed)).checked_add(price0Cumulative));
+            price1Cumulative = U256::from(U256::from(price1.checked_mul(timeElapsed)).checked_add(price1Cumulative));
 
             blockTimestamp = currentTimestamp;
         }
@@ -103,15 +103,17 @@ impl Oracle {
 
     pub fn consult(
         &self,
-        token: &Pubkey,
+        token: Pubkey,
         amountIn: U256
-    ) -> Option<U256> {
+    ) -> U256 {
         if token == self.token0 {
-            self.price0Average.checked_mul(amountIn)
+            let mut price0Average = self.price0Average.checked_mul(amountIn)?;
+            price0Average
         } else if token == self.token1 {
-            self.price1Average.checked_mul(amountIn)
+            let mut price1Average = self.price1Average.checked_mul(amountIn)?;
+            price1Average
         } else {
-            0.into()
+            U256::from(0)
         }
     }
 
@@ -129,12 +131,12 @@ impl Oracle {
             price1Average,
         ) = array_refs![input, 4, 32, 32, 32, 32, 8, 32, 32];
         Ok(Self {
-            PERIOD: u32::from(*PERIOD),
+            PERIOD: u32::from_le_bytes(*PERIOD),
             token0: Pubkey::new_from_array(*token0),
             token1: Pubkey::new_from_array(*token1),
             price0CumulativeLast: U256::from(price0CumulativeLast),
             price1CumulativeLast: U256::from(price1CumulativeLast),
-            blockTimestampLast: u64::from(blockTimestampLast),
+            blockTimestampLast: u64::from_le_bytes(*blockTimestampLast),
             price0Average: U256::from(price0Average),
             price1Average: U256::from(price1Average),
         })
