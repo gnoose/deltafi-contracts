@@ -341,13 +341,13 @@ impl Processor {
             return Err(SwapError::ExceededSlippage.into());
         }
 
-        let currentTimestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+        let current_timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
         let token_a = utils::unpack_token_account(&swap_source_info.data.borrow())?;
         let token_b = utils::unpack_token_account(&destination_info.data.borrow())?;
-        let (price0Cumulative, price1Cumulative, blockTimestamp) = token_swap.oracle.currentCumulativePrice(U256::from(token_a.amount), U256::from(token_b.amount), currentTimestamp);
+        let (price0_cumulative, price1_cumulative, block_timestamp) = token_swap.oracle.current_cumulative_price(U256::from(token_a.amount), U256::from(token_b.amount), current_timestamp);
         let mut swap = token_swap;
 
-        swap.oracle.update(price0Cumulative, price1Cumulative, blockTimestamp);
+        swap.oracle.update(price0_cumulative, price1_cumulative, block_timestamp);
 
         Self::token_transfer(
             swap_info.key,
