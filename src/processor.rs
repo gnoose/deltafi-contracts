@@ -749,16 +749,16 @@ impl Processor {
         Ok(())
     }
 
-    /// Processes an [FarmingInitialize](enum.Instruction.html).
+    /// Processes an [Farm's Initialize](enum.Instruction.html).
     pub fn process_farming_initialize(
         program_id: &Pubkey,
         fees: Fees,
         accounts: &[AccountInfo],
     ) -> ProgramResult {
         Ok(())
-    }    
+    }
 
-    /// Processes an [FarmingDeposit](enum.Instruction.html).
+    /// Processes an [Farm's Deposit](enum.Instruction.html).
     pub fn process_farming_deposit(
         program_id: &Pubkey,
         pool_token_amount: u64,
@@ -846,7 +846,7 @@ impl Processor {
         Ok(())
     }
 
-    /// Processes an [FarmingWithdraw](enum.Instruction.html).
+    /// Processes an [Farm's Withdraw](enum.Instruction.html).
     pub fn process_farming_withdraw(
         program_id: &Pubkey,
         pool_token_amount: u64,
@@ -936,7 +936,7 @@ impl Processor {
         Ok(())      
     }
 
-    /// Processes an [FarmingWithdraw](enum.Instruction.html).
+    /// Processes an [Farm's EmergencyWithdraw](enum.Instruction.html).
     pub fn process_farming_emergency_withdraw(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
@@ -984,7 +984,70 @@ impl Processor {
         farming_user.reward_debt = 0;
 
         Ok(())      
-    }    
+    }
+
+    /// Processes an [Farm's PrintDeposited](enum.Instruction.html).
+    pub fn process_farming_deposited(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+    ) -> ProgramResult {
+        let account_info_iter = &mut accounts.iter();
+        let farm_info = next_account_info(account_info_iter)?;
+        let user_farming_info = next_account_info(account_info_iter)?;
+
+        let farm = FarmInfo::unpack(&farm_info.data.borrow())?;        
+        if farm.is_paused {
+            return Err(SwapError::IsPaused.into());
+        }
+
+        let farming_user = FarmingUserInfo::unpack(&user_farming_info.data.borrow())?;
+        Ok(farming_user.amount)
+    }
+
+    /// Processes an [Farm's PrintPendingDeltafi]
+    pub fn process_farming_pending_deltafi(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+    ) -> ProgramResult {
+        let account_info_iter = &mut accounts.iter();
+        let farm_info = next_account_info(account_info_iter)?;
+        let user_farming_info = next_account_info(account_info_iter)?;
+        let clock_sysvar_info = next_account_info(account_info_iter)?;
+
+        let farm = FarmInfo::unpack(&farm_info.data.borrow())?;
+        if farm.is_paused {
+            return Err(SwapError::IsPaused.into());
+        }
+
+        let clock = Clock::from_account_info(clock_sysvar_info)?;
+        let farming_user = FarmingUserInfo::unpack(&user_farming_info.data.borrow())?;
+        
+        let invariant = Farm::new(
+            clock.unix_timestamp,
+        );
+
+        farm.acc_deltafi_per_share = U256::from(
+            invariant
+            .compute_acc_deltafi_per_share(
+                U256::from(farm.pool_mint.amount),
+                U256::from(farm.alloc_point),
+                U256::from(farm.pool_mint.supply),
+            )
+            .ok_or(SwapError::CalculationFailure)?)
+            .ok_or(SwapError::CalculationFailure)?;
+
+        u64 pending = U256::from(
+            invariant
+            .compute_pending_reward(
+                U256::from(farm.acc_deltafi_per_share),
+                U256::from(user_farming_info.amount),
+                U256::from(user_farming_info.reward_debt),
+            )
+            .ok_or(SwapError::CalculationFailure)?)
+            .ok_or(SwapError::CalculationFailure)?;
+        
+        Ok((pending))
+    }
 
     /// Processes an [Instruction](enum.Instruction.html).
     pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], input: &[u8]) -> ProgramResult {
@@ -1067,18 +1130,6 @@ impl Processor {
                     accounts,
                 )
             }
-            SwapInstruction::LpDeposit(LpDepositData {
-                lp_amount,
-                minimum_token_amount,
-            }) => {
-                msg!("Instruction: LP Deposit");
-                Self::process_lp_deposit(
-                    program_id,
-                    lp_amount,
-                    minimum_token_amount,
-                    accounts,
-                )
-            }
             _ => {
                 Err(SwapError::NoSwapInstruction.into())
             }
@@ -1125,6 +1176,20 @@ impl Processor {
             FarmingInstruction::EmergencyWithdraw() => {
                 msg!("Instruction: Farm Withdraw");
                 Self::process_farming_emergency_withdraw(
+                    program_id,
+                    accounts,
+                )
+            }
+            FarmingInstruction::PrintDeposited() => {
+                msg!("Instruction: Farm Print Deposited");
+                Self::process_farming_deposited(
+                    program_id,
+                    accounts,
+                )
+            }
+            FarmingInstruction::PrintPendingDeltafi() => {
+                msg!("Instruction: Farm Print Pending Deltafi");
+                Self::process_farming_pending_deltafi(
                     program_id,
                     accounts,
                 )

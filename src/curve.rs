@@ -344,7 +344,7 @@ impl Farm {
         supply: U256,
     ) -> Option<U256> {
         /// Update acc_deltafi_per_share through delta of time, allocation point, total allocation point, reward unit for time slot.
-        Ok(())
+        None
     }
 }
 
