@@ -48,7 +48,7 @@ impl Oracle {
             token1: Pubkey::from(token1),
             price0CumulativeLast: U256::from(0),
             price1CumulativeLast: U256::from(0),
-            blockTimestampLast: u64::from(SystemTime::now().duration_since(UNIX_EPOCH).expect("Time went backward")),
+            blockTimestampLast: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
             price0Average: U256::from(0),
             price1Average: U256::from(0),
         }

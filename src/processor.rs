@@ -30,7 +30,7 @@ use solana_program::{
     sysvar::{clock::Clock, Sysvar},
 };
 use spl_token::state::Mint;
-use std::time::SystemTime;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Program state handler. (and general curve params)
 pub struct Processor {}
@@ -341,7 +341,7 @@ impl Processor {
             return Err(SwapError::ExceededSlippage.into());
         }
 
-        let currentTimestamp: u64 = u64::from(SystemTime::now());
+        let currentTimestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
         let token_a = utils::unpack_token_account(&swap_source_info.data.borrow())?;
         let token_b = utils::unpack_token_account(&destination_info.data.borrow())?;
         let (price0Cumulative, price1Cumulative, blockTimestamp) = token_swap.oracle.currentCumulativePrice(U256::from(token_a.amount), U256::from(token_b.amount), currentTimestamp);
