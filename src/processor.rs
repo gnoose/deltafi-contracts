@@ -347,7 +347,7 @@ impl Processor {
         let (price0Cumulative, price1Cumulative, blockTimestamp) = token_swap.oracle.currentCumulativePrice(U256::from(token_a.amount), U256::from(token_b.amount), currentTimestamp);
         let mut swap = token_swap;
 
-        swap.oracle.update(price0Cumulative, price1Cumulative, blockTimestamp).unwrap()?;
+        swap.oracle.update(price0Cumulative, price1Cumulative, blockTimestamp);
 
         Self::token_transfer(
             swap_info.key,

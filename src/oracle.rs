@@ -68,8 +68,9 @@ impl Oracle {
         } else {
             // overflow is desired, casting never truncates
             // cumulative price is in (uq112x112 price * seconds) units so we simply wrap it after division by time elapsed
-            self.price0Average = U256::from(U256::from(price0Cumulative.checked_sub(self.price0CumulativeLast)).checked_div(U256::from(timeElapsed)));
-            self.price1Average = U256::from(U256::from(price1Cumulative.checked_sub(self.price1CumulativeLast)).checked_div(U256::from(timeElapsed)));
+
+            self.price0Average = (price0Cumulative - self.price0CumulativeLast) / timeElapsed;
+            self.price1Average = (price1Cumulative - self.price1CumulativeLast) / timeElapsed;
 
             self.price0CumulativeLast = price0Cumulative;
             self.price1CumulativeLast = price1Cumulative;
@@ -92,8 +93,8 @@ impl Oracle {
             //caculate current cumulative price
             let timeElapsed = U256::from(currentTimestamp - blockTimestamp);
 
-            price0Cumulative = U256::from((U256::from(price0.checked_mul(timeElapsed)).checked_add(price0Cumulative));
-            price1Cumulative = U256::from(U256::from(price1.checked_mul(timeElapsed)).checked_add(price1Cumulative));
+            price0Cumulative = price0 * timeElapsed + price0Cumulative;
+            price1Cumulative = price1 * timeElapsed + price1Cumulative;
 
             blockTimestamp = currentTimestamp;
         }
@@ -107,11 +108,9 @@ impl Oracle {
         amountIn: U256
     ) -> U256 {
         if token == self.token0 {
-            let mut price0Average = self.price0Average.checked_mul(amountIn)?;
-            price0Average
+            self.price0Average * amountIn
         } else if token == self.token1 {
-            let mut price1Average = self.price1Average.checked_mul(amountIn)?;
-            price1Average
+            self.price1Average * amountIn
         } else {
             U256::from(0)
         }
