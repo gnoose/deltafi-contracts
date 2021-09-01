@@ -27,7 +27,7 @@ pub struct Oracle {
     /// cumulative price for token1
     pub price1_cumulative_last: U256,
 
-    /// last block timestamp - second
+    /// last block timestamp
     pub block_timestamp_last: u64,
 
     /// average price for token0
