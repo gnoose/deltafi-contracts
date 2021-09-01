@@ -13,6 +13,7 @@ use crate::{
     pool_converter::PoolTokenConverter,
     state::SwapInfo,
     utils,
+    oracle::Oracle,
 };
 use num_traits::FromPrimitive;
 use solana_program::{
@@ -29,6 +30,7 @@ use solana_program::{
     sysvar::{clock::Clock, Sysvar},
 };
 use spl_token::state::Mint;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Program state handler. (and general curve params)
 pub struct Processor {}
@@ -258,6 +260,7 @@ impl Processor {
             admin_fee_key_a: *admin_fee_a_info.key,
             admin_fee_key_b: *admin_fee_b_info.key,
             fees,
+            oracle: Oracle::new(*token_a_info.key, *token_b_info.key),
         };
         SwapInfo::pack(obj, &mut swap_info.data.borrow_mut())?;
         Ok(())
@@ -337,6 +340,14 @@ impl Processor {
         if amount_swapped < minimum_amount_out {
             return Err(SwapError::ExceededSlippage.into());
         }
+
+        let current_timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+        let token_a = utils::unpack_token_account(&swap_source_info.data.borrow())?;
+        let token_b = utils::unpack_token_account(&destination_info.data.borrow())?;
+        let (price0_cumulative, price1_cumulative, block_timestamp) = token_swap.oracle.current_cumulative_price(U256::from(token_a.amount), U256::from(token_b.amount), current_timestamp);
+        let mut swap = token_swap;
+
+        swap.oracle.update(price0_cumulative, price1_cumulative, block_timestamp);
 
         Self::token_transfer(
             swap_info.key,

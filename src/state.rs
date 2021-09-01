@@ -1,6 +1,7 @@
 //! State transition types
 
 use crate::fees::Fees;
+use crate::oracle::Oracle;
 use arrayref::{array_mut_ref, array_ref, array_refs, mut_array_refs};
 use solana_program::{
     program_error::ProgramError,
@@ -60,6 +61,8 @@ pub struct SwapInfo {
     pub admin_fee_key_b: Pubkey,
     /// Fees
     pub fees: Fees,
+    /// Oracle
+    pub oracle: Oracle,
 }
 
 impl Sealed for SwapInfo {}
@@ -74,7 +77,7 @@ impl Pack for SwapInfo {
 
     /// Unpacks a byte buffer into a [SwapInfo](struct.SwapInfo.html).
     fn unpack_from_slice(input: &[u8]) -> Result<Self, ProgramError> {
-        let input = array_ref![input, 0, 395];
+        let input = array_ref![input, 0, 599];
         #[allow(clippy::ptr_offset_with_cast)]
         let (
             is_initialized,
@@ -95,7 +98,8 @@ impl Pack for SwapInfo {
             admin_fee_key_a,
             admin_fee_key_b,
             fees,
-        ) = array_refs![input, 1, 1, 1, 8, 8, 8, 8, 8, 32, 32, 32, 32, 32, 32, 32, 32, 32, 64];
+            oracle
+        ) = array_refs![input, 1, 1, 1, 8, 8, 8, 8, 8, 32, 32, 32, 32, 32, 32, 32, 32, 32, 64, 204];
         Ok(Self {
             is_initialized: match is_initialized {
                 [0] => false,
@@ -123,6 +127,7 @@ impl Pack for SwapInfo {
             admin_fee_key_a: Pubkey::new_from_array(*admin_fee_key_a),
             admin_fee_key_b: Pubkey::new_from_array(*admin_fee_key_b),
             fees: Fees::unpack_from_slice(fees)?,
+            oracle: Oracle::unpack_from_slice(oracle)?
         })
     }
 
@@ -217,6 +222,7 @@ mod tests {
             withdraw_fee_numerator,
             withdraw_fee_denominator,
         };
+        let oracle = Oracle::new(token_a, token_b);
 
         let is_initialized = true;
         let is_paused = false;
@@ -239,6 +245,7 @@ mod tests {
             admin_fee_key_a,
             admin_fee_key_b,
             fees,
+            oracle
         };
 
         let mut packed = [0u8; SwapInfo::LEN];
