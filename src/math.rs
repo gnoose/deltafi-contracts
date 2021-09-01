@@ -92,7 +92,7 @@ pub fn solve_quadratic_function_for_target (
     let mut sqrt = (k * fair_amount * f64::from(4) / v1).ceil();
     sqrt = ((sqrt + f64::from(1)) * f64::from(1)).sqrt();
 
-    let premium = ((sqrt - f64::from(1)) / (k * f64::from(2))).ceil();
+    let premium = ((sqrt - f64::from(1)) / (k * f64::from(1))).ceil();
 
     // V0 is greater than or equal to V1 according to the solution
     v1 * (f64::from(1) + premium)
