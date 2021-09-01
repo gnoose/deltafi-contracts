@@ -8,7 +8,7 @@ use crate::{
     fees::Fees,
     instruction::{
         AdminInstruction, DepositData, InitializeData, SwapData, SwapInstruction, WithdrawData,
-        WithdrawOneData, FarmingInstruction, FarmingInitializeData, FarmingDepositData, FarmingWithdrawData
+        WithdrawOneData, FarmingInstruction, FarmingDepositData, FarmingWithdrawData
     },
     pool_converter::PoolTokenConverter,
     state::{SwapInfo, FarmInfo, FarmingUserInfo},
@@ -749,15 +749,6 @@ impl Processor {
         Ok(())
     }
 
-    /// Processes an [Farm's Initialize](enum.Instruction.html).
-    pub fn process_farming_initialize(
-        program_id: &Pubkey,
-        fees: Fees,
-        accounts: &[AccountInfo],
-    ) -> ProgramResult {
-        Ok(())
-    }
-
     /// Processes an [Farm's Deposit](enum.Instruction.html).
     pub fn process_farming_deposit(
         program_id: &Pubkey,
@@ -1143,12 +1134,6 @@ impl Processor {
     ) -> ProgramResult {
         let instruction = FarmingInstruction::unpack(input)?;
         match instruction {
-            FarmingInstruction::Initialize(FarmingInitializeData {
-                fees,
-            }) => {
-                msg!("Instruction: Init Farm");
-                Self::process_farming_initialize(program_id, fees, accounts)
-            }
             FarmingInstruction::Deposit(FarmingDepositData {
                 pool_token_amount,
                 min_mint_amount,

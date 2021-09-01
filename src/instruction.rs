@@ -84,15 +84,15 @@ pub struct RampAData {
     /// Unix timestamp to stop ramp
     pub stop_ramp_ts: i64,
 }
-
-/// FARM INSTRUCTION DATA
 /// Farm Initialize instruction data
 #[repr(C)]
-#[derive(Debug, PartialEq)]
-pub struct FarmingInitializeData {
-    /// Fees
-    pub fees: Fees,
+#[derive(Clone, Debug, PartialEq)]
+pub struct FarmData {
+    /// alloc point for farm
+    pub alloc_point: u64,
 }
+
+/// FARM INSTRUCTION DATA
 
 /// Farm Deposit instruction data
 #[repr(C)]
@@ -134,6 +134,10 @@ pub enum AdminInstruction {
     CommitNewAdmin,
     /// TODO: Docs
     SetNewFees(Fees),
+    /// Add new farm with alloc point.
+    InitializeFarm(FarmData),
+    /// Set alloc point to farm.
+    SetFarm(FarmData),
 }
 
 impl AdminInstruction {
@@ -158,6 +162,18 @@ impl AdminInstruction {
             107 => {
                 let fees = Fees::unpack_unchecked(rest)?;
                 Some(Self::SetNewFees(fees))
+            }
+            108 => {
+                let (alloc_point, rest) = unpack_u64(rest)?;
+                Some(Self::InitializeFarm(FarmData {
+                    alloc_point,
+                }))
+            }
+            109 => {
+                let (alloc_point, rest) = unpack_u64(rest)?;
+                Some(Self::SetFarm(FarmData {
+                    alloc_point,
+                }))
             }
             _ => None,
         })
@@ -186,6 +202,18 @@ impl AdminInstruction {
                 let mut fees_slice = [0u8; Fees::LEN];
                 Pack::pack_into_slice(&fees, &mut fees_slice[..]);
                 buf.extend_from_slice(&fees_slice);
+            }
+            Self::InitializeFarm(FarmData {
+                alloc_point
+            }) => {
+                buf.push(108);
+                buf.extend_from_slice(&alloc_point.to_le_bytes());
+            }
+            Self::SetFarm(FarmData {
+                alloc_point
+            }) => {
+                buf.push(109);
+                buf.extend_from_slice(&alloc_point.to_le_bytes());
             }
         }
         buf
@@ -790,18 +818,6 @@ pub fn withdraw_one(
 #[repr(C)]
 #[derive(Debug, PartialEq)]
 pub enum FarmingInstruction {
-    ///   Initializes a new SwapInfo.
-    ///
-    ///   0. `[writable, signer]` New Token-swap to create.
-    ///   1. `[]` $authority derived from `create_program_address(&[Token-swap account])`
-    ///   2. `[]` admin Account.
-    ///   3. `[]` admin_fee_a admin fee Account for token_a.
-    ///   4. `[]` admin_fee_b admin fee Account for token_b.
-    ///   5. `[]` token_a Account. Must be non zero, owned by $authority.
-    ///   6. `[]` token_b Account. Must be non zero, owned by $authority.
-    ///   7. `[writable]` Pool Token Mint. Must be empty, owned by $authority.
-    Initialize(FarmingInitializeData),
-
     ///   Deposit some tokens into the pool.  The output is a "pool" token representing ownership
     ///   into the pool. Inputs are converted to the current ratio.
     ///
@@ -883,14 +899,6 @@ impl FarmingInstruction {
     pub fn unpack(input: &[u8]) -> Result<Self, ProgramError> {
         let (&tag, rest) = input.split_first().ok_or(SwapError::InvalidInstruction)?;
         Ok(match tag {
-            30 => {
-                let (&nonce, rest) = rest.split_first().ok_or(SwapError::InvalidInstruction)?;
-                let (amp_factor, rest) = unpack_u64(rest)?;
-                let fees = Fees::unpack_unchecked(rest)?;
-                Self::Initialize(FarmingInitializeData {
-                    fees,
-                })
-            }
             31 => {
                 let (pool_token_amount, rest) = unpack_u64(rest)?;
                 let (min_mint_amount, _rest) = unpack_u64(rest)?;
@@ -924,14 +932,6 @@ impl FarmingInstruction {
     pub fn pack(&self) -> Vec<u8> {
         let mut buf = Vec::with_capacity(size_of::<Self>());
         match *self {
-            Self::Initialize(FarmingInitializeData {
-                fees,
-            }) => {
-                buf.push(0);
-                let mut fees_slice = [0u8; Fees::LEN];
-                Pack::pack_into_slice(&fees, &mut fees_slice[..]);
-                buf.extend_from_slice(&fees_slice);
-            }
             Self::Deposit(FarmingDepositData {
                 pool_token_amount,
                 min_mint_amount,

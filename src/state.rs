@@ -223,7 +223,10 @@ pub struct FarmInfo {
     /// Timestamp when calculate reward last     
     pub last_reward_timestamp: u64,
     /// Total allocation points
+    /// !!seems not suitable, maybe this should be global over swap.
     pub total_alloc_point: u64,
+    /// allocation point
+    pub alloc_point: u64,
 }
 
 impl Sealed for FarmingUserInfo {}
