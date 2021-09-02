@@ -876,21 +876,6 @@ pub enum FarmingInstruction {
     ///   8. `[writable]` admin_fee_a admin fee Account for token_a.
     ///   9. `[writable]` admin_fee_b admin fee Account for token_b.
     ///   10. `[]` Token program id
-    /// 
-    PrintDeposited(),    
-    ///   Withdraw tokens from the pool at the current ratio forceful.
-    ///
-    ///   0. `[]` Token-swap
-    ///   1. `[]` $authority
-    ///   2. `[writable]` Pool mint account, $authority is the owner
-    ///   3. `[writable]` SOURCE Pool account, amount is transferable by $authority.
-    ///   4. `[writable]` token_a Swap Account to withdraw FROM.
-    ///   5. `[writable]` token_b Swap Account to withdraw FROM.
-    ///   6. `[writable]` token_a user Account to credit.
-    ///   7. `[writable]` token_b user Account to credit.
-    ///   8. `[writable]` admin_fee_a admin fee Account for token_a.
-    ///   9. `[writable]` admin_fee_b admin fee Account for token_b.
-    ///   10. `[]` Token program id
     PrintPendingDeltafi(),    
 }
 
@@ -919,9 +904,6 @@ impl FarmingInstruction {
                 Self::EmergencyWithdraw()
             }
             34 => {
-                Self::PrintDeposited()
-            }
-            35 => {
                 Self::PrintPendingDeltafi()
             }
             _ => return Err(SwapError::InvalidInstruction.into()),

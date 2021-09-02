@@ -6,7 +6,7 @@ use crate::{
     error::SwapError,
     fees::Fees,
     instruction::{AdminInstruction, RampAData, FarmData},
-    state::{SwapInfo, FarmInfo},
+    state::{SwapInfo, FarmBaseInfo, FarmInfo},
     utils,
 };
 use solana_program::{
@@ -362,28 +362,37 @@ fn set_new_fees(
 pub fn initialize_farm(
     program_id: &Pubkey,
     alloc_point: u64,
+    reward_unit: u64,
     accounts: &[AccountInfo],
 ) -> ProgramResult {
     let account_info_iter = &mut accounts.iter();
+    let farm_base_info = next_account_info(account_info_iter)?;
     let farm_info = next_account_info(account_info_iter)?;
     let authority_info = next_account_info(account_info_iter)?;
     let admin_info = next_account_info(account_info_iter)?;
+    let clock_sysvar_info = next_account_info(account_info_iter)?;
+    let pool_token_info = next_account_info(account_info_iter)?;
 
     let mut farm = FarmInfo::unpack(&farm_info.data.borrow())?;
+    let mut farm_base = FarmBaseInfo::unpack(&farm_base_info.data.borrow())?;
     is_admin(&farm.admin_key, admin_info)?;
     if *authority_info.key != utils::authority_id(program_id, farm_info.key, farm.nonce)? {
         return Err(SwapError::InvalidProgramAddress.into());
     }
+    let clock = Clock::from_account_info(clock_sysvar_info)?;
     
-    /// !!set total alloc point
-    /// ...
-    
-    farm.alloc_point = alloc_pint;
+    farm_base.total_alloc_point = farm_base.total_alloc_point + alloc_point;
+    farm_base.reward_unit = reward_unit;
+    farm.alloc_point = alloc_point;
+    farm.acc_deltafi_per_share = 0;
+    farm.last_reward_timestamp = clock.unix_timestamp;
+    farm.pool_mint = *pool_token_info.key;
 
-    /// !!initialize other properties
-    /// ...
+    // !!initialize other properties
+    // ...
     
-    FarmInfo::pack(farm, &mut farm.data.borrow_mute())?;
+    FarmBaseInfo::pack(farm_base, &mut farm_base_info.data.borrow_mut())?;
+    FarmInfo::pack(farm, &mut farm_info.data.borrow_mut())?;
     Ok(())
 }
 
@@ -393,21 +402,22 @@ fn set_farm(
     accounts: &[AccountInfo]
 ) -> ProgramResult {
     let account_info_iter = &mut accounts.iter();
+    let farm_base_info = next_account_info(account_info_iter)?;
     let farm_info = next_account_info(account_info_iter)?;
     let authority_info = next_account_info(account_info_iter)?;
     let admin_info = next_account_info(account_info_iter)?;
 
-    let mut farm = SwapInfo::unpack(&farm_info.data.borrow())?;
+    let mut farm = FarmInfo::unpack(&farm_info.data.borrow())?;
+    let mut farm_base = FarmBaseInfo::unpack(&farm_base_info.data.borrow())?;
     is_admin(&farm.admin_key, admin_info)?;
     if *authority_info.key != utils::authority_id(program_id, farm_info.key, farm.nonce)? {
         return Err(SwapError::InvalidProgramAddress.into());
     }
     
-    /// !!set total alloc point
-    /// ...
-    
+    farm_base.total_alloc_point = farm_base.total_alloc_point + alloc_point;
     farm.alloc_point = alloc_point;
-    FarmInfo::pack(farm, &mut farm.data.borrow_mute())?;
+    FarmBaseInfo::pack(farm_base, &mut farm_base_info.data.borrow_mut())?;
+    FarmInfo::pack(farm, &mut farm_info.data.borrow_mut())?;
     Ok(())
 }
 

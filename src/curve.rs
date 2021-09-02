@@ -3,7 +3,6 @@
 use crate::{
     bn::U256, 
     fees::Fees,
-    state::{FarmInfo, FarmingUserInfo},
 };
 
 /// Number of coins
@@ -302,14 +301,14 @@ pub struct Farm {
     /// Current unix timestamp
     current_ts: i64,
     /// Withdraw reward rate when depositing, can be set 1e36
-    rate: i64,
+    rate: u128,
 }
 
 impl Farm {
     /// New Farm calculator
     pub fn new(
         current_ts: i64,
-        rate: i64,
+        rate: u128,
     ) -> Self {
         Self {
             current_ts,
@@ -325,7 +324,7 @@ impl Farm {
         // maybe need some other factors
     ) -> Option<U256> {
         amount.checked_mul(acc_deltafi_per_share)?
-        .checked_div(U256::from(self.rate))?
+        .checked_div(self.rate.into())?
         .checked_sub(reward_debt)
     }
 
@@ -335,16 +334,26 @@ impl Farm {
         amount: U256,
     ) -> Option<U256> {
         amount.checked_mul(acc_deltafi_per_share)?
-        .checked_div(U256::from(self.rate))
+        .checked_div(self.rate.into())
     }
 
     pub fn compute_acc_deltafi_per_share(
         &self,
         acc_deltafi_per_share: U256,
+        alloc_point: U256,
+        total_alloc_point: U256,
         supply: U256,
+        time_delta: U256,
+        reward_unit: U256,
     ) -> Option<U256> {
-        /// Update acc_deltafi_per_share through delta of time, allocation point, total allocation point, reward unit for time slot.
-        None
+        // Update acc_deltafi_per_share through delta of time, allocation point, total allocation point, reward unit for time slot.
+        let deltafi_reward = time_delta.checked_mul(reward_unit)?
+            .checked_mul(alloc_point)?
+            .checked_div(total_alloc_point)?;
+        acc_deltafi_per_share.checked_add(
+            deltafi_reward.checked_mul(self.rate.into())?
+            .checked_div(supply)?
+        )
     }
 }
 
