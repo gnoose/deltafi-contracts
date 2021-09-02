@@ -97,3 +97,100 @@ pub fn solve_quadratic_function_for_target (
     // V0 is greater than or equal to V1 according to the solution
     v1 * (f64::from(1) + premium)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::Rng;
+
+    /* uses */
+    /// zero value
+    pub const ZERO_V: f64 = 0 as f64;
+    pub const MAX_V: f64 = f64::MAX;
+
+    #[test]
+    fn test_general_integrate() {
+        let v0 = rand::thread_rng().gen_range(ZERO_V, MAX_V);
+        let v1 = rand::thread_rng().gen_range(ZERO_V, MAX_V);
+        let v2 = rand::thread_rng().gen_range(ZERO_V, MAX_V);
+        let i = rand::thread_rng().gen_range(ZERO_V, MAX_V);
+        let k = rand::thread_rng().gen_range(ZERO_V, MAX_V);
+
+        let expected = i * (v1 - v2) * (f64::from(1) - k + k * (v0 * v0 / v1 / v2));
+
+        assert_eq!(
+            general_integrate(v0, v1, v2, i, k),
+            expected
+        );
+    }
+
+    #[test]
+    fn test_solve_quadratic_function_for_trade() {
+        let q0 = rand::thread_rng().gen_range(ZERO_V, MAX_V);
+        let q1 = rand::thread_rng().gen_range(ZERO_V, MAX_V);
+        let i_delta_b = rand::thread_rng().gen_range(ZERO_V, MAX_V);
+        let delta_b_sig = rand::random();
+        let k = rand::thread_rng().gen_range(ZERO_V, MAX_V);
+
+        let mut kq02q1 = k * q0 * q0 / q1;
+        let mut b = (f64::from(1) - k) * q1;
+
+        let minus_b_sig;
+        if delta_b_sig {
+            b = b + i_delta_b;
+        } else {
+            kq02q1 = kq02q1 + i_delta_b;
+        }
+
+        if b >= kq02q1 {
+            b = b - kq02q1;
+            minus_b_sig = true;
+        } else {
+            b = kq02q1 - b;
+            minus_b_sig = false;
+        }
+
+        // calculate sqrt
+        let mut square_root = f64::from(4) * (f64::from(1) - k) * k * q0 * q0;
+        square_root = (b  * b + square_root).sqrt();
+
+        // final res
+        let denominator = f64::from(2) * (f64::from(1) - k);
+        let numerator;
+        if minus_b_sig {
+            numerator = b + square_root;
+        } else {
+            numerator = square_root - b;
+        }
+
+        let result = numerator / denominator;
+        let expected = result;
+        if delta_b_sig {
+            expected = result.floor();
+        } else {
+            expected = result.ceil();
+        }
+
+        assert_eq!(
+            solve_quadratic_function_for_trade(q0, q1, i_delta_b, delta_b_sig, k),
+            expected
+        );
+    }
+
+    #[test]
+    fn test_solve_quadratic_function_for_target() {
+        let v1 = rand::thread_rng().gen_range(ZERO_V, MAX_V);
+        let k = rand::thread_rng().gen_range(ZERO_V, MAX_V);
+        let fair_amount = rand::thread_rng().gen_range(ZERO_V, MAX_V);
+
+        let mut sqrt = (k * fair_amount * f64::from(4) / v1).ceil();
+        sqrt = ((sqrt + f64::from(1)) * f64::from(1)).sqrt();
+
+        let expected = v1 + v1 * (sqrt - f64::from(1)) / f64::from(2) / k;
+
+        assert_eq!(
+            solve_quadratic_function_for_target(v1, k, fair_amount),
+            expected
+        );
+    }
+}
