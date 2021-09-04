@@ -121,7 +121,7 @@ impl Oracle {
     ) -> Result<Self, ProgramError> {
         let input = array_ref![input, 0, 204];
         #[allow(clippy::ptr_offset_with_cast)]
-        let (
+            let (
             period,
             token0,
             token1,
@@ -149,45 +149,40 @@ impl Oracle {
 mod tests {
     use super::*;
     use rand::Rng;
-    use std::cmp;
-    use rand::seq::IteratorRandom;
     use std::time::SystemTime;
 
     /* uses */
     /// Timestamp at 0
     pub const ZERO_TS: i64 = 0;
-    /// Minimum ramp duration
-    pub const MIN_RAMP_DURATION: i64 = 86400;
-    /// Min amplification coefficient
-    pub const MIN_AMP: u64 = 1;
-    /// Max amplification coefficient
-    pub const MAX_AMP: u64 = 1_000_000;
 
     #[test]
     fn test_current_cumulative_price() {
         let price0: U256 = U256::from(1);
         let price1: U256 = U256::from(1);
+        let token0 = Pubkey::default();
+        let token1 = Pubkey::default();
 
-        let current_timestamp = SystemTime::now().checked_add(1.into());
-        let time_elapsed = 1;
-        let oracle: Oracle = Oracle::new(token0, token1)?;
+        let current_timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() + 1;
+        let oracle: Oracle = Oracle::new(Pubkey::from(token0), Pubkey::from(token1));
 
-        let expected: (U256, U256, u64) = (price0, price1, u64::from(current_timestamp))?;
+        let expected: (U256, U256, u64) = (price0, price1, current_timestamp);
 
         assert_eq!(
-            oracle.current_cumulative_price(price0, price1, u64::from(current_timestamp)),
+            oracle.current_cumulative_price(price0, price1, current_timestamp),
             expected
         );
     }
 
     #[test]
     fn test_consult() {
-        let token = rand::thread_rng().choose(&mut toke0, &mut toke1, &mut rand::thread_rng().gen_range(MIN_AMP, MAX_AMP))?;
-        let amount_in = rand::thread_rng().gen_range(ZERO_TS, i64::MAX)?;
+        let token0 = Pubkey::default();
+        let token1 = Pubkey::default();
+        let token = token0;
+        let amount_in = U256::from(rand::thread_rng().gen_range(ZERO_TS, i64::MAX));
 
-        let oracle: Oracle = Oracle::new(token0, token1)?;
+        let oracle: Oracle = Oracle::new(Pubkey::from(token0), Pubkey::from(token1));
 
-        let expected: u64 = 0.into()?;
+        let expected = U256::from(0);
 
         assert_eq!(
             oracle.consult(token, amount_in),
