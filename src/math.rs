@@ -162,7 +162,10 @@ mod tests {
 
     /* uses */
     /// zero value
+    pub const ZERO_V: u64 = 0 as u64;
     pub const ONE_V: u64 = 1 as u64;
+    pub const TWO_V: u64 = 2 as u64;
+    pub const FOURTH_V: u64 = u64::MAX / 4;
     pub const MAX_V: u64 = u64::MAX;
 
     #[test]
@@ -217,11 +220,11 @@ mod tests {
 
     #[test]
     fn test_general_integrate() {
-        let v0: U256 = rand::thread_rng().gen_range(ONE_V, MAX_V).into();
-        let v1: U256 = rand::thread_rng().gen_range(ONE_V, MAX_V).into();
-        let v2: U256 = rand::thread_rng().gen_range(ONE_V, MAX_V).into();
-        let i: U256 = rand::thread_rng().gen_range(ONE_V, MAX_V).into();
-        let k: U256 = rand::thread_rng().gen_range(ONE_V, MAX_V).into();
+        let v0: U256 = rand::thread_rng().gen_range(TWO_V, FOURTH_V).into();
+        let v1: U256 = v0.checked_mul(3.into()).unwrap();
+        let v2: U256 = v0.checked_mul(2.into()).unwrap();
+        let i: U256 = rand::thread_rng().gen_range(TWO_V, MAX_V).into();
+        let k: U256 = rand::thread_rng().gen_range(ZERO_V, ONE_V).into();
 
         // expected = i * (v1 - v2) * (1 - k + k * (v0 * v0 / v1 / v2));
 
@@ -244,7 +247,7 @@ mod tests {
         let q0: U256 = rand::thread_rng().gen_range(ONE_V, MAX_V).into();
         let q1: U256 = rand::thread_rng().gen_range(ONE_V, MAX_V).into();
         let i_delta_b: U256 = rand::thread_rng().gen_range(ONE_V, MAX_V).into();
-        let k: U256 = rand::thread_rng().gen_range(ONE_V, MAX_V).into();
+        let k: U256 = rand::thread_rng().gen_range(ZERO_V, ONE_V).into();
         let delta_b_sig = rand::random();
 
         let mut kq02q1 = k.checked_mul(q0).unwrap().checked_mul(q0).unwrap().checked_div(q1).unwrap();
