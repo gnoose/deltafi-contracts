@@ -146,10 +146,10 @@ pub fn solve_quadratic_function_for_target (
     fair_amount: U256
 ) -> Option<U256> {
     // V0 = V1+V1*(sqrt-1)/2k
-    let mut sqrt = div_ceil(k.checked_mul(fair_amount)?.checked_mul(4.into())?, v1).unwrap();
-    sqrt = integer_sqrt(sqrt.checked_add(U256::one())?.checked_mul(U256::one())?).unwrap();
+    let mut sqrt = div_ceil(k.checked_mul(fair_amount)?.checked_mul(4.into())?, v1)?;
+    sqrt = integer_sqrt(sqrt.checked_add(U256::one())?.checked_mul(U256::one())?)?;
 
-    let premium = div_ceil(sqrt.checked_sub(U256::one())?, k.checked_mul(2.into())?).unwrap();
+    let premium = div_ceil(sqrt.checked_sub(U256::one())?, k.checked_mul(2.into())?)?;
 
     // V0 is greater than or equal to V1 according to the solution
     v1.checked_mul(premium.checked_add(U256::one())?)
