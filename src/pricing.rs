@@ -81,7 +81,7 @@ impl Pricing {
         &self,
         amount: U256,
         target_quote_token_amount: U256
-    ) -> U256 {
+    ) -> Option<U256> {
         let i = self._oracle_;
         let q2 = solve_quadratic_function_for_trade(
             target_quote_token_amount,
@@ -89,12 +89,12 @@ impl Pricing {
             i * amount,
             false,
             self._k_
-        );
+        ).unwrap();
 
         // in theory Q2 <= target_quote_token_amount
         // however when amount is close to 0, precision problems may cause Q2 > target_quote_token_amount
 
-        target_quote_token_amount - q2
+        target_quote_token_amount.checked_sub(q2)
     }
 
     /// return payQuoteToken
@@ -102,8 +102,8 @@ impl Pricing {
         &self,
         amount: U256,
         target_base_token_amount: U256
-    ) -> U256 {
-        let b2 = target_base_token_amount - amount;
+    ) -> Option<U256> {
+        let b2 = target_base_token_amount.checked_sub(amount)?;
 
         self._r_above_integrate(target_base_token_amount, target_base_token_amount, b2)
     }
@@ -116,7 +116,7 @@ impl Pricing {
         amount: U256,
         quote_balance: U256,
         target_quote_amount: U256
-    ) -> U256 {
+    ) -> Option<U256> {
         let i = self._oracle_;
         let q2 = solve_quadratic_function_for_trade(
             target_quote_amount,
@@ -124,9 +124,9 @@ impl Pricing {
             i * amount,
             false,
             self._k_
-        );
+        ).unwrap();
 
-        quote_balance - q2
+        quote_balance.checked_sub(q2)
     }
 
     /// return payQuoteToken
@@ -135,7 +135,7 @@ impl Pricing {
         amount: U256,
         quote_balance: U256,
         target_quote_amount: U256
-    ) -> U256 {
+    ) -> Option<U256> {
         // Here we don't require amount less than some value
         // Because it is limited at upper function
 
@@ -143,28 +143,28 @@ impl Pricing {
         let q2 = solve_quadratic_function_for_trade(
             target_quote_amount,
             quote_balance,
-            mul_ceil(i, amount),
+            mul_ceil(i, amount).unwrap(),
             true,
             self._k_
-        );
+        ).unwrap();
 
-        q2 - quote_balance
+        q2.checked_sub(quote_balance)
     }
 
     /// return payQuoteToken
-    pub fn _r_below_back_to_one(&self) -> U256 {
+    pub fn _r_below_back_to_one(&self) -> Option<U256> {
         // important: carefully design the system to make sure spareBase always greater than or equal to 0
 
-        let spare_base = self._base_balance_ - self._target_base_token_amount_;
+        let spare_base = self._base_balance_.checked_sub(self._target_base_token_amount_)?;
         let price = self._oracle_;
-        let fair_amount = spare_base * price;
+        let fair_amount = spare_base.checked_mul(price)?;
         let new_target_quote = solve_quadratic_function_for_target(
             self._quote_balance_,
             self._k_,
             fair_amount
-        );
+        ).unwrap();
 
-        new_target_quote - self._quote_balance_
+        new_target_quote.checked_sub(self._quote_balance_)
     }
 
     // ============ R > 1 cases ============
@@ -175,10 +175,10 @@ impl Pricing {
         amount: U256,
         base_balance: U256,
         target_base_amount: U256
-    ) -> U256 {
+    ) -> Option<U256> {
         //require(amount < baseBalance, "DODO_BASE_BALANCE_NOT_ENOUGH");
 
-        let b2 = base_balance - amount;
+        let b2 = base_balance.checked_sub(amount)?;
 
         self._r_above_integrate(target_base_amount, base_balance, b2)
     }
@@ -189,27 +189,27 @@ impl Pricing {
         amount: U256,
         base_balance: U256,
         target_base_amount: U256
-    ) -> U256 {
+    ) -> Option<U256> {
         // here we don't require B1 <= targetBaseAmount
         // Because it is limited at upper function
 
-        let b1 = base_balance + amount;
+        let b1 = base_balance.checked_add(amount)?;
 
         self._r_above_integrate(target_base_amount, b1, base_balance)
     }
 
     /// return payBaseToken
-    pub fn _r_above_back_to_one(&self) -> U256 {
-        let spare_quote = self._quote_balance_ - self._target_quote_token_amount_;
+    pub fn _r_above_back_to_one(&self) -> Option<U256> {
+        let spare_quote = self._quote_balance_.checked_sub(self._target_quote_token_amount_)?;
         let price = self._oracle_;
-        let fair_amount = div_floor(spare_quote, price);
+        let fair_amount = div_floor(spare_quote, price).unwrap();
         let new_target_base = solve_quadratic_function_for_target(
             self._base_balance_,
             self._k_,
             fair_amount
-        );
+        ).unwrap();
 
-        new_target_base - self._base_balance_
+        new_target_base.checked_sub(self._base_balance_)
     }
 
     // helper functions
@@ -223,30 +223,30 @@ impl Pricing {
         if self._r_status_ == RStatus::One {
             (self._target_base_token_amount_, self._target_quote_token_amount_)
         } else if self._r_status_ == RStatus::BelowOne {
-            let pay_quote_token = self._r_below_back_to_one();
+            let pay_quote_token = self._r_below_back_to_one().unwrap();
 
-            (self._target_base_token_amount_, q + pay_quote_token)
+            (self._target_base_token_amount_, q.checked_add(pay_quote_token).unwrap())
         } else {
-            let pay_base_token = self._r_above_back_to_one();
+            let pay_base_token = self._r_above_back_to_one().unwrap();
 
-            (b + pay_base_token, self._target_quote_token_amount_)
+            (b.checked_add(pay_base_token).unwrap(), self._target_quote_token_amount_)
         }
     }
 
     /// return midPrice
-    fn get_mid_price(&self) -> U256 {
+    fn get_mid_price(&self) -> Option<U256> {
         let (base_target, quote_target) = self.get_expected_target();
 
         if self._r_status_ == RStatus::BelowOne {
-            let mut r = div_floor(quote_target * quote_target, self._quote_balance_ * self._quote_balance_);
-            r = U256::from(1) - self._k_ + self._k_ * r;
+            let mut r = div_floor(quote_target.checked_mul(quote_target)?, self._quote_balance_.checked_mul(self._quote_balance_)?).unwrap();
+            r = U256::one().checked_sub(self._k_)?.checked_add(self._k_.checked_mul(r)?)?;
 
             div_floor(self._oracle_, r)
         } else {
-            let mut r = div_floor(base_target * base_target, self._base_balance_ * self._base_balance_);
-            r = U256::from(1) - self._k_ + self._k_ * r;
+            let mut r = div_floor(base_target.checked_mul(base_target)?, self._base_balance_.checked_mul(self._base_balance_)?).unwrap();
+            r = U256::one().checked_sub(self._k_)?.checked_add(self._k_.checked_mul(r)?)?;
 
-            self._oracle_ * r
+            self._oracle_.checked_mul(r)
         }
     }
 
@@ -255,8 +255,9 @@ impl Pricing {
         b0: U256,
         b1: U256,
         b2: U256
-    ) -> U256 {
+    ) -> Option<U256> {
         let i = self._oracle_;
+
         general_integrate(b0, b1, b2, i, self._k_)
     }
 
