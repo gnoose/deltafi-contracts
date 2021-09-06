@@ -922,6 +922,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7ffc5c5338469d4d3ea17d269fa8ea3512ad247247c30bd2df69e68309ed0a08"
 
 [[package]]
+name = "math"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7c872295791dbc560250d70fcae4c8da229d6f3649309a0a5b81fa0795231e5b"
+
+[[package]]
 name = "maybe-uninit"
 version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1913,6 +1919,7 @@ version = "0.1.0"
 dependencies = [
  "arrayref",
  "log",
+ "math",
  "num-derive",
  "num-traits",
  "proptest",

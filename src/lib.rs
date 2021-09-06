@@ -14,6 +14,7 @@ pub mod processor;
 pub mod state;
 pub mod utils;
 pub mod oracle;
+pub mod math;
 
 // Export current solana-program types for downstream users who may also be
 // building with a different solana-program version
