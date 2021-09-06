@@ -89,7 +89,7 @@ impl Pricing {
             i * amount,
             false,
             self._k_
-        ).unwrap();
+        )?;
 
         // in theory Q2 <= target_quote_token_amount
         // however when amount is close to 0, precision problems may cause Q2 > target_quote_token_amount
@@ -124,7 +124,7 @@ impl Pricing {
             i * amount,
             false,
             self._k_
-        ).unwrap();
+        )?;
 
         quote_balance.checked_sub(q2)
     }
@@ -143,10 +143,10 @@ impl Pricing {
         let q2 = solve_quadratic_function_for_trade(
             target_quote_amount,
             quote_balance,
-            mul_ceil(i, amount).unwrap(),
+            mul_ceil(i, amount)?,
             true,
             self._k_
-        ).unwrap();
+        )?;
 
         q2.checked_sub(quote_balance)
     }
@@ -162,7 +162,7 @@ impl Pricing {
             self._quote_balance_,
             self._k_,
             fair_amount
-        ).unwrap();
+        )?;
 
         new_target_quote.checked_sub(self._quote_balance_)
     }
@@ -202,12 +202,12 @@ impl Pricing {
     pub fn _r_above_back_to_one(&self) -> Option<U256> {
         let spare_quote = self._quote_balance_.checked_sub(self._target_quote_token_amount_)?;
         let price = self._oracle_;
-        let fair_amount = div_floor(spare_quote, price).unwrap();
+        let fair_amount = div_floor(spare_quote, price)?;
         let new_target_base = solve_quadratic_function_for_target(
             self._base_balance_,
             self._k_,
             fair_amount
-        ).unwrap();
+        )?;
 
         new_target_base.checked_sub(self._base_balance_)
     }
@@ -223,13 +223,13 @@ impl Pricing {
         if self._r_status_ == RStatus::One {
             (self._target_base_token_amount_, self._target_quote_token_amount_)
         } else if self._r_status_ == RStatus::BelowOne {
-            let pay_quote_token = self._r_below_back_to_one().unwrap();
+            let pay_quote_token = self._r_below_back_to_one()?;
 
-            (self._target_base_token_amount_, q.checked_add(pay_quote_token).unwrap())
+            (self._target_base_token_amount_, q.checked_add(pay_quote_token)?)
         } else {
-            let pay_base_token = self._r_above_back_to_one().unwrap();
+            let pay_base_token = self._r_above_back_to_one()?;
 
-            (b.checked_add(pay_base_token).unwrap(), self._target_quote_token_amount_)
+            (b.checked_add(pay_base_token)?, self._target_quote_token_amount_)
         }
     }
 
@@ -238,12 +238,12 @@ impl Pricing {
         let (base_target, quote_target) = self.get_expected_target();
 
         if self._r_status_ == RStatus::BelowOne {
-            let mut r = div_floor(quote_target.checked_mul(quote_target)?, self._quote_balance_.checked_mul(self._quote_balance_)?).unwrap();
+            let mut r = div_floor(quote_target.checked_mul(quote_target)?, self._quote_balance_.checked_mul(self._quote_balance_)?)?;
             r = U256::one().checked_sub(self._k_)?.checked_add(self._k_.checked_mul(r)?)?;
 
             div_floor(self._oracle_, r)
         } else {
-            let mut r = div_floor(base_target.checked_mul(base_target)?, self._base_balance_.checked_mul(self._base_balance_)?).unwrap();
+            let mut r = div_floor(base_target.checked_mul(base_target)?, self._base_balance_.checked_mul(self._base_balance_)?)?;
             r = U256::one().checked_sub(self._k_)?.checked_add(self._k_.checked_mul(r)?)?;
 
             self._oracle_.checked_mul(r)
@@ -320,7 +320,5 @@ mod test {
     fn test_r_above_integrate() {
 
     }
-
-
 
 }
