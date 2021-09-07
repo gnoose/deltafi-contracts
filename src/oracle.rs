@@ -1,9 +1,13 @@
 //! Moving Average = Oracle Price on Solana
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use arrayref::{array_ref, array_refs};
+use arrayref::{array_mut_ref, array_ref, array_refs, mut_array_refs};
 use log::trace;
-use solana_program::{program_error::ProgramError, pubkey::Pubkey};
+use solana_program::{
+    program_error::ProgramError,
+    program_pack::{Pack, Sealed},
+    pubkey::Pubkey,
+};
 
 use crate::bn::U256;
 
@@ -109,9 +113,12 @@ impl Oracle {
             U256::from(0)
         }
     }
+}
 
-    /// unpack from the input array to the Oracle
-    pub fn unpack_from_slice(input: &[u8]) -> Result<Self, ProgramError> {
+impl Sealed for Oracle {}
+impl Pack for Oracle {
+    const LEN: usize = 204;
+    fn unpack_from_slice(input: &[u8]) -> Result<Self, ProgramError> {
         let input = array_ref![input, 0, 204];
         #[allow(clippy::ptr_offset_with_cast)]
         let (
@@ -134,6 +141,30 @@ impl Oracle {
             price0_average: U256::from(price0_average),
             price1_average: U256::from(price1_average),
         })
+    }
+
+    fn pack_into_slice(&self, output: &mut [u8]) {
+        let output = array_mut_ref![output, 0, 204];
+        let (
+            period,
+            token0,
+            token1,
+            price0_cumulative_last,
+            price1_cumulative_last,
+            block_timestamp_last,
+            price0_average,
+            price1_average,
+        ) = mut_array_refs![output, 4, 32, 32, 32, 32, 8, 32, 32];
+        *period = self.period.to_le_bytes();
+        token0.copy_from_slice(self.token0.as_ref());
+        token1.copy_from_slice(self.token1.as_ref());
+        self.price0_cumulative_last
+            .to_little_endian(price0_cumulative_last);
+        self.price1_cumulative_last
+            .to_little_endian(price1_cumulative_last);
+        *block_timestamp_last = self.block_timestamp_last.to_le_bytes();
+        self.price0_average.to_little_endian(price0_average);
+        self.price1_average.to_little_endian(price1_average);
     }
 }
 

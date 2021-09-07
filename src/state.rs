@@ -73,7 +73,7 @@ impl IsInitialized for SwapInfo {
 }
 
 impl Pack for SwapInfo {
-    const LEN: usize = 395;
+    const LEN: usize = 599;
 
     /// Unpacks a byte buffer into a [SwapInfo](struct.SwapInfo.html).
     fn unpack_from_slice(input: &[u8]) -> Result<Self, ProgramError> {
@@ -132,7 +132,7 @@ impl Pack for SwapInfo {
     }
 
     fn pack_into_slice(&self, output: &mut [u8]) {
-        let output = array_mut_ref![output, 0, 395];
+        let output = array_mut_ref![output, 0, 599];
         let (
             is_initialized,
             is_paused,
@@ -152,7 +152,10 @@ impl Pack for SwapInfo {
             admin_fee_key_a,
             admin_fee_key_b,
             fees,
-        ) = mut_array_refs![output, 1, 1, 1, 8, 8, 8, 8, 8, 32, 32, 32, 32, 32, 32, 32, 32, 32, 64];
+            oracle,
+        ) = mut_array_refs![
+            output, 1, 1, 1, 8, 8, 8, 8, 8, 32, 32, 32, 32, 32, 32, 32, 32, 32, 64, 204
+        ];
         is_initialized[0] = self.is_initialized as u8;
         is_paused[0] = self.is_paused as u8;
         nonce[0] = self.nonce;
@@ -171,6 +174,7 @@ impl Pack for SwapInfo {
         admin_fee_key_a.copy_from_slice(self.admin_fee_key_a.as_ref());
         admin_fee_key_b.copy_from_slice(self.admin_fee_key_b.as_ref());
         self.fees.pack_into_slice(&mut fees[..]);
+        self.oracle.pack_into_slice(&mut oracle[..]);
     }
 }
 
@@ -276,6 +280,9 @@ mod tests {
         packed.extend_from_slice(&trade_fee_denominator.to_le_bytes());
         packed.extend_from_slice(&withdraw_fee_numerator.to_le_bytes());
         packed.extend_from_slice(&withdraw_fee_denominator.to_le_bytes());
+        let mut packed_oracle = [0u8; Oracle::LEN];
+        oracle.pack_into_slice(&mut packed_oracle);
+        packed.extend_from_slice(&packed_oracle);
         let unpacked = SwapInfo::unpack(&packed).unwrap();
         assert_eq!(swap_info, unpacked);
 
