@@ -268,7 +268,7 @@ mod test {
 
     use super::*;
     use rand::Rng;
-    use crate::pricing::{Pricing, RStatus};
+    use crate::v1curve::{Pricing, RStatus};
     use crate::math::{solve_quadratic_function_for_target, solve_quadratic_function_for_trade};
     use crate::bn::U256;
 
