@@ -1,9 +1,9 @@
 //! Utility methods
 
-use crate::error::SwapError;
-use solana_program::program_pack::Pack;
-use solana_program::pubkey::Pubkey;
+use solana_program::{program_pack::Pack, pubkey::Pubkey};
 use spl_token::state::Account;
+
+use crate::error::SwapError;
 
 /// Calculates the authority id by generating a program address.
 pub fn authority_id(program_id: &Pubkey, my_info: &Pubkey, nonce: u8) -> Result<Pubkey, SwapError> {
@@ -18,21 +18,19 @@ pub fn unpack_token_account(data: &[u8]) -> Result<Account, SwapError> {
 
 #[cfg(test)]
 pub mod test_utils {
-    use crate::{
-        curve::ZERO_TS, fees::Fees, instruction::*, processor::Processor, state::SwapInfo,
-    };
     use solana_program::{
-        account_info::AccountInfo, entrypoint::ProgramResult, instruction::Instruction,
-        program_error::ProgramError,
-    };
-    use solana_program::{
-        clock::Clock, msg, program_pack::Pack, program_stubs, pubkey::Pubkey, rent::Rent,
-        sysvar::id,
+        account_info::AccountInfo, clock::Clock, entrypoint::ProgramResult,
+        instruction::Instruction, msg, program_error::ProgramError, program_pack::Pack,
+        program_stubs, pubkey::Pubkey, rent::Rent, sysvar::id,
     };
     use solana_sdk::account::{create_account, create_is_signer_account_infos, Account};
     use spl_token::{
         instruction::{approve, initialize_account, initialize_mint, mint_to},
         state::{Account as SplAccount, Mint as SplMint},
+    };
+
+    use crate::{
+        curve::ZERO_TS, fees::Fees, instruction::*, processor::Processor, state::SwapInfo,
     };
 
     /// Test program id for the swap program.

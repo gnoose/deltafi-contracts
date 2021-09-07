@@ -4,9 +4,11 @@
 #![allow(clippy::ptr_offset_with_cast)]
 #![allow(clippy::manual_range_contains)]
 
-use crate::error::SwapError;
 use std::convert::TryInto;
+
 use uint::construct_uint;
+
+use crate::error::SwapError;
 
 construct_uint! {
     /// 256-bit unsigned integer.

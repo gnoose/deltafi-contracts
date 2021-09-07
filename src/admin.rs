@@ -1,14 +1,5 @@
 //! Module for processing admin-only instructions.
 
-use crate::{
-    bn::U256,
-    curve::{StableSwap, MAX_AMP, MIN_AMP, MIN_RAMP_DURATION, ZERO_TS},
-    error::SwapError,
-    fees::Fees,
-    instruction::{AdminInstruction, RampAData},
-    state::SwapInfo,
-    utils,
-};
 use solana_program::{
     account_info::{next_account_info, AccountInfo},
     entrypoint::ProgramResult,
@@ -17,6 +8,16 @@ use solana_program::{
     program_pack::Pack,
     pubkey::Pubkey,
     sysvar::{clock::Clock, Sysvar},
+};
+
+use crate::{
+    bn::U256,
+    curve::{StableSwap, MAX_AMP, MIN_AMP, MIN_RAMP_DURATION, ZERO_TS},
+    error::SwapError,
+    fees::Fees,
+    instruction::{AdminInstruction, RampAData},
+    state::SwapInfo,
+    utils,
 };
 
 /// Process admin instruction
@@ -321,9 +322,10 @@ fn set_new_fees(program_id: &Pubkey, new_fees: &Fees, accounts: &[AccountInfo]) 
 
 #[cfg(test)]
 mod tests {
+    use solana_sdk::clock::Epoch;
+
     use super::*;
     use crate::{curve::ZERO_TS, utils::test_utils::*};
-    use solana_sdk::clock::Epoch;
 
     const DEFAULT_TOKEN_A_AMOUNT: u64 = 1_000_000_000;
     const DEFAULT_TOKEN_B_AMOUNT: u64 = 1_000_000_000;

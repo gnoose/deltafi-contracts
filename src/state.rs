@@ -1,13 +1,13 @@
 //! State transition types
 
-use crate::fees::Fees;
-use crate::oracle::Oracle;
 use arrayref::{array_mut_ref, array_ref, array_refs, mut_array_refs};
 use solana_program::{
     program_error::ProgramError,
     program_pack::{IsInitialized, Pack, Sealed},
     pubkey::Pubkey,
 };
+
+use crate::{fees::Fees, oracle::Oracle};
 
 /// Program states.
 #[repr(C)]
@@ -98,7 +98,7 @@ impl Pack for SwapInfo {
             admin_fee_key_a,
             admin_fee_key_b,
             fees,
-            oracle
+            oracle,
         ) = array_refs![input, 1, 1, 1, 8, 8, 8, 8, 8, 32, 32, 32, 32, 32, 32, 32, 32, 32, 64, 204];
         Ok(Self {
             is_initialized: match is_initialized {
@@ -127,7 +127,7 @@ impl Pack for SwapInfo {
             admin_fee_key_a: Pubkey::new_from_array(*admin_fee_key_a),
             admin_fee_key_b: Pubkey::new_from_array(*admin_fee_key_b),
             fees: Fees::unpack_from_slice(fees)?,
-            oracle: Oracle::unpack_from_slice(oracle)?
+            oracle: Oracle::unpack_from_slice(oracle)?,
         })
     }
 
@@ -245,7 +245,7 @@ mod tests {
             admin_fee_key_a,
             admin_fee_key_b,
             fees,
-            oracle
+            oracle,
         };
 
         let mut packed = [0u8; SwapInfo::LEN];

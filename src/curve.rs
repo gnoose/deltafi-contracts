@@ -296,11 +296,13 @@ impl StableSwap {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::cmp;
+
     use proptest::prelude::*;
     use rand::Rng;
     use sim::{Model, MODEL_FEE_DENOMINATOR, MODEL_FEE_NUMERATOR};
-    use std::cmp;
+
+    use super::*;
 
     const MODEL_FEES: Fees = Fees {
         admin_trade_fee_numerator: 0,

@@ -1,5 +1,21 @@
 //! Program state processor
 
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use num_traits::FromPrimitive;
+use solana_program::{
+    account_info::{next_account_info, AccountInfo},
+    decode_error::DecodeError,
+    entrypoint::ProgramResult,
+    msg,
+    program::invoke_signed,
+    program_error::{PrintProgramError, ProgramError},
+    program_pack::Pack,
+    pubkey::Pubkey,
+    sysvar::{clock::Clock, Sysvar},
+};
+use spl_token::state::Mint;
+
 use crate::{
     admin::process_admin_instruction,
     bn::U256,
@@ -10,27 +26,11 @@ use crate::{
         AdminInstruction, DepositData, InitializeData, SwapData, SwapInstruction, WithdrawData,
         WithdrawOneData,
     },
+    oracle::Oracle,
     pool_converter::PoolTokenConverter,
     state::SwapInfo,
     utils,
-    oracle::Oracle,
 };
-use num_traits::FromPrimitive;
-use solana_program::{
-    account_info::{next_account_info, AccountInfo},
-    decode_error::DecodeError,
-    entrypoint::ProgramResult,
-    msg,
-    program::invoke_signed,
-    program_error::PrintProgramError,
-    program_error::ProgramError,
-    // program_option::COption,
-    program_pack::Pack,
-    pubkey::Pubkey,
-    sysvar::{clock::Clock, Sysvar},
-};
-use spl_token::state::Mint;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Program state handler. (and general curve params)
 pub struct Processor {}
@@ -341,13 +341,22 @@ impl Processor {
             return Err(SwapError::ExceededSlippage.into());
         }
 
-        let current_timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+        let current_timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
         let token_a = utils::unpack_token_account(&swap_source_info.data.borrow())?;
         let token_b = utils::unpack_token_account(&destination_info.data.borrow())?;
-        let (price0_cumulative, price1_cumulative, block_timestamp) = token_swap.oracle.current_cumulative_price(U256::from(token_a.amount), U256::from(token_b.amount), current_timestamp);
+        let (price0_cumulative, price1_cumulative, block_timestamp) =
+            token_swap.oracle.current_cumulative_price(
+                U256::from(token_a.amount),
+                U256::from(token_b.amount),
+                current_timestamp,
+            );
         let mut swap = token_swap;
 
-        swap.oracle.update(price0_cumulative, price1_cumulative, block_timestamp);
+        swap.oracle
+            .update(price0_cumulative, price1_cumulative, block_timestamp);
 
         Self::token_transfer(
             swap_info.key,
@@ -870,15 +879,16 @@ impl PrintProgramError for SwapError {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::{
-        instruction::{deposit, swap, withdraw, withdraw_one},
-        utils::test_utils::*,
-    };
     use solana_sdk::account::Account;
     use spl_token::{
         error::TokenError,
         instruction::{approve, mint_to, revoke, set_authority, AuthorityType},
+    };
+
+    use super::*;
+    use crate::{
+        instruction::{deposit, swap, withdraw, withdraw_one},
+        utils::test_utils::*,
     };
 
     /// Initial amount of pool tokens for swap contract, hard-coded to something

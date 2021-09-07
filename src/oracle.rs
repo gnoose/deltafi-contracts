@@ -1,12 +1,11 @@
 //! Moving Average = Oracle Price on Solana
-use solana_program::{
-    pubkey::Pubkey,
-    program_error::ProgramError
-};
-use log::{ trace };
-use arrayref::{ array_ref, array_refs };
 use std::time::{SystemTime, UNIX_EPOCH};
-use crate::{ bn::U256 };
+
+use arrayref::{array_ref, array_refs};
+use log::trace;
+use solana_program::{program_error::ProgramError, pubkey::Pubkey};
+
+use crate::bn::U256;
 
 /// Oracle struct
 #[repr(C)]
@@ -39,17 +38,17 @@ pub struct Oracle {
 
 impl Oracle {
     /// initialize function for Oracle
-    pub fn new(
-        token0: Pubkey,
-        token1: Pubkey,
-    ) -> Self {
+    pub fn new(token0: Pubkey, token1: Pubkey) -> Self {
         Self {
             period: 24,
             token0: Pubkey::from(token0),
             token1: Pubkey::from(token1),
             price0_cumulative_last: U256::from(0),
             price1_cumulative_last: U256::from(0),
-            block_timestamp_last: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
+            block_timestamp_last: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
             price0_average: U256::from(0),
             price1_average: U256::from(0),
         }
@@ -60,7 +59,7 @@ impl Oracle {
         &mut self,
         price0_cumulative: U256,
         price1_cumulative: U256,
-        block_timestamp: u64
+        block_timestamp: u64,
     ) {
         let time_elapsed = block_timestamp - self.block_timestamp_last;
 
@@ -101,11 +100,7 @@ impl Oracle {
     }
 
     /// return the consult of the oracle
-    pub fn consult(
-        &self,
-        token: Pubkey,
-        amount_in: U256
-    ) -> U256 {
+    pub fn consult(&self, token: Pubkey, amount_in: U256) -> U256 {
         if token == self.token0 {
             self.price0_average * amount_in
         } else if token == self.token1 {
@@ -116,12 +111,10 @@ impl Oracle {
     }
 
     /// unpack from the input array to the Oracle
-    pub fn unpack_from_slice(
-        input: &[u8]
-    ) -> Result<Self, ProgramError> {
+    pub fn unpack_from_slice(input: &[u8]) -> Result<Self, ProgramError> {
         let input = array_ref![input, 0, 204];
         #[allow(clippy::ptr_offset_with_cast)]
-            let (
+        let (
             period,
             token0,
             token1,
@@ -142,14 +135,15 @@ impl Oracle {
             price1_average: U256::from(price1_average),
         })
     }
-
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use rand::Rng;
     use std::time::SystemTime;
+
+    use rand::Rng;
+
+    use super::*;
 
     /* uses */
     /// Timestamp at 0
@@ -162,7 +156,11 @@ mod tests {
         let token0 = Pubkey::default();
         let token1 = Pubkey::default();
 
-        let current_timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() + 1;
+        let current_timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            + 1;
         let oracle: Oracle = Oracle::new(Pubkey::from(token0), Pubkey::from(token1));
 
         let expected: (U256, U256, u64) = (price0, price1, current_timestamp);
@@ -184,10 +182,6 @@ mod tests {
 
         let expected = U256::from(0);
 
-        assert_eq!(
-            oracle.consult(token, amount_in),
-            expected
-        );
-
+        assert_eq!(oracle.consult(token, amount_in), expected);
     }
 }
