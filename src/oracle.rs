@@ -58,7 +58,7 @@ impl Oracle {
         }
     }
 
-    /// update oracle info by current price info and tiemstamp
+    /// update oracle info by current price info and timestamp
     pub fn update(
         &mut self,
         price0_cumulative: U256,
@@ -67,7 +67,7 @@ impl Oracle {
     ) {
         let time_elapsed = block_timestamp - self.block_timestamp_last;
 
-        if time_elapsed >= self.period as u64 {
+        if time_elapsed < self.period as u64 {
             trace!("ExampleOracleSimple: PERIOD_NOT_ELAPSED");
         } else {
             self.price0_average = (price0_cumulative - self.price0_cumulative_last) / time_elapsed;
