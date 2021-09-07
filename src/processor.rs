@@ -1348,7 +1348,7 @@ mod tests {
             // wrong admin_fee_key_b
             let old_admin_fee_account_b = accounts.admin_fee_b_account;
             let old_admin_fee_key_b = accounts.admin_fee_b_key;
-            accounts.admin_fee_b_account = wrong_admin_fee_account.clone();
+            accounts.admin_fee_b_account = wrong_admin_fee_account;
             accounts.admin_fee_b_key = wrong_admin_fee_key;
 
             assert_eq!(
@@ -1396,7 +1396,7 @@ mod tests {
             accounts.token_a_key = bad_token_key;
             accounts.token_a_account = bad_token_account;
             accounts.token_a_mint_key = bad_mint_key;
-            accounts.token_a_mint_account = bad_mint_account.clone();
+            accounts.token_a_mint_account = bad_mint_account;
 
             assert_eq!(
                 Err(SwapError::MismatchedDecimals.into()),
@@ -1439,8 +1439,8 @@ mod tests {
             );
         }
         let swap_info = SwapInfo::unpack(&accounts.swap_account.data).unwrap();
-        assert_eq!(swap_info.is_initialized, true);
-        assert_eq!(swap_info.is_paused, false);
+        assert!(swap_info.is_initialized);
+        assert!(!swap_info.is_paused);
         assert_eq!(swap_info.nonce, accounts.nonce);
         assert_eq!(swap_info.initial_amp_factor, amp_factor);
         assert_eq!(swap_info.target_amp_factor, amp_factor);
@@ -1781,7 +1781,7 @@ mod tests {
             let old_a_key = accounts.token_a_key;
             let old_a_account = accounts.token_a_account;
 
-            accounts.token_a_key = token_a_key.clone();
+            accounts.token_a_key = token_a_key;
             accounts.token_a_account = token_a_account.clone();
 
             // wrong swap token a account
@@ -1807,7 +1807,7 @@ mod tests {
             let old_b_key = accounts.token_b_key;
             let old_b_account = accounts.token_b_account;
 
-            accounts.token_b_key = token_b_key.clone();
+            accounts.token_b_key = token_b_key;
             accounts.token_b_account = token_b_account.clone();
 
             // wrong swap token b account
@@ -2376,7 +2376,7 @@ mod tests {
             let old_a_key = accounts.token_a_key;
             let old_a_account = accounts.token_a_account;
 
-            accounts.token_a_key = token_a_key.clone();
+            accounts.token_a_key = token_a_key;
             accounts.token_a_account = token_a_account.clone();
 
             // wrong swap token a account
@@ -2402,7 +2402,7 @@ mod tests {
             let old_b_key = accounts.token_b_key;
             let old_b_account = accounts.token_b_account;
 
-            accounts.token_b_key = token_b_key.clone();
+            accounts.token_b_key = token_b_key;
             accounts.token_b_account = token_b_account.clone();
 
             // wrong swap token b account
@@ -2614,8 +2614,8 @@ mod tests {
         let initial_b = token_b_amount / 5;
         let minimum_b_amount = initial_b / 2;
 
-        let swap_token_a_key = accounts.token_a_key.clone();
-        let swap_token_b_key = accounts.token_b_key.clone();
+        let swap_token_a_key = accounts.token_a_key;
+        let swap_token_b_key = accounts.token_b_key;
 
         // swap not initialized
         {
@@ -3249,7 +3249,7 @@ mod tests {
 
             let old_token_b_key = accounts.token_b_key;
             let old_token_b_account = accounts.token_b_account;
-            accounts.token_b_key = accounts.token_a_key.clone();
+            accounts.token_b_key = accounts.token_a_key;
             accounts.token_b_account = accounts.token_a_account.clone();
 
             assert_eq!(
@@ -3303,7 +3303,7 @@ mod tests {
 
             let old_token_a_key = accounts.token_a_key;
             let old_token_a_account = accounts.token_a_account;
-            accounts.token_a_key = foreign_token_key.clone();
+            accounts.token_a_key = foreign_token_key;
             accounts.token_a_account = foreign_token_account.clone();
 
             assert_eq!(
@@ -3324,8 +3324,8 @@ mod tests {
 
             let old_token_b_key = accounts.token_b_key;
             let old_token_b_account = accounts.token_b_account;
-            accounts.token_b_key = foreign_token_key.clone();
-            accounts.token_b_account = foreign_token_account.clone();
+            accounts.token_b_key = foreign_token_key;
+            accounts.token_b_account = foreign_token_account;
 
             assert_eq!(
                 Err(SwapError::IncorrectSwapAccount.into()),

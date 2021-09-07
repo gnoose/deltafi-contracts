@@ -146,9 +146,9 @@ mod tests {
 
     /* uses */
     /// zero value
-    pub const ZERO_V: u64 = 0 as u64;
-    pub const ONE_V: u64 = 1 as u64;
-    pub const TWO_V: u64 = 2 as u64;
+    pub const ZERO_V: u64 = 0_u64;
+    pub const ONE_V: u64 = 1_u64;
+    pub const TWO_V: u64 = 2_u64;
     pub const FOURTH_V: u64 = u64::MAX / 4;
     pub const MAX_V: u64 = u64::MAX;
 

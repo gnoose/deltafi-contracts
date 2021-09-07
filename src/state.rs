@@ -253,10 +253,7 @@ mod tests {
         let unpacked = SwapInfo::unpack(&packed).unwrap();
         assert_eq!(swap_info, unpacked);
 
-        let mut packed = vec![];
-        packed.push(1 as u8); // is_initialized
-        packed.push(0 as u8); // is_paused
-        packed.push(nonce);
+        let mut packed: Vec<u8> = vec![1, 0, nonce];
         packed.extend_from_slice(&initial_amp_factor.to_le_bytes());
         packed.extend_from_slice(&target_amp_factor.to_le_bytes());
         packed.extend_from_slice(&start_ramp_ts.to_le_bytes());

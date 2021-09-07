@@ -161,7 +161,7 @@ mod tests {
             .unwrap()
             .as_secs()
             + 1;
-        let oracle: Oracle = Oracle::new(Pubkey::from(token0), Pubkey::from(token1));
+        let oracle: Oracle = Oracle::new(token0, token1);
 
         let expected: (U256, U256, u64) = (price0, price1, current_timestamp);
 
@@ -178,7 +178,7 @@ mod tests {
         let token = token0;
         let amount_in = U256::from(rand::thread_rng().gen_range(ZERO_TS, i64::MAX));
 
-        let oracle: Oracle = Oracle::new(Pubkey::from(token0), Pubkey::from(token1));
+        let oracle: Oracle = Oracle::new(token0, token1);
 
         let expected = U256::from(0);
 

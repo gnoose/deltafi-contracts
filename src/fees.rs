@@ -219,7 +219,7 @@ mod tests {
         assert_eq!(
             fees.normalized_trade_fee(n_coins, trade_amount.into())
                 .unwrap(),
-            expected_normalized_fee.into()
+            expected_normalized_fee
         );
     }
 }

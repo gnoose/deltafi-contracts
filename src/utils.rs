@@ -54,8 +54,10 @@ pub mod test_utils {
     pub const DEFAULT_TOKEN_DECIMALS: u8 = 6;
 
     pub fn clock_account(ts: i64) -> Account {
-        let mut clock = Clock::default();
-        clock.unix_timestamp = ts;
+        let clock = Clock {
+            unix_timestamp: ts,
+            ..Default::default()
+        };
         Account::new_data(1, &clock, &id()).unwrap()
     }
 
@@ -315,6 +317,7 @@ pub mod test_utils {
             panic!("Could not find matching swap token account");
         }
 
+        #[allow(clippy::too_many_arguments)]
         pub fn swap(
             &mut self,
             user_key: &Pubkey,
@@ -388,6 +391,7 @@ pub mod test_utils {
             Ok(())
         }
 
+        #[allow(clippy::too_many_arguments)]
         pub fn deposit(
             &mut self,
             depositor_key: &Pubkey,
@@ -470,6 +474,7 @@ pub mod test_utils {
             )
         }
 
+        #[allow(clippy::too_many_arguments)]
         pub fn withdraw(
             &mut self,
             user_key: &Pubkey,
@@ -540,6 +545,7 @@ pub mod test_utils {
             Ok(())
         }
 
+        #[allow(clippy::too_many_arguments)]
         pub fn withdraw_one(
             &mut self,
             user_key: &Pubkey,

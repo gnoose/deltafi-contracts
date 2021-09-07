@@ -465,14 +465,7 @@ mod tests {
             stop_ramp_ts,
         );
         let amount_x: u64 = 2045250484898639148;
-        check_y(
-            &model,
-            amount_x.into(),
-            d,
-            current_ts,
-            start_ramp_ts,
-            stop_ramp_ts,
-        );
+        check_y(&model, amount_x, d, current_ts, start_ramp_ts, stop_ramp_ts);
 
         let amount_a: u64 = 8625384579714585493;
         let amount_b: u64 = 4925481879098236733;
@@ -486,14 +479,7 @@ mod tests {
             stop_ramp_ts,
         );
         let amount_x: u64 = 8155777549389559399;
-        check_y(
-            &model,
-            amount_x.into(),
-            d,
-            current_ts,
-            start_ramp_ts,
-            stop_ramp_ts,
-        );
+        check_y(&model, amount_x, d, current_ts, start_ramp_ts, stop_ramp_ts);
     }
 
     #[test]
@@ -558,8 +544,8 @@ mod tests {
             );
             let d = check_d(
                 &model,
-                amount_a.into(),
-                amount_b.into(),
+                amount_a,
+                amount_b,
                 current_ts,
                 start_ramp_ts,
                 stop_ramp_ts,
@@ -571,6 +557,7 @@ mod tests {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn check_swap(
         initial_amp_factor: u64,
         target_amp_factor: u64,
@@ -676,6 +663,7 @@ mod tests {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn check_withdraw_one(
         initial_amp_factor: u64,
         target_amp_factor: u64,
