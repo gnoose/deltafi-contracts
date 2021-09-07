@@ -41,8 +41,8 @@ impl Oracle {
     pub fn new(token0: Pubkey, token1: Pubkey) -> Self {
         Self {
             period: 24,
-            token0: Pubkey::from(token0),
-            token1: Pubkey::from(token1),
+            token0,
+            token1,
             price0_cumulative_last: U256::from(0),
             price1_cumulative_last: U256::from(0),
             block_timestamp_last: SystemTime::now()
