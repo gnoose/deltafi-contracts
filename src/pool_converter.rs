@@ -65,14 +65,12 @@ mod tests {
             token_b,
             fees: &fees,
         };
-        let expected_result = if expected_before_fees.is_some() {
-            let expected_fees = fees.withdraw_fee(expected_before_fees.unwrap()).unwrap();
+        let expected_result = expected_before_fees.map(|expected_before_fees| {
+            let expected_fees = fees.withdraw_fee(expected_before_fees).unwrap();
             let expected_admin_fees = fees.admin_withdraw_fee(expected_fees).unwrap();
-            let expected_amount = expected_before_fees.unwrap() - expected_fees;
-            Some((expected_amount, expected_admin_fees))
-        } else {
-            None
-        };
+            let expected_amount = expected_before_fees - expected_fees;
+            (expected_amount, expected_admin_fees)
+        });
         assert_eq!(calculator.token_a_rate(deposit), expected_result);
         assert_eq!(calculator.supply, supply);
     }
