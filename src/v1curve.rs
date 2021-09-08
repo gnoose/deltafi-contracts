@@ -26,10 +26,10 @@ impl Default for RStatus {
     fn default() -> Self { RStatus::One }
 }
 
-/// Pricing struct
+/// V1curve struct
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct Pricing {
+pub struct V1curve {
     /// slope variable
     pub _k_: U256,
 
@@ -53,8 +53,8 @@ pub struct Pricing {
 
 }
 
-impl Pricing {
-    /// initialize function for Pricing
+impl V1curve {
+    /// initialize function for V1curve
     pub fn new(
         _k_: U256,
         _r_status_: RStatus,
@@ -268,7 +268,7 @@ mod test {
 
     use super::*;
     use rand::Rng;
-    use crate::v1curve::{Pricing, RStatus};
+    use crate::v1curve::{V1curve, RStatus};
     use crate::math::{solve_quadratic_function_for_target, solve_quadratic_function_for_trade};
     use crate::bn::U256;
 
@@ -293,7 +293,7 @@ mod test {
         let amount: U256 = rand::thread_rng().gen_range(ONE_V, MAX_V).into();
         let target_quote_token_amount: U256 = rand::thread_rng().gen_range(ONE_V, MAX_V).into();
 
-        let pricing = Pricing::new(
+        let v1_curve = V1curve::new(
           _k_,
           _r_status_,
           _oracle_,
@@ -313,7 +313,7 @@ mod test {
 
         let expected = target_quote_token_amount.checked_sub(q2).unwrap();
         assert_eq!(
-            pricing._r_one_sell_base_token(amount, target_quote_token_amount).unwrap(),
+            v1_curve._r_one_sell_base_token(amount, target_quote_token_amount).unwrap(),
             expected
         )
     }
@@ -331,7 +331,7 @@ mod test {
         let amount: U256 = rand::thread_rng().gen_range(ONE_V, FOURTH_V).into();
         let target_base_token_amount: U256 = rand::thread_rng().gen_range(HALF_V, MAX_V).into();
 
-        let pricing = Pricing::new(
+        let v1_curve = V1curve::new(
             _k_,
             _r_status_,
             _oracle_,
@@ -343,14 +343,14 @@ mod test {
 
         let b2 = target_base_token_amount.checked_sub(amount).unwrap();
 
-        let expected = pricing._r_above_integrate(
+        let expected = v1_curve._r_above_integrate(
             target_base_token_amount,
             target_base_token_amount,
             b2
         ).unwrap();
 
         assert_eq!(
-            pricing._r_one_buy_base_token(amount, target_base_token_amount).unwrap(),
+            v1_curve._r_one_buy_base_token(amount, target_base_token_amount).unwrap(),
             expected
         )
     }
@@ -369,7 +369,7 @@ mod test {
         let quote_balance: U256 = rand::thread_rng().gen_range(HALF_V, MAX_V).into();
         let target_quote_amount: U256 = rand::thread_rng().gen_range(HALF_V, MAX_V).into();
 
-        let pricing = Pricing::new(
+        let v1_curve = V1curve::new(
             _k_,
             _r_status_,
             _oracle_,
@@ -390,7 +390,7 @@ mod test {
         let expected = quote_balance.checked_sub(q2).unwrap();
 
         assert_eq!(
-            pricing._r_below_sell_base_token(amount, quote_balance, target_quote_amount).unwrap(),
+            v1_curve._r_below_sell_base_token(amount, quote_balance, target_quote_amount).unwrap(),
             expected
         )
     }
@@ -409,7 +409,7 @@ mod test {
         let quote_balance: U256 = rand::thread_rng().gen_range(HALF_V, MAX_V).into();
         let target_quote_amount: U256 = rand::thread_rng().gen_range(HALF_V, MAX_V).into();
 
-        let pricing = Pricing::new(
+        let v1_curve = V1curve::new(
             _k_,
             _r_status_,
             _oracle_,
@@ -430,14 +430,14 @@ mod test {
         let expected = q2.checked_sub(quote_balance).unwrap();
 
         assert_eq!(
-            pricing._r_below_buy_base_token(amount, quote_balance, target_quote_amount).unwrap(),
+            v1_curve._r_below_buy_base_token(amount, quote_balance, target_quote_amount).unwrap(),
             expected
         )
     }
 
     #[test]
     fn test_r_below_back_to_one() {
-        let _k_: U256 = rand::thread_rng().gen_range(ZERO_V, ONE_V).into();
+        let _k_: U256 = rand::thread_rng().gen_range(ONE_V, MAX_V).into();
         let _r_status_ = RStatus::One;
         let _oracle_: U256 = rand::thread_rng().gen_range(ONE_V, MAX_V).into();
         let _base_balance_: U256 = rand::thread_rng().gen_range(HALF_V, MAX_V).into();
@@ -445,7 +445,7 @@ mod test {
         let _target_base_token_amount_: U256 = rand::thread_rng().gen_range(ONE_V, HALF_V).into();
         let _target_quote_token_amount_: U256 = rand::thread_rng().gen_range(ONE_V, HALF_V).into();
 
-        let pricing = Pricing::new(
+        let v1_curve = V1curve::new(
             _k_,
             _r_status_,
             _oracle_,
@@ -466,7 +466,7 @@ mod test {
         let expected = new_target_quote.checked_sub(_quote_balance_).unwrap();
 
         assert_eq!(
-            pricing._r_below_back_to_one().unwrap(),
+            v1_curve._r_below_back_to_one().unwrap(),
             expected
         )
     }
@@ -485,7 +485,7 @@ mod test {
         let base_balance: U256 = rand::thread_rng().gen_range(HALF_V, MAX_V).into();
         let target_base_amount: U256 = rand::thread_rng().gen_range(HALF_V, MAX_V).into();
 
-        let pricing = Pricing::new(
+        let v1_curve = V1curve::new(
             _k_,
             _r_status_,
             _oracle_,
@@ -497,14 +497,14 @@ mod test {
 
         let b2 = base_balance.checked_sub(amount).unwrap();
 
-        let expected = pricing._r_above_integrate(
+        let expected = v1_curve._r_above_integrate(
             target_base_amount,
             base_balance,
             b2
         ).unwrap();
 
         assert_eq!(
-            pricing._r_above_buy_base_token(amount, base_balance, target_base_amount).unwrap(),
+            v1_curve._r_above_buy_base_token(amount, base_balance, target_base_amount).unwrap(),
             expected
         )
     }
@@ -523,7 +523,7 @@ mod test {
         let base_balance: U256 = rand::thread_rng().gen_range(HALF_V, MAX_V).into();
         let target_base_amount: U256 = rand::thread_rng().gen_range(HALF_V, MAX_V).into();
 
-        let pricing = Pricing::new(
+        let v1_curve = V1curve::new(
             _k_,
             _r_status_,
             _oracle_,
@@ -535,21 +535,21 @@ mod test {
 
         let b1 = base_balance.checked_add(amount).unwrap();
 
-        let expected = pricing._r_above_integrate(
+        let expected = v1_curve._r_above_integrate(
             target_base_amount,
             b1,
             base_balance
         ).unwrap();
 
         assert_eq!(
-            pricing._r_above_sell_base_token(amount, base_balance, target_base_amount).unwrap(),
+            v1_curve._r_above_sell_base_token(amount, base_balance, target_base_amount).unwrap(),
             expected
         )
     }
 
     #[test]
     fn test_r_above_back_to_one() {
-        let _k_: U256 = rand::thread_rng().gen_range(ZERO_V, ONE_V).into();
+        let _k_: U256 = rand::thread_rng().gen_range(ONE_V, MAX_V).into();
         let _r_status_ = RStatus::One;
         let _oracle_: U256 = rand::thread_rng().gen_range(ONE_V, MAX_V).into();
         let _base_balance_: U256 = rand::thread_rng().gen_range(HALF_V, MAX_V).into();
@@ -557,7 +557,7 @@ mod test {
         let _target_base_token_amount_: U256 = rand::thread_rng().gen_range(ONE_V, HALF_V).into();
         let _target_quote_token_amount_: U256 = rand::thread_rng().gen_range(ONE_V, HALF_V).into();
 
-        let pricing = Pricing::new(
+        let v1_curve = V1curve::new(
             _k_,
             _r_status_,
             _oracle_,
@@ -578,7 +578,7 @@ mod test {
         let expected = new_target_base.checked_sub(_base_balance_).unwrap();
 
         assert_eq!(
-            pricing._r_above_back_to_one().unwrap(),
+            v1_curve._r_above_back_to_one().unwrap(),
             expected
         )
     }
@@ -593,7 +593,7 @@ mod test {
         let _target_base_token_amount_: U256 = rand::thread_rng().gen_range(ONE_V, MAX_V).into();
         let _target_quote_token_amount_: U256 = rand::thread_rng().gen_range(ONE_V, MAX_V).into();
 
-        let pricing = Pricing::new(
+        let v1_curve = V1curve::new(
             _k_,
             _r_status_,
             _oracle_,
@@ -606,17 +606,17 @@ mod test {
         if _r_status_ == RStatus::One {
             expected = (_target_base_token_amount_, _target_quote_token_amount_);
         } else if _r_status_ == RStatus::BelowOne {
-            let pay_quote_token = pricing._r_below_back_to_one().unwrap();
+            let pay_quote_token = v1_curve._r_below_back_to_one().unwrap();
 
             expected = (_target_base_token_amount_, _quote_balance_.checked_add(pay_quote_token).unwrap());
         } else {
-            let pay_base_token = pricing._r_above_back_to_one().unwrap();
+            let pay_base_token = v1_curve._r_above_back_to_one().unwrap();
 
             expected = (_base_balance_.checked_add(pay_base_token).unwrap(), _target_quote_token_amount_);
         }
 
         assert_eq!(
-            pricing.get_expected_target().unwrap(),
+            v1_curve.get_expected_target().unwrap(),
             expected
         )
     }
@@ -631,7 +631,7 @@ mod test {
         let _target_base_token_amount_: U256 = rand::thread_rng().gen_range(ONE_V, MAX_V).into();
         let _target_quote_token_amount_: U256 = rand::thread_rng().gen_range(ONE_V, MAX_V).into();
 
-        let pricing = Pricing::new(
+        let v1_curve = V1curve::new(
             _k_,
             _r_status_,
             _oracle_,
@@ -641,7 +641,7 @@ mod test {
             _target_quote_token_amount_
         );
 
-        let (base_target, quote_target) = pricing.get_expected_target().unwrap();
+        let (base_target, quote_target) = v1_curve.get_expected_target().unwrap();
 
         let expected;
         if _r_status_ == RStatus::BelowOne {
@@ -657,7 +657,7 @@ mod test {
         }
 
         assert_eq!(
-            pricing.get_mid_price().unwrap(),
+            v1_curve.get_mid_price().unwrap(),
             expected
         )
     }
@@ -676,7 +676,7 @@ mod test {
         let b1: U256 = b0.checked_mul(3.into()).unwrap();
         let b2: U256 = b0.checked_mul(2.into()).unwrap();
 
-        let pricing = Pricing::new(
+        let v1_curve = V1curve::new(
             _k_,
             _r_status_,
             _oracle_,
@@ -689,7 +689,7 @@ mod test {
         let expected = general_integrate(b0, b1, b2, _oracle_, _k_).unwrap();
 
         assert_eq!(
-            pricing._r_above_integrate(b0, b1, b2).unwrap(),
+            v1_curve._r_above_integrate(b0, b1, b2).unwrap(),
             expected
         )
     }
