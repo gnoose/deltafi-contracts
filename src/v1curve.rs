@@ -1,11 +1,10 @@
 //! Implement pricing of PMM
-use crate::bn::U256;
-use crate::math::{
-    div_floor,
-    mul_ceil,
-    general_integrate,
-    solve_quadratic_function_for_trade,
-    solve_quadratic_function_for_target
+use crate::{
+    bn::U256,
+    math::{
+        div_floor, general_integrate, mul_ceil, solve_quadratic_function_for_target,
+        solve_quadratic_function_for_trade,
+    },
 };
 
 /// RStatus enum
@@ -19,11 +18,13 @@ pub enum RStatus {
     AboveOne,
 
     /// r < 1
-    BelowOne
+    BelowOne,
 }
 
 impl Default for RStatus {
-    fn default() -> Self { RStatus::One }
+    fn default() -> Self {
+        RStatus::One
+    }
 }
 
 /// V1curve struct
@@ -40,7 +41,7 @@ pub struct V1curve {
     pub _oracle_: U256,
 
     /// base token balance
-    pub  _base_balance_: U256,
+    pub _base_balance_: U256,
 
     /// quote token balance
     pub _quote_balance_: U256,
@@ -50,7 +51,6 @@ pub struct V1curve {
 
     /// target quote token amount
     pub _target_quote_token_amount_: U256,
-
 }
 
 impl V1curve {
@@ -62,16 +62,16 @@ impl V1curve {
         _base_balance_: U256,
         _quote_balance_: U256,
         _target_base_token_amount_: U256,
-        _target_quote_token_amount_: U256
+        _target_quote_token_amount_: U256,
     ) -> Self {
         Self {
-            _k_: _k_,
-            _r_status_: _r_status_,
-            _oracle_: _oracle_,
-            _base_balance_: _base_balance_,
-            _quote_balance_: _quote_balance_,
-            _target_base_token_amount_: _target_base_token_amount_,
-            _target_quote_token_amount_: _target_quote_token_amount_
+            _k_,
+            _r_status_,
+            _oracle_,
+            _base_balance_,
+            _quote_balance_,
+            _target_base_token_amount_,
+            _target_quote_token_amount_,
         }
     }
     // ================== R = 1 cases ==================
@@ -80,7 +80,7 @@ impl V1curve {
     pub fn _r_one_sell_base_token(
         &self,
         amount: U256,
-        target_quote_token_amount: U256
+        target_quote_token_amount: U256,
     ) -> Option<U256> {
         let i = self._oracle_;
         let q2 = solve_quadratic_function_for_trade(
@@ -88,7 +88,7 @@ impl V1curve {
             target_quote_token_amount,
             i.checked_mul(amount)?,
             false,
-            self._k_
+            self._k_,
         )?;
 
         // in theory Q2 <= target_quote_token_amount
@@ -101,7 +101,7 @@ impl V1curve {
     pub fn _r_one_buy_base_token(
         &self,
         amount: U256,
-        target_base_token_amount: U256
+        target_base_token_amount: U256,
     ) -> Option<U256> {
         let b2 = target_base_token_amount.checked_sub(amount)?;
 
@@ -115,7 +115,7 @@ impl V1curve {
         &self,
         amount: U256,
         quote_balance: U256,
-        target_quote_amount: U256
+        target_quote_amount: U256,
     ) -> Option<U256> {
         let i = self._oracle_;
         let q2 = solve_quadratic_function_for_trade(
@@ -123,7 +123,7 @@ impl V1curve {
             quote_balance,
             i.checked_mul(amount)?,
             false,
-            self._k_
+            self._k_,
         )?;
 
         quote_balance.checked_sub(q2)
@@ -134,7 +134,7 @@ impl V1curve {
         &self,
         amount: U256,
         quote_balance: U256,
-        target_quote_amount: U256
+        target_quote_amount: U256,
     ) -> Option<U256> {
         // Here we don't require amount less than some value
         // Because it is limited at upper function
@@ -145,7 +145,7 @@ impl V1curve {
             quote_balance,
             mul_ceil(i, amount)?,
             true,
-            self._k_
+            self._k_,
         )?;
 
         q2.checked_sub(quote_balance)
@@ -155,14 +155,13 @@ impl V1curve {
     pub fn _r_below_back_to_one(&self) -> Option<U256> {
         // important: carefully design the system to make sure spareBase always greater than or equal to 0
 
-        let spare_base = self._base_balance_.checked_sub(self._target_base_token_amount_)?;
+        let spare_base = self
+            ._base_balance_
+            .checked_sub(self._target_base_token_amount_)?;
         let price = self._oracle_;
         let fair_amount = spare_base.checked_mul(price)?;
-        let new_target_quote = solve_quadratic_function_for_target(
-            self._quote_balance_,
-            self._k_,
-            fair_amount
-        )?;
+        let new_target_quote =
+            solve_quadratic_function_for_target(self._quote_balance_, self._k_, fair_amount)?;
 
         new_target_quote.checked_sub(self._quote_balance_)
     }
@@ -174,7 +173,7 @@ impl V1curve {
         &self,
         amount: U256,
         base_balance: U256,
-        target_base_amount: U256
+        target_base_amount: U256,
     ) -> Option<U256> {
         //require(amount < baseBalance, "DODO_BASE_BALANCE_NOT_ENOUGH");
 
@@ -188,7 +187,7 @@ impl V1curve {
         &self,
         amount: U256,
         base_balance: U256,
-        target_base_amount: U256
+        target_base_amount: U256,
     ) -> Option<U256> {
         // here we don't require B1 <= targetBaseAmount
         // Because it is limited at upper function
@@ -200,14 +199,13 @@ impl V1curve {
 
     /// return payBaseToken
     pub fn _r_above_back_to_one(&self) -> Option<U256> {
-        let spare_quote = self._quote_balance_.checked_sub(self._target_quote_token_amount_)?;
+        let spare_quote = self
+            ._quote_balance_
+            .checked_sub(self._target_quote_token_amount_)?;
         let price = self._oracle_;
         let fair_amount = div_floor(spare_quote, price)?;
-        let new_target_base = solve_quadratic_function_for_target(
-            self._base_balance_,
-            self._k_,
-            fair_amount
-        )?;
+        let new_target_base =
+            solve_quadratic_function_for_target(self._base_balance_, self._k_, fair_amount)?;
 
         new_target_base.checked_sub(self._base_balance_)
     }
@@ -221,15 +219,24 @@ impl V1curve {
         let b = self._base_balance_;
 
         if self._r_status_ == RStatus::One {
-            Some((self._target_base_token_amount_, self._target_quote_token_amount_))
+            Some((
+                self._target_base_token_amount_,
+                self._target_quote_token_amount_,
+            ))
         } else if self._r_status_ == RStatus::BelowOne {
             let pay_quote_token = self._r_below_back_to_one()?;
 
-            Some((self._target_base_token_amount_, q.checked_add(pay_quote_token)?))
+            Some((
+                self._target_base_token_amount_,
+                q.checked_add(pay_quote_token)?,
+            ))
         } else {
             let pay_base_token = self._r_above_back_to_one()?;
 
-            Some((b.checked_add(pay_base_token)?, self._target_quote_token_amount_))
+            Some((
+                b.checked_add(pay_base_token)?,
+                self._target_quote_token_amount_,
+            ))
         }
     }
 
@@ -238,39 +245,46 @@ impl V1curve {
         let (base_target, quote_target) = self.get_expected_target()?;
 
         if self._r_status_ == RStatus::BelowOne {
-            let mut r = div_floor(quote_target.checked_mul(quote_target)?, self._quote_balance_.checked_mul(self._quote_balance_)?)?;
-            r = U256::one().checked_sub(self._k_)?.checked_add(self._k_.checked_mul(r)?)?;
+            let mut r = div_floor(
+                quote_target.checked_mul(quote_target)?,
+                self._quote_balance_.checked_mul(self._quote_balance_)?,
+            )?;
+            r = U256::one()
+                .checked_sub(self._k_)?
+                .checked_add(self._k_.checked_mul(r)?)?;
 
             div_floor(self._oracle_, r)
         } else {
-            let mut r = div_floor(base_target.checked_mul(base_target)?, self._base_balance_.checked_mul(self._base_balance_)?)?;
-            r = U256::one().checked_sub(self._k_)?.checked_add(self._k_.checked_mul(r)?)?;
+            let mut r = div_floor(
+                base_target.checked_mul(base_target)?,
+                self._base_balance_.checked_mul(self._base_balance_)?,
+            )?;
+            r = U256::one()
+                .checked_sub(self._k_)?
+                .checked_add(self._k_.checked_mul(r)?)?;
 
             self._oracle_.checked_mul(r)
         }
     }
 
-    fn _r_above_integrate(
-        &self,
-        b0: U256,
-        b1: U256,
-        b2: U256
-    ) -> Option<U256> {
+    fn _r_above_integrate(&self, b0: U256, b1: U256, b2: U256) -> Option<U256> {
         let i = self._oracle_;
 
         general_integrate(b0, b1, b2, i, self._k_)
     }
-
 }
 
 #[cfg(test)]
 mod test {
 
-    use super::*;
     use rand::Rng;
-    use crate::v1curve::{V1curve, RStatus};
-    use crate::math::{solve_quadratic_function_for_target, solve_quadratic_function_for_trade};
-    use crate::bn::U256;
+
+    use super::*;
+    use crate::{
+        bn::U256,
+        math::{solve_quadratic_function_for_target, solve_quadratic_function_for_trade},
+        v1curve::{RStatus, V1curve},
+    };
 
     /// const variable definitions
     pub const ZERO_V: u64 = 0 as u64;
@@ -294,13 +308,13 @@ mod test {
         let target_quote_token_amount: U256 = rand::thread_rng().gen_range(ONE_V, MAX_V).into();
 
         let v1_curve = V1curve::new(
-          _k_,
-          _r_status_,
-          _oracle_,
-          _base_balance_,
-          _quote_balance_,
-          _target_base_token_amount_,
-          _target_quote_token_amount_
+            _k_,
+            _r_status_,
+            _oracle_,
+            _base_balance_,
+            _quote_balance_,
+            _target_base_token_amount_,
+            _target_quote_token_amount_,
         );
 
         let q2 = solve_quadratic_function_for_trade(
@@ -308,12 +322,15 @@ mod test {
             _target_quote_token_amount_,
             _oracle_.checked_mul(amount).unwrap(),
             false,
-            _k_
-        ).unwrap();
+            _k_,
+        )
+        .unwrap();
 
         let expected = target_quote_token_amount.checked_sub(q2).unwrap();
         assert_eq!(
-            v1_curve._r_one_sell_base_token(amount, target_quote_token_amount).unwrap(),
+            v1_curve
+                ._r_one_sell_base_token(amount, target_quote_token_amount)
+                .unwrap(),
             expected
         )
     }
@@ -338,19 +355,19 @@ mod test {
             _base_balance_,
             _quote_balance_,
             _target_base_token_amount_,
-            _target_quote_token_amount_
+            _target_quote_token_amount_,
         );
 
         let b2 = target_base_token_amount.checked_sub(amount).unwrap();
 
-        let expected = v1_curve._r_above_integrate(
-            target_base_token_amount,
-            target_base_token_amount,
-            b2
-        ).unwrap();
+        let expected = v1_curve
+            ._r_above_integrate(target_base_token_amount, target_base_token_amount, b2)
+            .unwrap();
 
         assert_eq!(
-            v1_curve._r_one_buy_base_token(amount, target_base_token_amount).unwrap(),
+            v1_curve
+                ._r_one_buy_base_token(amount, target_base_token_amount)
+                .unwrap(),
             expected
         )
     }
@@ -376,7 +393,7 @@ mod test {
             _base_balance_,
             _quote_balance_,
             _target_base_token_amount_,
-            _target_quote_token_amount_
+            _target_quote_token_amount_,
         );
 
         let q2 = solve_quadratic_function_for_trade(
@@ -384,13 +401,16 @@ mod test {
             quote_balance,
             _oracle_.checked_mul(amount).unwrap(),
             false,
-            _k_
-        ).unwrap();
+            _k_,
+        )
+        .unwrap();
 
         let expected = quote_balance.checked_sub(q2).unwrap();
 
         assert_eq!(
-            v1_curve._r_below_sell_base_token(amount, quote_balance, target_quote_amount).unwrap(),
+            v1_curve
+                ._r_below_sell_base_token(amount, quote_balance, target_quote_amount)
+                .unwrap(),
             expected
         )
     }
@@ -416,7 +436,7 @@ mod test {
             _base_balance_,
             _quote_balance_,
             _target_base_token_amount_,
-            _target_quote_token_amount_
+            _target_quote_token_amount_,
         );
 
         let q2 = solve_quadratic_function_for_trade(
@@ -424,13 +444,16 @@ mod test {
             quote_balance,
             mul_ceil(_oracle_, amount).unwrap(),
             true,
-            _k_
-        ).unwrap();
+            _k_,
+        )
+        .unwrap();
 
         let expected = q2.checked_sub(quote_balance).unwrap();
 
         assert_eq!(
-            v1_curve._r_below_buy_base_token(amount, quote_balance, target_quote_amount).unwrap(),
+            v1_curve
+                ._r_below_buy_base_token(amount, quote_balance, target_quote_amount)
+                .unwrap(),
             expected
         )
     }
@@ -452,23 +475,19 @@ mod test {
             _base_balance_,
             _quote_balance_,
             _target_base_token_amount_,
-            _target_quote_token_amount_
+            _target_quote_token_amount_,
         );
 
-        let spare_base = _base_balance_.checked_sub(_target_base_token_amount_).unwrap();
+        let spare_base = _base_balance_
+            .checked_sub(_target_base_token_amount_)
+            .unwrap();
         let fair_amount = spare_base.checked_mul(_oracle_).unwrap();
-        let new_target_quote = solve_quadratic_function_for_target(
-            _quote_balance_,
-            _k_,
-            fair_amount
-        ).unwrap();
+        let new_target_quote =
+            solve_quadratic_function_for_target(_quote_balance_, _k_, fair_amount).unwrap();
 
         let expected = new_target_quote.checked_sub(_quote_balance_).unwrap();
 
-        assert_eq!(
-            v1_curve._r_below_back_to_one().unwrap(),
-            expected
-        )
+        assert_eq!(v1_curve._r_below_back_to_one().unwrap(), expected)
     }
 
     #[test]
@@ -492,19 +511,19 @@ mod test {
             _base_balance_,
             _quote_balance_,
             _target_base_token_amount_,
-            _target_quote_token_amount_
+            _target_quote_token_amount_,
         );
 
         let b2 = base_balance.checked_sub(amount).unwrap();
 
-        let expected = v1_curve._r_above_integrate(
-            target_base_amount,
-            base_balance,
-            b2
-        ).unwrap();
+        let expected = v1_curve
+            ._r_above_integrate(target_base_amount, base_balance, b2)
+            .unwrap();
 
         assert_eq!(
-            v1_curve._r_above_buy_base_token(amount, base_balance, target_base_amount).unwrap(),
+            v1_curve
+                ._r_above_buy_base_token(amount, base_balance, target_base_amount)
+                .unwrap(),
             expected
         )
     }
@@ -530,19 +549,19 @@ mod test {
             _base_balance_,
             _quote_balance_,
             _target_base_token_amount_,
-            _target_quote_token_amount_
+            _target_quote_token_amount_,
         );
 
         let b1 = base_balance.checked_add(amount).unwrap();
 
-        let expected = v1_curve._r_above_integrate(
-            target_base_amount,
-            b1,
-            base_balance
-        ).unwrap();
+        let expected = v1_curve
+            ._r_above_integrate(target_base_amount, b1, base_balance)
+            .unwrap();
 
         assert_eq!(
-            v1_curve._r_above_sell_base_token(amount, base_balance, target_base_amount).unwrap(),
+            v1_curve
+                ._r_above_sell_base_token(amount, base_balance, target_base_amount)
+                .unwrap(),
             expected
         )
     }
@@ -564,23 +583,19 @@ mod test {
             _base_balance_,
             _quote_balance_,
             _target_base_token_amount_,
-            _target_quote_token_amount_
+            _target_quote_token_amount_,
         );
 
-        let spare_quote = _quote_balance_.checked_sub(_target_quote_token_amount_).unwrap();
+        let spare_quote = _quote_balance_
+            .checked_sub(_target_quote_token_amount_)
+            .unwrap();
         let fair_amount = div_floor(spare_quote, _oracle_).unwrap();
-        let new_target_base = solve_quadratic_function_for_target(
-            _base_balance_,
-            _k_,
-            fair_amount
-        ).unwrap();
+        let new_target_base =
+            solve_quadratic_function_for_target(_base_balance_, _k_, fair_amount).unwrap();
 
         let expected = new_target_base.checked_sub(_base_balance_).unwrap();
 
-        assert_eq!(
-            v1_curve._r_above_back_to_one().unwrap(),
-            expected
-        )
+        assert_eq!(v1_curve._r_above_back_to_one().unwrap(), expected)
     }
 
     #[test]
@@ -600,7 +615,7 @@ mod test {
             _base_balance_,
             _quote_balance_,
             _target_base_token_amount_,
-            _target_quote_token_amount_
+            _target_quote_token_amount_,
         );
         let expected;
         if _r_status_ == RStatus::One {
@@ -608,17 +623,20 @@ mod test {
         } else if _r_status_ == RStatus::BelowOne {
             let pay_quote_token = v1_curve._r_below_back_to_one().unwrap();
 
-            expected = (_target_base_token_amount_, _quote_balance_.checked_add(pay_quote_token).unwrap());
+            expected = (
+                _target_base_token_amount_,
+                _quote_balance_.checked_add(pay_quote_token).unwrap(),
+            );
         } else {
             let pay_base_token = v1_curve._r_above_back_to_one().unwrap();
 
-            expected = (_base_balance_.checked_add(pay_base_token).unwrap(), _target_quote_token_amount_);
+            expected = (
+                _base_balance_.checked_add(pay_base_token).unwrap(),
+                _target_quote_token_amount_,
+            );
         }
 
-        assert_eq!(
-            v1_curve.get_expected_target().unwrap(),
-            expected
-        )
+        assert_eq!(v1_curve.get_expected_target().unwrap(), expected)
     }
 
     #[test]
@@ -638,28 +656,41 @@ mod test {
             _base_balance_,
             _quote_balance_,
             _target_base_token_amount_,
-            _target_quote_token_amount_
+            _target_quote_token_amount_,
         );
 
         let (base_target, quote_target) = v1_curve.get_expected_target().unwrap();
 
         let expected;
         if _r_status_ == RStatus::BelowOne {
-            let mut r = div_floor(quote_target.checked_mul(quote_target).unwrap(), _quote_balance_.checked_mul(_quote_balance_).unwrap()).unwrap();
-            r = U256::one().checked_sub(_k_).unwrap().checked_add(_k_.checked_mul(r).unwrap()).unwrap();
+            let mut r = div_floor(
+                quote_target.checked_mul(quote_target).unwrap(),
+                _quote_balance_.checked_mul(_quote_balance_).unwrap(),
+            )
+            .unwrap();
+            r = U256::one()
+                .checked_sub(_k_)
+                .unwrap()
+                .checked_add(_k_.checked_mul(r).unwrap())
+                .unwrap();
 
             expected = div_floor(_oracle_, r).unwrap();
         } else {
-            let mut r = div_floor(base_target.checked_mul(base_target).unwrap(), _base_balance_.checked_mul(_base_balance_).unwrap()).unwrap();
-            r = U256::one().checked_sub(_k_).unwrap().checked_add(_k_.checked_mul(r).unwrap()).unwrap();
+            let mut r = div_floor(
+                base_target.checked_mul(base_target).unwrap(),
+                _base_balance_.checked_mul(_base_balance_).unwrap(),
+            )
+            .unwrap();
+            r = U256::one()
+                .checked_sub(_k_)
+                .unwrap()
+                .checked_add(_k_.checked_mul(r).unwrap())
+                .unwrap();
 
             expected = _oracle_.checked_mul(r).unwrap();
         }
 
-        assert_eq!(
-            v1_curve.get_mid_price().unwrap(),
-            expected
-        )
+        assert_eq!(v1_curve.get_mid_price().unwrap(), expected)
     }
 
     #[test]
@@ -683,15 +714,11 @@ mod test {
             _base_balance_,
             _quote_balance_,
             _target_base_token_amount_,
-            _target_quote_token_amount_
+            _target_quote_token_amount_,
         );
 
         let expected = general_integrate(b0, b1, b2, _oracle_, _k_).unwrap();
 
-        assert_eq!(
-            v1_curve._r_above_integrate(b0, b1, b2).unwrap(),
-            expected
-        )
+        assert_eq!(v1_curve._r_above_integrate(b0, b1, b2).unwrap(), expected)
     }
-
 }
