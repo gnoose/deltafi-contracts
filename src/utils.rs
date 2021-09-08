@@ -19,7 +19,7 @@ pub fn unpack_token_account(data: &[u8]) -> Result<Account, SwapError> {
 #[cfg(test)]
 pub mod test_utils {
     use crate::{
-        curve::ZERO_TS, fees::Fees, instruction::*, processor::Processor, state::SwapInfo,
+        curve::ZERO_TS, fees::Fees, instruction::*, processor::Processor, state::{SwapInfo, FarmInfo},
     };
     use solana_program::{
         account_info::AccountInfo, entrypoint::ProgramResult, instruction::Instruction,
@@ -232,6 +232,641 @@ pub mod test_utils {
             account_owner: &Pubkey,
             a_amount: u64,
             b_amount: u64,
+            pool_amount: u64,
+        ) -> (Pubkey, Account, Pubkey, Account, Pubkey, Account) {
+            let (token_a_key, token_a_account) = mint_token(
+                &TOKEN_PROGRAM_ID,
+                &self.token_a_mint_key,
+                &mut self.token_a_mint_account,
+                &mint_owner,
+                &account_owner,
+                a_amount,
+            );
+            let (token_b_key, token_b_account) = mint_token(
+                &TOKEN_PROGRAM_ID,
+                &self.token_b_mint_key,
+                &mut self.token_b_mint_account,
+                &mint_owner,
+                &account_owner,
+                b_amount,
+            );
+            let (pool_key, pool_account) = mint_token(
+                &TOKEN_PROGRAM_ID,
+                &self.pool_mint_key,
+                &mut self.pool_mint_account,
+                &self.authority_key,
+                &account_owner,
+                pool_amount,
+            );
+            (
+                token_a_key,
+                token_a_account,
+                token_b_key,
+                token_b_account,
+                pool_key,
+                pool_account,
+            )
+        }
+
+        fn get_admin_fee_key(&self, account_key: &Pubkey) -> Pubkey {
+            if *account_key == self.token_a_key {
+                return self.admin_fee_a_key;
+            } else if *account_key == self.token_b_key {
+                return self.admin_fee_b_key;
+            }
+            panic!("Could not find matching admin fee account");
+        }
+
+        fn get_admin_fee_account(&self, account_key: &Pubkey) -> &Account {
+            if *account_key == self.admin_fee_a_key {
+                return &self.admin_fee_a_account;
+            } else if *account_key == self.admin_fee_b_key {
+                return &self.admin_fee_b_account;
+            }
+            panic!("Could not find matching admin fee account");
+        }
+
+        fn set_admin_fee_account_(&mut self, account_key: &Pubkey, account: Account) {
+            if *account_key == self.admin_fee_a_key {
+                self.admin_fee_a_account = account;
+                return;
+            } else if *account_key == self.admin_fee_b_key {
+                self.admin_fee_b_account = account;
+                return;
+            }
+            panic!("Could not find matching admin fee account");
+        }
+
+        fn get_token_account(&self, account_key: &Pubkey) -> &Account {
+            if *account_key == self.token_a_key {
+                return &self.token_a_account;
+            } else if *account_key == self.token_b_key {
+                return &self.token_b_account;
+            }
+            panic!("Could not find matching swap token account");
+        }
+
+        fn set_token_account(&mut self, account_key: &Pubkey, account: Account) {
+            if *account_key == self.token_a_key {
+                self.token_a_account = account;
+                return;
+            } else if *account_key == self.token_b_key {
+                self.token_b_account = account;
+                return;
+            }
+            panic!("Could not find matching swap token account");
+        }
+
+        pub fn swap(
+            &mut self,
+            user_key: &Pubkey,
+            user_source_key: &Pubkey,
+            mut user_source_account: &mut Account,
+            swap_source_key: &Pubkey,
+            swap_destination_key: &Pubkey,
+            user_destination_key: &Pubkey,
+            mut user_destination_account: &mut Account,
+            amount_in: u64,
+            minimum_amount_out: u64,
+        ) -> ProgramResult {
+            // approve moving from user source account
+            do_process_instruction(
+                approve(
+                    &TOKEN_PROGRAM_ID,
+                    &user_source_key,
+                    &self.authority_key,
+                    &user_key,
+                    &[],
+                    amount_in,
+                )
+                .unwrap(),
+                vec![
+                    &mut user_source_account,
+                    &mut Account::default(),
+                    &mut Account::default(),
+                ],
+            )
+            .unwrap();
+
+            let admin_destination_key = self.get_admin_fee_key(swap_destination_key);
+            let mut admin_destination_account =
+                self.get_admin_fee_account(&admin_destination_key).clone();
+            let mut swap_source_account = self.get_token_account(swap_source_key).clone();
+            let mut swap_destination_account = self.get_token_account(swap_destination_key).clone();
+
+            // perform the swap
+            do_process_instruction(
+                swap(
+                    &SWAP_PROGRAM_ID,
+                    &TOKEN_PROGRAM_ID,
+                    &self.swap_key,
+                    &self.authority_key,
+                    &user_source_key,
+                    &swap_source_key,
+                    &swap_destination_key,
+                    &user_destination_key,
+                    &admin_destination_key,
+                    amount_in,
+                    minimum_amount_out,
+                )
+                .unwrap(),
+                vec![
+                    &mut self.swap_account,
+                    &mut Account::default(),
+                    &mut user_source_account,
+                    &mut swap_source_account,
+                    &mut swap_destination_account,
+                    &mut user_destination_account,
+                    &mut admin_destination_account,
+                    &mut Account::default(),
+                    &mut clock_account(ZERO_TS),
+                ],
+            )?;
+
+            self.set_admin_fee_account_(&admin_destination_key, admin_destination_account);
+            self.set_token_account(swap_source_key, swap_source_account);
+            self.set_token_account(swap_destination_key, swap_destination_account);
+
+            Ok(())
+        }
+
+        pub fn deposit(
+            &mut self,
+            depositor_key: &Pubkey,
+            depositor_token_a_key: &Pubkey,
+            mut depositor_token_a_account: &mut Account,
+            depositor_token_b_key: &Pubkey,
+            mut depositor_token_b_account: &mut Account,
+            depositor_pool_key: &Pubkey,
+            mut depositor_pool_account: &mut Account,
+            amount_a: u64,
+            amount_b: u64,
+            min_mint_amount: u64,
+        ) -> ProgramResult {
+            do_process_instruction(
+                approve(
+                    &TOKEN_PROGRAM_ID,
+                    &depositor_token_a_key,
+                    &self.authority_key,
+                    &depositor_key,
+                    &[],
+                    amount_a,
+                )
+                .unwrap(),
+                vec![
+                    &mut depositor_token_a_account,
+                    &mut Account::default(),
+                    &mut Account::default(),
+                ],
+            )
+            .unwrap();
+
+            do_process_instruction(
+                approve(
+                    &TOKEN_PROGRAM_ID,
+                    &depositor_token_b_key,
+                    &self.authority_key,
+                    &depositor_key,
+                    &[],
+                    amount_b,
+                )
+                .unwrap(),
+                vec![
+                    &mut depositor_token_b_account,
+                    &mut Account::default(),
+                    &mut Account::default(),
+                ],
+            )
+            .unwrap();
+
+            // perform deposit
+            do_process_instruction(
+                deposit(
+                    &SWAP_PROGRAM_ID,
+                    &TOKEN_PROGRAM_ID,
+                    &self.swap_key,
+                    &self.authority_key,
+                    &depositor_token_a_key,
+                    &depositor_token_b_key,
+                    &self.token_a_key,
+                    &self.token_b_key,
+                    &self.pool_mint_key,
+                    &depositor_pool_key,
+                    amount_a,
+                    amount_b,
+                    min_mint_amount,
+                )
+                .unwrap(),
+                vec![
+                    &mut self.swap_account,
+                    &mut Account::default(),
+                    &mut depositor_token_a_account,
+                    &mut depositor_token_b_account,
+                    &mut self.token_a_account,
+                    &mut self.token_b_account,
+                    &mut self.pool_mint_account,
+                    &mut depositor_pool_account,
+                    &mut Account::default(),
+                    &mut clock_account(ZERO_TS),
+                ],
+            )
+        }
+
+        pub fn withdraw(
+            &mut self,
+            user_key: &Pubkey,
+            pool_key: &Pubkey,
+            mut pool_account: &mut Account,
+            token_a_key: &Pubkey,
+            mut token_a_account: &mut Account,
+            token_b_key: &Pubkey,
+            mut token_b_account: &mut Account,
+            pool_amount: u64,
+            minimum_a_amount: u64,
+            minimum_b_amount: u64,
+        ) -> ProgramResult {
+            // approve swap program to take out pool tokens
+            do_process_instruction(
+                approve(
+                    &TOKEN_PROGRAM_ID,
+                    &pool_key,
+                    &self.authority_key,
+                    &user_key,
+                    &[],
+                    pool_amount,
+                )
+                .unwrap(),
+                vec![
+                    &mut pool_account,
+                    &mut Account::default(),
+                    &mut Account::default(),
+                ],
+            )
+            .unwrap();
+
+            // perform withraw
+            do_process_instruction(
+                withdraw(
+                    &SWAP_PROGRAM_ID,
+                    &TOKEN_PROGRAM_ID,
+                    &self.swap_key,
+                    &self.authority_key,
+                    &self.pool_mint_key,
+                    &pool_key,
+                    &self.token_a_key,
+                    &self.token_b_key,
+                    &token_a_key,
+                    &token_b_key,
+                    &self.admin_fee_a_key,
+                    &self.admin_fee_b_key,
+                    pool_amount,
+                    minimum_a_amount,
+                    minimum_b_amount,
+                )
+                .unwrap(),
+                vec![
+                    &mut self.swap_account,
+                    &mut Account::default(),
+                    &mut self.pool_mint_account,
+                    &mut pool_account,
+                    &mut self.token_a_account,
+                    &mut self.token_b_account,
+                    &mut token_a_account,
+                    &mut token_b_account,
+                    &mut self.admin_fee_a_account,
+                    &mut self.admin_fee_b_account,
+                    &mut Account::default(),
+                ],
+            )?;
+
+            Ok(())
+        }
+
+        pub fn withdraw_one(
+            &mut self,
+            user_key: &Pubkey,
+            pool_key: &Pubkey,
+            mut pool_account: &mut Account,
+            dest_token_key: &Pubkey,
+            mut dest_token_account: &mut Account,
+            pool_amount: u64,
+            minimum_amount: u64,
+        ) -> ProgramResult {
+            // approve swap program to take out pool tokens
+            do_process_instruction(
+                approve(
+                    &TOKEN_PROGRAM_ID,
+                    &pool_key,
+                    &self.authority_key,
+                    &user_key,
+                    &[],
+                    pool_amount,
+                )
+                .unwrap(),
+                vec![
+                    &mut pool_account,
+                    &mut Account::default(),
+                    &mut Account::default(),
+                ],
+            )
+            .unwrap();
+
+            // perform withraw_one
+            do_process_instruction(
+                withdraw_one(
+                    &SWAP_PROGRAM_ID,
+                    &TOKEN_PROGRAM_ID,
+                    &self.swap_key,
+                    &self.authority_key,
+                    &self.pool_mint_key,
+                    &pool_key,
+                    &self.token_a_key,
+                    &self.token_b_key,
+                    &dest_token_key,
+                    &self.admin_fee_a_key,
+                    pool_amount,
+                    minimum_amount,
+                )
+                .unwrap(),
+                vec![
+                    &mut self.swap_account,
+                    &mut Account::default(),
+                    &mut self.pool_mint_account,
+                    &mut pool_account,
+                    &mut self.token_a_account,
+                    &mut self.token_b_account,
+                    &mut dest_token_account,
+                    &mut self.admin_fee_a_account,
+                    &mut Account::default(),
+                    &mut clock_account(ZERO_TS),
+                ],
+            )
+        }
+
+        /** Admin functions **/
+
+        pub fn ramp_a(
+            &mut self,
+            target_amp: u64,
+            current_ts: i64,
+            stop_ramp_ts: i64,
+        ) -> ProgramResult {
+            do_process_instruction(
+                ramp_a(
+                    &SWAP_PROGRAM_ID,
+                    &self.swap_key,
+                    &self.authority_key,
+                    &self.admin_key,
+                    target_amp,
+                    stop_ramp_ts,
+                )
+                .unwrap(),
+                vec![
+                    &mut self.swap_account,
+                    &mut Account::default(),
+                    &mut self.admin_account,
+                    &mut clock_account(current_ts),
+                ],
+            )
+        }
+
+        pub fn stop_ramp_a(&mut self, current_ts: i64) -> ProgramResult {
+            do_process_instruction(
+                stop_ramp_a(
+                    &SWAP_PROGRAM_ID,
+                    &self.swap_key,
+                    &self.authority_key,
+                    &self.admin_key,
+                )
+                .unwrap(),
+                vec![
+                    &mut self.swap_account,
+                    &mut Account::default(),
+                    &mut self.admin_account,
+                    &mut clock_account(current_ts),
+                ],
+            )
+        }
+
+        pub fn pause(&mut self) -> ProgramResult {
+            do_process_instruction(
+                pause(
+                    &SWAP_PROGRAM_ID,
+                    &self.swap_key,
+                    &self.authority_key,
+                    &self.admin_key,
+                )
+                .unwrap(),
+                vec![
+                    &mut self.swap_account,
+                    &mut Account::default(),
+                    &mut self.admin_account,
+                ],
+            )
+        }
+
+        pub fn unpause(&mut self) -> ProgramResult {
+            do_process_instruction(
+                unpause(
+                    &SWAP_PROGRAM_ID,
+                    &self.swap_key,
+                    &self.authority_key,
+                    &self.admin_key,
+                )
+                .unwrap(),
+                vec![
+                    &mut self.swap_account,
+                    &mut Account::default(),
+                    &mut self.admin_account,
+                ],
+            )
+        }
+
+        pub fn set_admin_fee_account(
+            &mut self,
+            new_admin_fee_key: &Pubkey,
+            new_admin_fee_account: &Account,
+        ) -> ProgramResult {
+            do_process_instruction(
+                set_fee_account(
+                    &SWAP_PROGRAM_ID,
+                    &self.swap_key,
+                    &self.authority_key,
+                    &self.admin_key,
+                    new_admin_fee_key,
+                )
+                .unwrap(),
+                vec![
+                    &mut self.swap_account,
+                    &mut Account::default(),
+                    &mut self.admin_account,
+                    &mut new_admin_fee_account.clone(),
+                ],
+            )
+        }
+
+        pub fn apply_new_admin(&mut self, current_ts: i64) -> ProgramResult {
+            do_process_instruction(
+                apply_new_admin(
+                    &SWAP_PROGRAM_ID,
+                    &self.swap_key,
+                    &self.authority_key,
+                    &self.admin_key,
+                )
+                .unwrap(),
+                vec![
+                    &mut self.swap_account,
+                    &mut Account::default(),
+                    &mut self.admin_account,
+                    &mut clock_account(current_ts),
+                ],
+            )
+        }
+
+        pub fn commit_new_admin(
+            &mut self,
+            new_admin_key: &Pubkey,
+            current_ts: i64,
+        ) -> ProgramResult {
+            do_process_instruction(
+                commit_new_admin(
+                    &SWAP_PROGRAM_ID,
+                    &self.swap_key,
+                    &self.authority_key,
+                    &self.admin_key,
+                    new_admin_key,
+                )
+                .unwrap(),
+                vec![
+                    &mut self.swap_account,
+                    &mut Account::default(),
+                    &mut self.admin_account,
+                    &mut Account::default(),
+                    &mut clock_account(current_ts),
+                ],
+            )
+        }
+
+        pub fn set_new_fees(&mut self, new_fees: Fees) -> ProgramResult {
+            do_process_instruction(
+                set_new_fees(
+                    &SWAP_PROGRAM_ID,
+                    &self.swap_key,
+                    &self.authority_key,
+                    &self.admin_key,
+                    new_fees,
+                )
+                .unwrap(),
+                vec![
+                    &mut self.swap_account,
+                    &mut Account::default(),
+                    &mut self.admin_account,
+                ],
+            )
+        }
+    }
+
+    pub struct FarmAccountInfo {
+        pub nonce: u8,
+        pub authority_key: Pubkey,
+        pub farm_base_key: Pubkey,
+        pub farm_base_account: Account,
+        pub farm_key: Pubkey,
+        pub farm_account: Account,
+        pub pool_mint_key: Pubkey,
+        pub pool_mint_account: Account,
+        pub pool_token_key: Pubkey,
+        pub pool_token_account: Account,
+        pub token_deltafi_key: Pubkey,
+        pub token_deltafi_account: Account,
+        pub token_deltafi_mint_key: Pubkey,
+        pub token_deltafi_mint_account: Account,
+        pub admin_key: Pubkey,
+        pub admin_account: Account,
+        pub admin_fee_deltafi_key: Pubkey,
+        pub admin_fee_deltafi_account: Account,
+        pub fees: Fees,
+    }
+
+    impl FarmAccountInfo {
+        pub fn new(
+            user_key: &Pubkey,
+            token_pool_amount: u64,
+            fees: Fees,
+        ) -> Self {
+            let farm_base_key = pubkey_rand();
+            let farm_base_account = Account::new(0, FarmInfo::get_packed_len(), &SWAP_PROGRAM_ID);
+            let (authority_key, nonce) =
+                Pubkey::find_program_address(&[&farm_base_key.to_bytes()[..]], &SWAP_PROGRAM_ID);            
+                
+            let farm_key = pubkey_rand();
+            let farm_account = Account::new(0, FarmInfo::get_packed_len(), &SWAP_PROGRAM_ID);
+            let (authority_key, nonce) =
+                Pubkey::find_program_address(&[&farm_key.to_bytes()[..]], &SWAP_PROGRAM_ID);
+
+            let (pool_mint_key, mut pool_mint_account) = create_mint(
+                &TOKEN_PROGRAM_ID,
+                &authority_key,
+                DEFAULT_TOKEN_DECIMALS,
+                None,
+            );
+            let (pool_token_key, pool_token_account) = mint_token(
+                &TOKEN_PROGRAM_ID,
+                &pool_mint_key,
+                &mut pool_mint_account,
+                &authority_key,
+                &user_key,
+                0,
+            );
+            let (token_deltafi_mint_key, mut token_deltafi_mint_account) =
+                create_mint(&TOKEN_PROGRAM_ID, &user_key, DEFAULT_TOKEN_DECIMALS, None);
+            let (token_deltafi_key, token_deltafi_account) = mint_token(
+                &TOKEN_PROGRAM_ID,
+                &token_deltafi_mint_key,
+                &mut token_deltafi_mint_account,
+                &user_key,
+                &authority_key,
+                token_pool_amount,
+            );
+            let (admin_fee_deltafi_key, admin_fee_deltafi_account) = mint_token(
+                &TOKEN_PROGRAM_ID,
+                &token_deltafi_mint_key,
+                &mut token_deltafi_mint_account,
+                &user_key,
+                &authority_key,
+                0,
+            );
+
+            let admin_account = Account::default();
+
+            FarmAccountInfo {
+                nonce,
+                authority_key,
+                farm_base_key,
+                farm_base_account,
+                farm_key,
+                farm_account,
+                pool_mint_key,
+                pool_mint_account,
+                pool_token_key,
+                pool_token_account,
+                token_deltafi_mint_key,
+                token_deltafi_mint_account,
+                token_deltafi_key,
+                token_deltafi_account,
+                admin_key: admin_account.owner,
+                admin_account,
+                admin_fee_deltafi_key,
+                admin_fee_deltafi_account,
+                fees,
+            }
+        }
+
+        pub fn setup_token_accounts(
+            &mut self,
+            mint_owner: &Pubkey,
+            account_owner: &Pubkey,
+            lp_amount: u64,
             pool_amount: u64,
         ) -> (Pubkey, Account, Pubkey, Account, Pubkey, Account) {
             let (token_a_key, token_a_account) = mint_token(

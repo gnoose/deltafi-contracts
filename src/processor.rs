@@ -866,7 +866,7 @@ impl Processor {
     pub fn process_farming_withdraw(
         program_id: &Pubkey,
         pool_token_amount: u64,
-        minimum_pool_token_amount: u64,
+        min_pool_token_amount: u64,
         accounts: &[AccountInfo],
     ) -> ProgramResult {
         let account_info_iter = &mut accounts.iter();
@@ -1188,13 +1188,13 @@ impl Processor {
             }
             FarmingInstruction::Withdraw(FarmingWithdrawData {
                 pool_token_amount,
-                minimum_pool_token_amount,
+                min_pool_token_amount,
             }) => {
                 msg!("Instruction: Farm Withdraw");
                 Self::process_farming_withdraw(
                     program_id,
                     pool_token_amount,
-                    minimum_pool_token_amount,
+                    min_pool_token_amount,
                     accounts,
                 )
             }
@@ -4127,5 +4127,26 @@ mod tests {
                 )
             );
         }
+    }
+
+    #[test]
+    fn test_farming_deposite() {
+        let user_key = pubkey_rand();
+        let depositor_key = pubkey_rand();
+    }
+
+    #[test]
+    fn test_farming_withdraw() {
+        
+    }
+
+    #[test]
+    fn test_farming_mergency_withdraw() {
+        
+    }
+
+    #[test]
+    fn test_farming_pending_deltafi() {
+        
     }
 }

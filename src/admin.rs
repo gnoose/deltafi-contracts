@@ -63,15 +63,17 @@ pub fn process_admin_instruction(
         }
         AdminInstruction::InitializeFarm(FarmData {
             alloc_point,
+            reward_unit,
         }) => {
             msg!("Instruction: Initialize Farm");
-            initialize_farm(program_id, alloc_point, accounts)
+            initialize_farm(program_id, alloc_point, reward_unit, accounts)
         }
         AdminInstruction::SetFarm(FarmData {
-            alloc_point
+            alloc_point,
+            reward_unit,
         }) => {
             msg!("Instruction:: SetFarm");
-            set_farm(program_id, alloc_point, accounts)
+            set_farm(program_id, alloc_point, reward_unit, accounts)
         }
     }
 }
@@ -399,6 +401,7 @@ pub fn initialize_farm(
 fn set_farm(
     program_id: &Pubkey,
     alloc_point: u64,
+    reward_unit: u64,
     accounts: &[AccountInfo]
 ) -> ProgramResult {
     let account_info_iter = &mut accounts.iter();
@@ -1069,5 +1072,15 @@ mod tests {
             let swap_info = SwapInfo::unpack(&accounts.swap_account.data).unwrap();
             assert_eq!(swap_info.fees, new_fees);
         }
+    }
+
+    #[test]
+    fn test_initialize_farm() {
+
+    }
+
+    #[test]
+    fn test_set_farm() {
+        
     }
 }
