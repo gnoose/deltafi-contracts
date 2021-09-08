@@ -214,7 +214,7 @@ impl V1curve {
     // ============ Helper functions ============
 
     /// return baseTarget, quoteTarget
-    fn get_expected_target(&self) -> Option<(U256, U256)> {
+    fn _get_expected_target(&self) -> Option<(U256, U256)> {
         let q = self._quote_balance_;
         let b = self._base_balance_;
 
@@ -241,8 +241,8 @@ impl V1curve {
     }
 
     /// return midPrice
-    fn get_mid_price(&self) -> Option<U256> {
-        let (base_target, quote_target) = self.get_expected_target()?;
+    fn _get_mid_price(&self) -> Option<U256> {
+        let (base_target, quote_target) = self._get_expected_target()?;
 
         if self._r_status_ == RStatus::BelowOne {
             let mut r = div_floor(
@@ -636,7 +636,7 @@ mod test {
             );
         }
 
-        assert_eq!(v1_curve.get_expected_target().unwrap(), expected)
+        assert_eq!(v1_curve._get_expected_target().unwrap(), expected)
     }
 
     #[test]
@@ -659,7 +659,7 @@ mod test {
             _target_quote_token_amount_,
         );
 
-        let (base_target, quote_target) = v1_curve.get_expected_target().unwrap();
+        let (base_target, quote_target) = v1_curve._get_expected_target().unwrap();
 
         let expected;
         if _r_status_ == RStatus::BelowOne {
@@ -690,7 +690,7 @@ mod test {
             expected = _oracle_.checked_mul(r).unwrap();
         }
 
-        assert_eq!(v1_curve.get_mid_price().unwrap(), expected)
+        assert_eq!(v1_curve._get_mid_price().unwrap(), expected)
     }
 
     #[test]
