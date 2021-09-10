@@ -1,9 +1,8 @@
 //! Implement pricing of PMM
 use crate::{
-    bn::U256,
+    bn::FixedU256,
     math::{
-        div_floor, general_integrate, mul_ceil, solve_quadratic_function_for_target,
-        solve_quadratic_function_for_trade,
+        general_integrate, solve_quadratic_function_for_target, solve_quadratic_function_for_trade,
     },
 };
 
@@ -32,63 +31,63 @@ impl Default for RStatus {
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct V1curve {
     /// slope variable
-    pub _k_: U256,
+    pub k: FixedU256,
 
     /// r status
-    pub _r_status_: RStatus,
+    pub r_status: RStatus,
 
     /// oracle price
-    pub _oracle_: U256,
+    pub oracle: FixedU256,
 
     /// base token balance
-    pub _base_balance_: U256,
+    pub base_balance: FixedU256,
 
     /// quote token balance
-    pub _quote_balance_: U256,
+    pub quote_balance: FixedU256,
 
     /// target base token amount
-    pub _target_base_token_amount_: U256,
+    pub target_base_token_amount: FixedU256,
 
     /// target quote token amount
-    pub _target_quote_token_amount_: U256,
+    pub target_quote_token_amount: FixedU256,
 }
 
 impl V1curve {
     /// initialize function for V1curve
     pub fn new(
-        _k_: U256,
-        _r_status_: RStatus,
-        _oracle_: U256,
-        _base_balance_: U256,
-        _quote_balance_: U256,
-        _target_base_token_amount_: U256,
-        _target_quote_token_amount_: U256,
+        k: FixedU256,
+        r_status: RStatus,
+        oracle: FixedU256,
+        base_balance: FixedU256,
+        quote_balance: FixedU256,
+        target_base_token_amount: FixedU256,
+        target_quote_token_amount: FixedU256,
     ) -> Self {
         Self {
-            _k_,
-            _r_status_,
-            _oracle_,
-            _base_balance_,
-            _quote_balance_,
-            _target_base_token_amount_,
-            _target_quote_token_amount_,
+            k,
+            r_status,
+            oracle,
+            base_balance,
+            quote_balance,
+            target_base_token_amount,
+            target_quote_token_amount,
         }
     }
-    // ================== R = 1 cases ==================
 
+    // ================== R = 1 cases ==================
     /// return receiveQuoteToken
-    pub fn _r_one_sell_base_token(
+    pub fn r_one_sell_base_token(
         &self,
-        amount: U256,
-        target_quote_token_amount: U256,
-    ) -> Option<U256> {
-        let i = self._oracle_;
+        amount: FixedU256,
+        target_quote_token_amount: FixedU256,
+    ) -> Option<FixedU256> {
+        let i = self.oracle;
         let q2 = solve_quadratic_function_for_trade(
             target_quote_token_amount,
             target_quote_token_amount,
-            i.checked_mul(amount)?,
+            i.checked_mul_floor(amount)?,
             false,
-            self._k_,
+            self.k,
         )?;
 
         // in theory Q2 <= target_quote_token_amount
@@ -98,627 +97,232 @@ impl V1curve {
     }
 
     /// return payQuoteToken
-    pub fn _r_one_buy_base_token(
+    pub fn r_one_buy_base_token(
         &self,
-        amount: U256,
-        target_base_token_amount: U256,
-    ) -> Option<U256> {
+        amount: FixedU256,
+        target_base_token_amount: FixedU256,
+    ) -> Option<FixedU256> {
         let b2 = target_base_token_amount.checked_sub(amount)?;
 
-        self._r_above_integrate(target_base_token_amount, target_base_token_amount, b2)
+        self.r_above_integrate(target_base_token_amount, target_base_token_amount, b2)
     }
 
     // ============ R < 1 cases ============
 
     /// return receieQuoteToken
-    pub fn _r_below_sell_base_token(
+    pub fn r_below_sell_base_token(
         &self,
-        amount: U256,
-        quote_balance: U256,
-        target_quote_amount: U256,
-    ) -> Option<U256> {
-        let i = self._oracle_;
+        amount: FixedU256,
+        quote_balance: FixedU256,
+        target_quote_amount: FixedU256,
+    ) -> Option<FixedU256> {
+        let i = self.oracle;
         let q2 = solve_quadratic_function_for_trade(
             target_quote_amount,
             quote_balance,
-            i.checked_mul(amount)?,
+            i.checked_mul_floor(amount)?,
             false,
-            self._k_,
+            self.k,
         )?;
 
         quote_balance.checked_sub(q2)
     }
 
     /// return payQuoteToken
-    pub fn _r_below_buy_base_token(
+    pub fn r_below_buy_base_token(
         &self,
-        amount: U256,
-        quote_balance: U256,
-        target_quote_amount: U256,
-    ) -> Option<U256> {
+        amount: FixedU256,
+        quote_balance: FixedU256,
+        target_quote_amount: FixedU256,
+    ) -> Option<FixedU256> {
         // Here we don't require amount less than some value
         // Because it is limited at upper function
 
-        let i = self._oracle_;
+        let i = self.oracle;
         let q2 = solve_quadratic_function_for_trade(
             target_quote_amount,
             quote_balance,
-            mul_ceil(i, amount)?,
+            i.checked_mul_ceil(amount)?,
             true,
-            self._k_,
+            self.k,
         )?;
 
         q2.checked_sub(quote_balance)
     }
 
     /// return payQuoteToken
-    pub fn _r_below_back_to_one(&self) -> Option<U256> {
+    pub fn r_below_back_to_one(&self) -> Option<FixedU256> {
         // important: carefully design the system to make sure spareBase always greater than or equal to 0
 
         let spare_base = self
-            ._base_balance_
-            .checked_sub(self._target_base_token_amount_)?;
-        let price = self._oracle_;
-        let fair_amount = spare_base.checked_mul(price)?;
+            .base_balance
+            .checked_sub(self.target_base_token_amount)?;
+        let price = self.oracle;
+        let fair_amount = spare_base.checked_mul_floor(price)?;
         let new_target_quote =
-            solve_quadratic_function_for_target(self._quote_balance_, self._k_, fair_amount)?;
+            solve_quadratic_function_for_target(self.quote_balance, self.k, fair_amount)?;
 
-        new_target_quote.checked_sub(self._quote_balance_)
+        new_target_quote.checked_sub(self.quote_balance)
     }
 
     // ============ R > 1 cases ============
 
     /// return payQuoteToken
-    pub fn _r_above_buy_base_token(
+    pub fn r_above_buy_base_token(
         &self,
-        amount: U256,
-        base_balance: U256,
-        target_base_amount: U256,
-    ) -> Option<U256> {
+        amount: FixedU256,
+        base_balance: FixedU256,
+        target_base_amount: FixedU256,
+    ) -> Option<FixedU256> {
         //require(amount < baseBalance, "DODO_BASE_BALANCE_NOT_ENOUGH");
 
         let b2 = base_balance.checked_sub(amount)?;
 
-        self._r_above_integrate(target_base_amount, base_balance, b2)
+        self.r_above_integrate(target_base_amount, base_balance, b2)
     }
 
     /// return receiveQuoteToken
-    pub fn _r_above_sell_base_token(
+    pub fn r_above_sell_base_token(
         &self,
-        amount: U256,
-        base_balance: U256,
-        target_base_amount: U256,
-    ) -> Option<U256> {
+        amount: FixedU256,
+        base_balance: FixedU256,
+        target_base_amount: FixedU256,
+    ) -> Option<FixedU256> {
         // here we don't require B1 <= targetBaseAmount
         // Because it is limited at upper function
 
         let b1 = base_balance.checked_add(amount)?;
 
-        self._r_above_integrate(target_base_amount, b1, base_balance)
+        self.r_above_integrate(target_base_amount, b1, base_balance)
     }
 
     /// return payBaseToken
-    pub fn _r_above_back_to_one(&self) -> Option<U256> {
+    pub fn r_above_back_to_one(&self) -> Option<FixedU256> {
         let spare_quote = self
-            ._quote_balance_
-            .checked_sub(self._target_quote_token_amount_)?;
-        let price = self._oracle_;
-        let fair_amount = div_floor(spare_quote, price)?;
+            .quote_balance
+            .checked_sub(self.target_quote_token_amount)?;
+        let price = self.oracle;
+        let fair_amount = spare_quote.checked_div_floor(price)?;
         let new_target_base =
-            solve_quadratic_function_for_target(self._base_balance_, self._k_, fair_amount)?;
+            solve_quadratic_function_for_target(self.base_balance, self.k, fair_amount)?;
 
-        new_target_base.checked_sub(self._base_balance_)
+        new_target_base.checked_sub(self.base_balance)
     }
 
     // helper functions
     // ============ Helper functions ============
 
     /// return baseTarget, quoteTarget
-    fn _get_expected_target(&self) -> Option<(U256, U256)> {
-        let q = self._quote_balance_;
-        let b = self._base_balance_;
+    fn get_expected_target(&self) -> Option<(FixedU256, FixedU256)> {
+        let q = self.quote_balance;
+        let b = self.base_balance;
 
-        if self._r_status_ == RStatus::One {
+        if self.r_status == RStatus::One {
             Some((
-                self._target_base_token_amount_,
-                self._target_quote_token_amount_,
+                self.target_base_token_amount,
+                self.target_quote_token_amount,
             ))
-        } else if self._r_status_ == RStatus::BelowOne {
-            let pay_quote_token = self._r_below_back_to_one()?;
+        } else if self.r_status == RStatus::BelowOne {
+            let pay_quote_token = self.r_below_back_to_one()?;
 
             Some((
-                self._target_base_token_amount_,
+                self.target_base_token_amount,
                 q.checked_add(pay_quote_token)?,
             ))
         } else {
-            let pay_base_token = self._r_above_back_to_one()?;
+            let pay_base_token = self.r_above_back_to_one()?;
 
             Some((
                 b.checked_add(pay_base_token)?,
-                self._target_quote_token_amount_,
+                self.target_quote_token_amount,
             ))
         }
     }
 
     /// return midPrice
-    fn _get_mid_price(&self) -> Option<U256> {
-        let (base_target, quote_target) = self._get_expected_target()?;
+    fn get_mid_price(&self) -> Option<FixedU256> {
+        let (base_target, quote_target) = self.get_expected_target()?;
 
-        if self._r_status_ == RStatus::BelowOne {
-            let mut r = div_floor(
-                quote_target.checked_mul(quote_target)?,
-                self._quote_balance_.checked_mul(self._quote_balance_)?,
-            )?;
-            r = U256::one()
-                .checked_sub(self._k_)?
-                .checked_add(self._k_.checked_mul(r)?)?;
+        if self.r_status == RStatus::BelowOne {
+            let mut r = quote_target
+                .checked_mul_floor(quote_target)?
+                .checked_div_floor(self.quote_balance.checked_mul_floor(self.quote_balance)?)?;
+            r = FixedU256::one()
+                .checked_sub(self.k)?
+                .checked_add(self.k.checked_mul_floor(r)?)?;
 
-            div_floor(self._oracle_, r)
+            self.oracle.checked_div_floor(r)
         } else {
-            let mut r = div_floor(
-                base_target.checked_mul(base_target)?,
-                self._base_balance_.checked_mul(self._base_balance_)?,
-            )?;
-            r = U256::one()
-                .checked_sub(self._k_)?
-                .checked_add(self._k_.checked_mul(r)?)?;
+            let mut r = base_target
+                .checked_mul_floor(base_target)?
+                .checked_div_floor(self.base_balance.checked_mul_floor(self.base_balance)?)?;
+            r = FixedU256::one()
+                .checked_sub(self.k)?
+                .checked_add(self.k.checked_mul_floor(r)?)?;
 
-            self._oracle_.checked_mul(r)
+            self.oracle.checked_mul_floor(r)
         }
     }
 
-    fn _r_above_integrate(&self, b0: U256, b1: U256, b2: U256) -> Option<U256> {
-        let i = self._oracle_;
+    fn r_above_integrate(&self, v0: FixedU256, v1: FixedU256, v2: FixedU256) -> Option<FixedU256> {
+        let i = self.oracle;
 
-        general_integrate(b0, b1, b2, i, self._k_)
+        general_integrate(v0, v1, v2, i, self.k)
     }
 }
 
 #[cfg(test)]
-mod test {
-
-    use rand::Rng;
-
-    use super::*;
+mod tests {
     use crate::{
-        bn::U256,
-        math::{solve_quadratic_function_for_target, solve_quadratic_function_for_trade},
+        bn::FixedU256,
         v1curve::{RStatus, V1curve},
     };
 
-    /// const variable definitions
-    pub const ZERO_V: u64 = 0 as u64;
-    pub const ONE_V: u64 = 1 as u64;
-    pub const TWO_V: u64 = 2 as u64;
-    pub const FOURTH_V: u64 = u64::MAX / 4;
-    pub const HALF_V: u64 = u64::MAX / 2;
-    pub const MAX_V: u64 = u64::MAX;
-
     #[test]
-    fn test_r_one_sell_base_token() {
-        let _k_: U256 = rand::thread_rng().gen_range(ZERO_V, ONE_V).into();
-        let _r_status_ = RStatus::One;
-        let _oracle_: U256 = rand::thread_rng().gen_range(ONE_V, MAX_V).into();
-        let _base_balance_: U256 = rand::thread_rng().gen_range(ONE_V, MAX_V).into();
-        let _quote_balance_: U256 = rand::thread_rng().gen_range(ONE_V, MAX_V).into();
-        let _target_base_token_amount_: U256 = rand::thread_rng().gen_range(ONE_V, MAX_V).into();
-        let _target_quote_token_amount_: U256 = rand::thread_rng().gen_range(ONE_V, MAX_V).into();
-
-        let amount: U256 = rand::thread_rng().gen_range(ONE_V, MAX_V).into();
-        let target_quote_token_amount: U256 = rand::thread_rng().gen_range(ONE_V, MAX_V).into();
+    fn basic() {
+        let k: FixedU256 = FixedU256::new_from_float(0.5.into(), 18);
+        let r_status = RStatus::One;
+        let oracle: FixedU256 = FixedU256::new_from_float(100.into(), 18);
+        let base_balance: FixedU256 = FixedU256::new_from_float(1000.into(), 18);
+        let quote_balance: FixedU256 = FixedU256::new_from_float(2000.into(), 18);
+        let target_base_token_amount: FixedU256 = FixedU256::new_from_float(500.into(), 18);
+        let target_quote_token_amount: FixedU256 = FixedU256::new_from_float(1000.into(), 18);
 
         let v1_curve = V1curve::new(
-            _k_,
-            _r_status_,
-            _oracle_,
-            _base_balance_,
-            _quote_balance_,
-            _target_base_token_amount_,
-            _target_quote_token_amount_,
-        );
-
-        let q2 = solve_quadratic_function_for_trade(
-            _target_quote_token_amount_,
-            _target_quote_token_amount_,
-            _oracle_.checked_mul(amount).unwrap(),
-            false,
-            _k_,
-        )
-        .unwrap();
-
-        let expected = target_quote_token_amount.checked_sub(q2).unwrap();
-        assert_eq!(
-            v1_curve
-                ._r_one_sell_base_token(amount, target_quote_token_amount)
-                .unwrap(),
-            expected
-        )
-    }
-
-    #[test]
-    fn test_r_one_buy_base_token() {
-        let _k_: U256 = rand::thread_rng().gen_range(ZERO_V, ONE_V).into();
-        let _r_status_ = RStatus::One;
-        let _oracle_: U256 = rand::thread_rng().gen_range(ONE_V, MAX_V).into();
-        let _base_balance_: U256 = rand::thread_rng().gen_range(ONE_V, MAX_V).into();
-        let _quote_balance_: U256 = rand::thread_rng().gen_range(ONE_V, MAX_V).into();
-        let _target_base_token_amount_: U256 = rand::thread_rng().gen_range(ONE_V, MAX_V).into();
-        let _target_quote_token_amount_: U256 = rand::thread_rng().gen_range(ONE_V, MAX_V).into();
-
-        let amount: U256 = rand::thread_rng().gen_range(ONE_V, FOURTH_V).into();
-        let target_base_token_amount: U256 = rand::thread_rng().gen_range(HALF_V, MAX_V).into();
-
-        let v1_curve = V1curve::new(
-            _k_,
-            _r_status_,
-            _oracle_,
-            _base_balance_,
-            _quote_balance_,
-            _target_base_token_amount_,
-            _target_quote_token_amount_,
-        );
-
-        let b2 = target_base_token_amount.checked_sub(amount).unwrap();
-
-        let expected = v1_curve
-            ._r_above_integrate(target_base_token_amount, target_base_token_amount, b2)
-            .unwrap();
-
-        assert_eq!(
-            v1_curve
-                ._r_one_buy_base_token(amount, target_base_token_amount)
-                .unwrap(),
-            expected
-        )
-    }
-
-    #[test]
-    fn test_r_below_sell_base_token() {
-        let _k_: U256 = rand::thread_rng().gen_range(ZERO_V, ONE_V).into();
-        let _r_status_ = RStatus::One;
-        let _oracle_: U256 = rand::thread_rng().gen_range(ONE_V, MAX_V).into();
-        let _base_balance_: U256 = rand::thread_rng().gen_range(ONE_V, MAX_V).into();
-        let _quote_balance_: U256 = rand::thread_rng().gen_range(ONE_V, MAX_V).into();
-        let _target_base_token_amount_: U256 = rand::thread_rng().gen_range(ONE_V, MAX_V).into();
-        let _target_quote_token_amount_: U256 = rand::thread_rng().gen_range(ONE_V, MAX_V).into();
-
-        let amount: U256 = rand::thread_rng().gen_range(ONE_V, FOURTH_V).into();
-        let quote_balance: U256 = rand::thread_rng().gen_range(HALF_V, MAX_V).into();
-        let target_quote_amount: U256 = rand::thread_rng().gen_range(HALF_V, MAX_V).into();
-
-        let v1_curve = V1curve::new(
-            _k_,
-            _r_status_,
-            _oracle_,
-            _base_balance_,
-            _quote_balance_,
-            _target_base_token_amount_,
-            _target_quote_token_amount_,
-        );
-
-        let q2 = solve_quadratic_function_for_trade(
-            target_quote_amount,
+            k,
+            r_status,
+            oracle,
+            base_balance,
             quote_balance,
-            _oracle_.checked_mul(amount).unwrap(),
-            false,
-            _k_,
-        )
-        .unwrap();
-
-        let expected = quote_balance.checked_sub(q2).unwrap();
-
-        assert_eq!(
-            v1_curve
-                ._r_below_sell_base_token(amount, quote_balance, target_quote_amount)
-                .unwrap(),
-            expected
-        )
-    }
-
-    #[test]
-    fn test_r_below_buy_base_token() {
-        let _k_: U256 = rand::thread_rng().gen_range(ZERO_V, ONE_V).into();
-        let _r_status_ = RStatus::One;
-        let _oracle_: U256 = rand::thread_rng().gen_range(ONE_V, MAX_V).into();
-        let _base_balance_: U256 = rand::thread_rng().gen_range(ONE_V, MAX_V).into();
-        let _quote_balance_: U256 = rand::thread_rng().gen_range(ONE_V, MAX_V).into();
-        let _target_base_token_amount_: U256 = rand::thread_rng().gen_range(ONE_V, MAX_V).into();
-        let _target_quote_token_amount_: U256 = rand::thread_rng().gen_range(ONE_V, MAX_V).into();
-
-        let amount: U256 = rand::thread_rng().gen_range(ONE_V, FOURTH_V).into();
-        let quote_balance: U256 = rand::thread_rng().gen_range(HALF_V, MAX_V).into();
-        let target_quote_amount: U256 = rand::thread_rng().gen_range(HALF_V, MAX_V).into();
-
-        let v1_curve = V1curve::new(
-            _k_,
-            _r_status_,
-            _oracle_,
-            _base_balance_,
-            _quote_balance_,
-            _target_base_token_amount_,
-            _target_quote_token_amount_,
+            target_base_token_amount,
+            target_quote_token_amount,
         );
 
-        let q2 = solve_quadratic_function_for_trade(
-            target_quote_amount,
-            quote_balance,
-            mul_ceil(_oracle_, amount).unwrap(),
-            true,
-            _k_,
-        )
-        .unwrap();
+        let amount: FixedU256 = FixedU256::new_from_float(50.into(), 18);
 
-        let expected = q2.checked_sub(quote_balance).unwrap();
-
-        assert_eq!(
-            v1_curve
-                ._r_below_buy_base_token(amount, quote_balance, target_quote_amount)
-                .unwrap(),
-            expected
-        )
-    }
-
-    #[test]
-    fn test_r_below_back_to_one() {
-        let _k_: U256 = rand::thread_rng().gen_range(ONE_V, MAX_V).into();
-        let _r_status_ = RStatus::One;
-        let _oracle_: U256 = rand::thread_rng().gen_range(ONE_V, MAX_V).into();
-        let _base_balance_: U256 = rand::thread_rng().gen_range(HALF_V, MAX_V).into();
-        let _quote_balance_: U256 = rand::thread_rng().gen_range(HALF_V, MAX_V).into();
-        let _target_base_token_amount_: U256 = rand::thread_rng().gen_range(ONE_V, HALF_V).into();
-        let _target_quote_token_amount_: U256 = rand::thread_rng().gen_range(ONE_V, HALF_V).into();
-
-        let v1_curve = V1curve::new(
-            _k_,
-            _r_status_,
-            _oracle_,
-            _base_balance_,
-            _quote_balance_,
-            _target_base_token_amount_,
-            _target_quote_token_amount_,
-        );
-
-        let spare_base = _base_balance_
-            .checked_sub(_target_base_token_amount_)
-            .unwrap();
-        let fair_amount = spare_base.checked_mul(_oracle_).unwrap();
-        let new_target_quote =
-            solve_quadratic_function_for_target(_quote_balance_, _k_, fair_amount).unwrap();
-
-        let expected = new_target_quote.checked_sub(_quote_balance_).unwrap();
-
-        assert_eq!(v1_curve._r_below_back_to_one().unwrap(), expected)
-    }
-
-    #[test]
-    fn test_r_above_buy_base_token() {
-        let _k_: U256 = rand::thread_rng().gen_range(ZERO_V, ONE_V).into();
-        let _r_status_ = RStatus::One;
-        let _oracle_: U256 = rand::thread_rng().gen_range(ONE_V, MAX_V).into();
-        let _base_balance_: U256 = rand::thread_rng().gen_range(HALF_V, MAX_V).into();
-        let _quote_balance_: U256 = rand::thread_rng().gen_range(HALF_V, MAX_V).into();
-        let _target_base_token_amount_: U256 = rand::thread_rng().gen_range(ONE_V, HALF_V).into();
-        let _target_quote_token_amount_: U256 = rand::thread_rng().gen_range(ONE_V, HALF_V).into();
-
-        let amount: U256 = rand::thread_rng().gen_range(ONE_V, FOURTH_V).into();
-        let base_balance: U256 = rand::thread_rng().gen_range(HALF_V, MAX_V).into();
-        let target_base_amount: U256 = rand::thread_rng().gen_range(HALF_V, MAX_V).into();
-
-        let v1_curve = V1curve::new(
-            _k_,
-            _r_status_,
-            _oracle_,
-            _base_balance_,
-            _quote_balance_,
-            _target_base_token_amount_,
-            _target_quote_token_amount_,
-        );
-
-        let b2 = base_balance.checked_sub(amount).unwrap();
-
-        let expected = v1_curve
-            ._r_above_integrate(target_base_amount, base_balance, b2)
-            .unwrap();
-
-        assert_eq!(
-            v1_curve
-                ._r_above_buy_base_token(amount, base_balance, target_base_amount)
-                .unwrap(),
-            expected
-        )
-    }
-
-    #[test]
-    fn test_r_above_sell_base_token() {
-        let _k_: U256 = rand::thread_rng().gen_range(ZERO_V, ONE_V).into();
-        let _r_status_ = RStatus::One;
-        let _oracle_: U256 = rand::thread_rng().gen_range(ONE_V, MAX_V).into();
-        let _base_balance_: U256 = rand::thread_rng().gen_range(HALF_V, MAX_V).into();
-        let _quote_balance_: U256 = rand::thread_rng().gen_range(HALF_V, MAX_V).into();
-        let _target_base_token_amount_: U256 = rand::thread_rng().gen_range(ONE_V, HALF_V).into();
-        let _target_quote_token_amount_: U256 = rand::thread_rng().gen_range(ONE_V, HALF_V).into();
-
-        let amount: U256 = rand::thread_rng().gen_range(ONE_V, FOURTH_V).into();
-        let base_balance: U256 = rand::thread_rng().gen_range(HALF_V, MAX_V).into();
-        let target_base_amount: U256 = rand::thread_rng().gen_range(HALF_V, MAX_V).into();
-
-        let v1_curve = V1curve::new(
-            _k_,
-            _r_status_,
-            _oracle_,
-            _base_balance_,
-            _quote_balance_,
-            _target_base_token_amount_,
-            _target_quote_token_amount_,
-        );
-
-        let b1 = base_balance.checked_add(amount).unwrap();
-
-        let expected = v1_curve
-            ._r_above_integrate(target_base_amount, b1, base_balance)
-            .unwrap();
-
-        assert_eq!(
-            v1_curve
-                ._r_above_sell_base_token(amount, base_balance, target_base_amount)
-                .unwrap(),
-            expected
-        )
-    }
-
-    #[test]
-    fn test_r_above_back_to_one() {
-        let _k_: U256 = rand::thread_rng().gen_range(ONE_V, MAX_V).into();
-        let _r_status_ = RStatus::One;
-        let _oracle_: U256 = rand::thread_rng().gen_range(ONE_V, MAX_V).into();
-        let _base_balance_: U256 = rand::thread_rng().gen_range(HALF_V, MAX_V).into();
-        let _quote_balance_: U256 = rand::thread_rng().gen_range(HALF_V, MAX_V).into();
-        let _target_base_token_amount_: U256 = rand::thread_rng().gen_range(ONE_V, HALF_V).into();
-        let _target_quote_token_amount_: U256 = rand::thread_rng().gen_range(ONE_V, HALF_V).into();
-
-        let v1_curve = V1curve::new(
-            _k_,
-            _r_status_,
-            _oracle_,
-            _base_balance_,
-            _quote_balance_,
-            _target_base_token_amount_,
-            _target_quote_token_amount_,
-        );
-
-        let spare_quote = _quote_balance_
-            .checked_sub(_target_quote_token_amount_)
-            .unwrap();
-        let fair_amount = div_floor(spare_quote, _oracle_).unwrap();
-        let new_target_base =
-            solve_quadratic_function_for_target(_base_balance_, _k_, fair_amount).unwrap();
-
-        let expected = new_target_base.checked_sub(_base_balance_).unwrap();
-
-        assert_eq!(v1_curve._r_above_back_to_one().unwrap(), expected)
-    }
-
-    #[test]
-    fn test_get_expected_target() {
-        let _k_: U256 = rand::thread_rng().gen_range(ZERO_V, ONE_V).into();
-        let _r_status_ = RStatus::One;
-        let _oracle_: U256 = rand::thread_rng().gen_range(ONE_V, MAX_V).into();
-        let _base_balance_: U256 = rand::thread_rng().gen_range(ONE_V, MAX_V).into();
-        let _quote_balance_: U256 = rand::thread_rng().gen_range(ONE_V, MAX_V).into();
-        let _target_base_token_amount_: U256 = rand::thread_rng().gen_range(ONE_V, MAX_V).into();
-        let _target_quote_token_amount_: U256 = rand::thread_rng().gen_range(ONE_V, MAX_V).into();
-
-        let v1_curve = V1curve::new(
-            _k_,
-            _r_status_,
-            _oracle_,
-            _base_balance_,
-            _quote_balance_,
-            _target_base_token_amount_,
-            _target_quote_token_amount_,
-        );
-        let expected;
-        if _r_status_ == RStatus::One {
-            expected = (_target_base_token_amount_, _target_quote_token_amount_);
-        } else if _r_status_ == RStatus::BelowOne {
-            let pay_quote_token = v1_curve._r_below_back_to_one().unwrap();
-
-            expected = (
-                _target_base_token_amount_,
-                _quote_balance_.checked_add(pay_quote_token).unwrap(),
-            );
-        } else {
-            let pay_base_token = v1_curve._r_above_back_to_one().unwrap();
-
-            expected = (
-                _base_balance_.checked_add(pay_base_token).unwrap(),
-                _target_quote_token_amount_,
-            );
-        }
-
-        assert_eq!(v1_curve._get_expected_target().unwrap(), expected)
-    }
-
-    #[test]
-    fn test_get_mid_price() {
-        let _k_: U256 = rand::thread_rng().gen_range(ZERO_V, ONE_V).into();
-        let _r_status_ = RStatus::One;
-        let _oracle_: U256 = rand::thread_rng().gen_range(ONE_V, MAX_V).into();
-        let _base_balance_: U256 = rand::thread_rng().gen_range(ONE_V, MAX_V).into();
-        let _quote_balance_: U256 = rand::thread_rng().gen_range(ONE_V, MAX_V).into();
-        let _target_base_token_amount_: U256 = rand::thread_rng().gen_range(ONE_V, MAX_V).into();
-        let _target_quote_token_amount_: U256 = rand::thread_rng().gen_range(ONE_V, MAX_V).into();
-
-        let v1_curve = V1curve::new(
-            _k_,
-            _r_status_,
-            _oracle_,
-            _base_balance_,
-            _quote_balance_,
-            _target_base_token_amount_,
-            _target_quote_token_amount_,
-        );
-
-        let (base_target, quote_target) = v1_curve._get_expected_target().unwrap();
-
-        let expected;
-        if _r_status_ == RStatus::BelowOne {
-            let mut r = div_floor(
-                quote_target.checked_mul(quote_target).unwrap(),
-                _quote_balance_.checked_mul(_quote_balance_).unwrap(),
-            )
-            .unwrap();
-            r = U256::one()
-                .checked_sub(_k_)
-                .unwrap()
-                .checked_add(_k_.checked_mul(r).unwrap())
-                .unwrap();
-
-            expected = div_floor(_oracle_, r).unwrap();
-        } else {
-            let mut r = div_floor(
-                base_target.checked_mul(base_target).unwrap(),
-                _base_balance_.checked_mul(_base_balance_).unwrap(),
-            )
-            .unwrap();
-            r = U256::one()
-                .checked_sub(_k_)
-                .unwrap()
-                .checked_add(_k_.checked_mul(r).unwrap())
-                .unwrap();
-
-            expected = _oracle_.checked_mul(r).unwrap();
-        }
-
-        assert_eq!(v1_curve._get_mid_price().unwrap(), expected)
-    }
-
-    #[test]
-    fn test_r_above_integrate() {
-        let _k_: U256 = rand::thread_rng().gen_range(ZERO_V, ONE_V).into();
-        let _r_status_ = RStatus::One;
-        let _oracle_: U256 = rand::thread_rng().gen_range(ONE_V, MAX_V).into();
-        let _base_balance_: U256 = rand::thread_rng().gen_range(ONE_V, MAX_V).into();
-        let _quote_balance_: U256 = rand::thread_rng().gen_range(ONE_V, MAX_V).into();
-        let _target_base_token_amount_: U256 = rand::thread_rng().gen_range(ONE_V, MAX_V).into();
-        let _target_quote_token_amount_: U256 = rand::thread_rng().gen_range(ONE_V, MAX_V).into();
-
-        let b0: U256 = rand::thread_rng().gen_range(TWO_V, FOURTH_V).into();
-        let b1: U256 = b0.checked_mul(3.into()).unwrap();
-        let b2: U256 = b0.checked_mul(2.into()).unwrap();
-
-        let v1_curve = V1curve::new(
-            _k_,
-            _r_status_,
-            _oracle_,
-            _base_balance_,
-            _quote_balance_,
-            _target_base_token_amount_,
-            _target_quote_token_amount_,
-        );
-
-        let expected = general_integrate(b0, b1, b2, _oracle_, _k_).unwrap();
-
-        assert_eq!(v1_curve._r_above_integrate(b0, b1, b2).unwrap(), expected)
+        // assert_eq!(
+        //     v1_curve
+        //         .r_above_integrate(
+        //             target_base_token_amount,
+        //             target_base_token_amount,
+        //             target_base_token_amount.checked_sub(amount).unwrap()
+        //         )
+        //         .unwrap(),
+        //     FixedU256::new_from_float(10000.into(), 18)
+        // );
+        //
+        // assert_eq!(
+        //     v1_curve
+        //         .r_one_buy_base_token(amount, target_base_token_amount)
+        //         .unwrap(),
+        //     FixedU256::new_from_float(10000.into(), 18)
+        // );
+        //
+        // assert_eq!(
+        //     v1_curve
+        //         .r_one_sell_base_token(amount, target_quote_token_amount)
+        //         .unwrap(),
+        //     FixedU256::new_from_float(900.into(), 18)
+        // );
     }
 }
