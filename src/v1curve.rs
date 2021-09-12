@@ -365,22 +365,35 @@ mod tests {
             FixedU256::new_from_int(12080.into(), 18).unwrap()
         );
 
+        let value = FixedU256::new(995049300.into()).unwrap()
+            .checked_mul_floor(FixedU256::new(100000.into()).unwrap()).unwrap()
+            .checked_mul_floor(FixedU256::new(100000.into()).unwrap()).unwrap();
         assert_eq!(
             v1_curve.r_above_back_to_one().unwrap(),
-            FixedU256::new_from_int(9950493.into(), 18).unwrap()
-                .checked_div_floor(FixedU256::new_from_int(1000000.into(), 18).unwrap()).unwrap()
+            FixedU256::new_from_fixed(value.into_u256_ceil(), 18)
         );
 
         // ============ Helper functions ============
 
+        r_status = RStatus::BelowOne;
+        v1_curve = V1curve::new(
+            k,
+            r_status,
+            oracle,
+            base_balance,
+            quote_balance,
+            target_base_token_amount,
+            target_quote_token_amount,
+        );
+
         assert_eq!(
             v1_curve.get_expected_target().unwrap(),
-            (FixedU256::new_from_int(975.into(), 18).unwrap(), FixedU256::new_from_int(975.into(), 18).unwrap())
+            (FixedU256::new_from_int(500.into(), 18).unwrap(), FixedU256::new_from_int(16000.into(), 18).unwrap())
         );
 
         assert_eq!(
             v1_curve.get_mid_price().unwrap(),
-            FixedU256::new_from_int(975.into(), 18).unwrap()
+            FixedU256::new_from_int(3.into(), 18).unwrap()
         );
 
         assert_eq!(
