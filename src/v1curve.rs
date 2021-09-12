@@ -213,7 +213,7 @@ impl V1curve {
     // ============ Helper functions ============
 
     /// return baseTarget, quoteTarget
-    fn get_expected_target(&self) -> Option<(FixedU256, FixedU256)> {
+    fn _get_expected_target(&self) -> Option<(FixedU256, FixedU256)> {
         let q = self.quote_balance;
         let b = self.base_balance;
 
@@ -240,8 +240,8 @@ impl V1curve {
     }
 
     /// return midPrice
-    fn get_mid_price(&self) -> Option<FixedU256> {
-        let (base_target, quote_target) = self.get_expected_target()?;
+    fn _get_mid_price(&self) -> Option<FixedU256> {
+        let (base_target, quote_target) = self._get_expected_target()?;
 
         if self.r_status == RStatus::BelowOne {
             let mut r = quote_target
@@ -283,14 +283,17 @@ mod tests {
     #[test]
     fn basic() {
         let k: FixedU256 = FixedU256::one()
-            .checked_mul_floor(FixedU256::new(5.into()).unwrap()).unwrap()
-            .checked_div_floor(FixedU256::new(10.into()).unwrap()).unwrap();
+            .checked_mul_floor(FixedU256::new(5.into()).unwrap())
+            .unwrap()
+            .checked_div_floor(FixedU256::new(10.into()).unwrap())
+            .unwrap();
         let mut r_status = RStatus::One;
         let oracle: FixedU256 = FixedU256::new_from_int(100.into(), 18).unwrap();
         let base_balance: FixedU256 = FixedU256::new_from_int(1000.into(), 18).unwrap();
         let quote_balance: FixedU256 = FixedU256::new_from_int(2000.into(), 18).unwrap();
         let target_base_token_amount: FixedU256 = FixedU256::new_from_int(500.into(), 18).unwrap();
-        let target_quote_token_amount: FixedU256 = FixedU256::new_from_int(1000.into(), 18).unwrap();
+        let target_quote_token_amount: FixedU256 =
+            FixedU256::new_from_int(1000.into(), 18).unwrap();
 
         let mut v1_curve = V1curve::new(
             k,
@@ -307,12 +310,16 @@ mod tests {
         // ================== R = 1 cases ==================
 
         assert_eq!(
-            v1_curve.r_one_sell_base_token(amount, target_quote_token_amount).unwrap(),
+            v1_curve
+                .r_one_sell_base_token(amount, target_quote_token_amount)
+                .unwrap(),
             FixedU256::new_from_int(975.into(), 18).unwrap()
         );
 
         assert_eq!(
-            v1_curve.r_one_buy_base_token(amount, target_base_token_amount).unwrap(),
+            v1_curve
+                .r_one_buy_base_token(amount, target_base_token_amount)
+                .unwrap(),
             FixedU256::new_from_int(30000.into(), 18).unwrap()
         );
 
@@ -329,12 +336,16 @@ mod tests {
         );
 
         assert_eq!(
-            v1_curve.r_below_sell_base_token(amount, quote_balance, target_quote_token_amount).unwrap(),
+            v1_curve
+                .r_below_sell_base_token(amount, quote_balance, target_quote_token_amount)
+                .unwrap(),
             FixedU256::new_from_int(1974.into(), 18).unwrap()
         );
 
         assert_eq!(
-            v1_curve.r_below_buy_base_token(amount, quote_balance, target_quote_token_amount).unwrap(),
+            v1_curve
+                .r_below_buy_base_token(amount, quote_balance, target_quote_token_amount)
+                .unwrap(),
             FixedU256::new_from_int(39524.into(), 18).unwrap()
         );
 
@@ -356,18 +367,25 @@ mod tests {
         );
 
         assert_eq!(
-            v1_curve.r_above_buy_base_token(amount, base_balance, target_base_token_amount).unwrap(),
+            v1_curve
+                .r_above_buy_base_token(amount, base_balance, target_base_token_amount)
+                .unwrap(),
             FixedU256::new_from_int(13125.into(), 18).unwrap()
         );
 
         assert_eq!(
-            v1_curve.r_above_sell_base_token(amount, base_balance, target_base_token_amount).unwrap(),
+            v1_curve
+                .r_above_sell_base_token(amount, base_balance, target_base_token_amount)
+                .unwrap(),
             FixedU256::new_from_int(12080.into(), 18).unwrap()
         );
 
-        let value = FixedU256::new(995049300.into()).unwrap()
-            .checked_mul_floor(FixedU256::new(100000.into()).unwrap()).unwrap()
-            .checked_mul_floor(FixedU256::new(100000.into()).unwrap()).unwrap();
+        let value = FixedU256::new(995049300.into())
+            .unwrap()
+            .checked_mul_floor(FixedU256::new(100000.into()).unwrap())
+            .unwrap()
+            .checked_mul_floor(FixedU256::new(100000.into()).unwrap())
+            .unwrap();
         assert_eq!(
             v1_curve.r_above_back_to_one().unwrap(),
             FixedU256::new_from_fixed(value.into_u256_ceil(), 18)
@@ -387,24 +405,27 @@ mod tests {
         );
 
         assert_eq!(
-            v1_curve.get_expected_target().unwrap(),
-            (FixedU256::new_from_int(500.into(), 18).unwrap(), FixedU256::new_from_int(16000.into(), 18).unwrap())
+            v1_curve._get_expected_target().unwrap(),
+            (
+                FixedU256::new_from_int(500.into(), 18).unwrap(),
+                FixedU256::new_from_int(16000.into(), 18).unwrap()
+            )
         );
 
         assert_eq!(
-            v1_curve.get_mid_price().unwrap(),
+            v1_curve._get_mid_price().unwrap(),
             FixedU256::new_from_int(3.into(), 18).unwrap()
         );
 
         assert_eq!(
-            v1_curve.r_above_integrate(
-                target_quote_token_amount,
-                target_quote_token_amount,
-                target_quote_token_amount.checked_sub(amount).unwrap()
-            ).unwrap(),
+            v1_curve
+                .r_above_integrate(
+                    target_quote_token_amount,
+                    target_quote_token_amount,
+                    target_quote_token_amount.checked_sub(amount).unwrap()
+                )
+                .unwrap(),
             FixedU256::new_from_int(30000.into(), 18).unwrap()
         );
-
-
     }
 }

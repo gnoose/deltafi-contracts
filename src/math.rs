@@ -135,8 +135,10 @@ mod tests {
         let delta_b: FixedU256 = FixedU256::new_from_int(200.into(), 18).unwrap();
         let i_delta_b: FixedU256 = i.checked_mul_floor(delta_b).unwrap();
         let k: FixedU256 = FixedU256::one()
-            .checked_mul_floor(FixedU256::new(5.into()).unwrap()).unwrap()
-            .checked_div_floor(FixedU256::new(10.into()).unwrap()).unwrap();
+            .checked_mul_floor(FixedU256::new(5.into()).unwrap())
+            .unwrap()
+            .checked_div_floor(FixedU256::new(10.into()).unwrap())
+            .unwrap();
 
         assert_eq!(
             general_integrate(q0, q1, q1.checked_sub(delta_b).unwrap(), i, k).unwrap(),
@@ -152,6 +154,5 @@ mod tests {
             solve_quadratic_function_for_target(q0, k, i_delta_b).unwrap(),
             FixedU256::new_from_int(7000.into(), 18).unwrap()
         );
-
     }
 }

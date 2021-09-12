@@ -4,8 +4,7 @@
 #![allow(clippy::ptr_offset_with_cast)]
 #![allow(clippy::manual_range_contains)]
 
-use std::convert::TryInto;
-use std::cmp::Ordering;
+use std::{cmp::Ordering, convert::TryInto};
 
 use uint::construct_uint;
 
@@ -76,7 +75,7 @@ impl FixedU256 {
     pub fn new(value: U256) -> Option<Self> {
         Some(Self {
             inner: value,
-            base_point: U256::one()
+            base_point: U256::one(),
         })
     }
 
@@ -114,26 +113,32 @@ impl FixedU256 {
         if self.inner.is_zero() {
             return Some(Self {
                 inner: U256::zero(),
-                base_point: new_base_point
+                base_point: new_base_point,
             });
         }
 
-        if new_base_point > self.base_point {
-            let value = self.inner.checked_mul(new_base_point.checked_div(self.base_point)?)?;
+        match new_base_point.cmp(&self.base_point) {
+            Ordering::Greater => {
+                let value = self
+                    .inner
+                    .checked_mul(new_base_point.checked_div(self.base_point)?)?;
 
-            Some(Self {
-                inner: value,
-                base_point: new_base_point
-            })
-        } else if new_base_point < self.base_point {
-            let value = self.inner.checked_ceil_div(self.base_point.checked_div(new_base_point)?)?;
+                Some(Self {
+                    inner: value,
+                    base_point: new_base_point,
+                })
+            }
+            Ordering::Less => {
+                let value = self
+                    .inner
+                    .checked_ceil_div(self.base_point.checked_div(new_base_point)?)?;
 
-            Some(Self {
-                inner: value,
-                base_point: new_base_point
-            })
-        } else {
-            Some(*self)
+                Some(Self {
+                    inner: value,
+                    base_point: new_base_point,
+                })
+            }
+            Ordering::Equal => Some(*self),
         }
     }
 
@@ -155,7 +160,7 @@ impl FixedU256 {
                 let value = self.inner.checked_sub(other.inner)?;
                 Some(Self {
                     inner: value,
-                    base_point: self.base_point
+                    base_point: self.base_point,
                 })
             }
             Ordering::Less => {
@@ -163,7 +168,7 @@ impl FixedU256 {
                 let value = self.inner.checked_sub(new_other.inner)?;
                 Some(Self {
                     inner: value,
-                    base_point: self.base_point
+                    base_point: self.base_point,
                 })
             }
             Ordering::Greater => {
@@ -171,7 +176,7 @@ impl FixedU256 {
                 let value = self.inner.checked_sub(new_other.inner)?;
                 Some(Self {
                     inner: value,
-                    base_point: self.base_point
+                    base_point: self.base_point,
                 })
             }
         }
@@ -184,7 +189,7 @@ impl FixedU256 {
                 let value = self.inner.checked_add(other.inner)?;
                 Some(Self {
                     inner: value,
-                    base_point: self.base_point
+                    base_point: self.base_point,
                 })
             }
             Ordering::Less => {
@@ -192,7 +197,7 @@ impl FixedU256 {
                 let value = self.inner.checked_add(new_other.inner)?;
                 Some(Self {
                     inner: value,
-                    base_point: self.base_point
+                    base_point: self.base_point,
                 })
             }
             Ordering::Greater => {
@@ -200,7 +205,7 @@ impl FixedU256 {
                 let value = self.inner.checked_add(new_other.inner)?;
                 Some(Self {
                     inner: value,
-                    base_point: self.base_point
+                    base_point: self.base_point,
                 })
             }
         }
@@ -302,9 +307,20 @@ mod tests {
         assert_eq!(c.sqrt().unwrap().into_u256_ceil(), 2.into());
         assert_eq!(b.checked_sub(c).unwrap().into_u256_ceil(), 38.into());
         assert_eq!(b.checked_add(c).unwrap().into_u256_ceil(), 46.into());
-        assert_eq!(FixedU256::one().checked_add(c).unwrap().into_u256_ceil(), 5.into());
+        assert_eq!(
+            FixedU256::one().checked_add(c).unwrap().into_u256_ceil(),
+            5.into()
+        );
         assert_eq!(FixedU256::new(4.into()).unwrap().into_u256_ceil(), 4.into());
-        assert_eq!(b.take_and_scale(100.into()).unwrap().into_u256_ceil(), 42.into());
-        assert_eq!(b.checked_sub(FixedU256::new_from_int(1.into(), 2).unwrap()).unwrap().into_u256_ceil(), 41.into());
+        assert_eq!(
+            b.take_and_scale(100.into()).unwrap().into_u256_ceil(),
+            42.into()
+        );
+        assert_eq!(
+            b.checked_sub(FixedU256::new_from_int(1.into(), 2).unwrap())
+                .unwrap()
+                .into_u256_ceil(),
+            41.into()
+        );
     }
 }
