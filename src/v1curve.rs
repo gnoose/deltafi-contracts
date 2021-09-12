@@ -247,6 +247,7 @@ impl V1curve {
             let mut r = quote_target
                 .checked_mul_floor(quote_target)?
                 .checked_div_floor(self.quote_balance.checked_mul_floor(self.quote_balance)?)?;
+
             r = FixedU256::one()
                 .checked_sub(self.k)?
                 .checked_add(self.k.checked_mul_floor(r)?)?;
@@ -256,6 +257,7 @@ impl V1curve {
             let mut r = base_target
                 .checked_mul_floor(base_target)?
                 .checked_div_floor(self.base_balance.checked_mul_floor(self.base_balance)?)?;
+
             r = FixedU256::one()
                 .checked_sub(self.k)?
                 .checked_add(self.k.checked_mul_floor(r)?)?;
@@ -280,15 +282,17 @@ mod tests {
 
     #[test]
     fn basic() {
-        let k: FixedU256 = FixedU256::new_from_float(0.5.into(), 18);
-        let r_status = RStatus::One;
-        let oracle: FixedU256 = FixedU256::new_from_float(100.into(), 18);
-        let base_balance: FixedU256 = FixedU256::new_from_float(1000.into(), 18);
-        let quote_balance: FixedU256 = FixedU256::new_from_float(2000.into(), 18);
-        let target_base_token_amount: FixedU256 = FixedU256::new_from_float(500.into(), 18);
-        let target_quote_token_amount: FixedU256 = FixedU256::new_from_float(1000.into(), 18);
+        let k: FixedU256 = FixedU256::one()
+            .checked_mul_floor(FixedU256::new(5.into()).unwrap()).unwrap()
+            .checked_div_floor(FixedU256::new(10.into()).unwrap()).unwrap();
+        let mut r_status = RStatus::One;
+        let oracle: FixedU256 = FixedU256::new_from_int(100.into(), 18).unwrap();
+        let base_balance: FixedU256 = FixedU256::new_from_int(1000.into(), 18).unwrap();
+        let quote_balance: FixedU256 = FixedU256::new_from_int(2000.into(), 18).unwrap();
+        let target_base_token_amount: FixedU256 = FixedU256::new_from_int(500.into(), 18).unwrap();
+        let target_quote_token_amount: FixedU256 = FixedU256::new_from_int(1000.into(), 18).unwrap();
 
-        let v1_curve = V1curve::new(
+        let mut v1_curve = V1curve::new(
             k,
             r_status,
             oracle,
@@ -298,31 +302,96 @@ mod tests {
             target_quote_token_amount,
         );
 
-        let amount: FixedU256 = FixedU256::new_from_float(50.into(), 18);
+        let amount: FixedU256 = FixedU256::new_from_int(200.into(), 18).unwrap();
 
-        // assert_eq!(
-        //     v1_curve
-        //         .r_above_integrate(
-        //             target_base_token_amount,
-        //             target_base_token_amount,
-        //             target_base_token_amount.checked_sub(amount).unwrap()
-        //         )
-        //         .unwrap(),
-        //     FixedU256::new_from_float(10000.into(), 18)
-        // );
-        //
-        // assert_eq!(
-        //     v1_curve
-        //         .r_one_buy_base_token(amount, target_base_token_amount)
-        //         .unwrap(),
-        //     FixedU256::new_from_float(10000.into(), 18)
-        // );
-        //
-        // assert_eq!(
-        //     v1_curve
-        //         .r_one_sell_base_token(amount, target_quote_token_amount)
-        //         .unwrap(),
-        //     FixedU256::new_from_float(900.into(), 18)
-        // );
+        // ================== R = 1 cases ==================
+
+        assert_eq!(
+            v1_curve.r_one_sell_base_token(amount, target_quote_token_amount).unwrap(),
+            FixedU256::new_from_int(975.into(), 18).unwrap()
+        );
+
+        assert_eq!(
+            v1_curve.r_one_buy_base_token(amount, target_base_token_amount).unwrap(),
+            FixedU256::new_from_int(30000.into(), 18).unwrap()
+        );
+
+        // ============ R < 1 cases ============
+        r_status = RStatus::BelowOne;
+        v1_curve = V1curve::new(
+            k,
+            r_status,
+            oracle,
+            base_balance,
+            quote_balance,
+            target_base_token_amount,
+            target_quote_token_amount,
+        );
+
+        assert_eq!(
+            v1_curve.r_below_sell_base_token(amount, quote_balance, target_quote_token_amount).unwrap(),
+            FixedU256::new_from_int(1974.into(), 18).unwrap()
+        );
+
+        assert_eq!(
+            v1_curve.r_below_buy_base_token(amount, quote_balance, target_quote_token_amount).unwrap(),
+            FixedU256::new_from_int(39524.into(), 18).unwrap()
+        );
+
+        assert_eq!(
+            v1_curve.r_below_back_to_one().unwrap(),
+            FixedU256::new_from_int(14000.into(), 18).unwrap()
+        );
+
+        // ============ R > 1 cases ============
+        r_status = RStatus::AboveOne;
+        v1_curve = V1curve::new(
+            k,
+            r_status,
+            oracle,
+            base_balance,
+            quote_balance,
+            target_base_token_amount,
+            target_quote_token_amount,
+        );
+
+        assert_eq!(
+            v1_curve.r_above_buy_base_token(amount, base_balance, target_base_token_amount).unwrap(),
+            FixedU256::new_from_int(13125.into(), 18).unwrap()
+        );
+
+        assert_eq!(
+            v1_curve.r_above_sell_base_token(amount, base_balance, target_base_token_amount).unwrap(),
+            FixedU256::new_from_int(12080.into(), 18).unwrap()
+        );
+
+        assert_eq!(
+            v1_curve.r_above_back_to_one().unwrap(),
+            FixedU256::new_from_int(9950493.into(), 18).unwrap()
+                .checked_div_floor(FixedU256::new_from_int(1000000.into(), 18).unwrap()).unwrap()
+        );
+
+        // ============ Helper functions ============
+
+        assert_eq!(
+            v1_curve.get_expected_target().unwrap(),
+            (FixedU256::new_from_int(975.into(), 18).unwrap(), FixedU256::new_from_int(975.into(), 18).unwrap())
+        );
+
+        assert_eq!(
+            v1_curve.get_mid_price().unwrap(),
+            FixedU256::new_from_int(975.into(), 18).unwrap()
+        );
+
+        assert_eq!(
+            v1_curve.r_above_integrate(
+                target_quote_token_amount,
+                target_quote_token_amount,
+                target_quote_token_amount.checked_sub(amount).unwrap()
+            ).unwrap(),
+            FixedU256::new_from_int(30000.into(), 18).unwrap()
+        );
+
+
     }
 }

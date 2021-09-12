@@ -71,7 +71,7 @@ pub fn solve_quadratic_function_for_trade(
     // // calculate sqrt
     let mut square_root = FixedU256::one()
         .checked_sub(k)?
-        .checked_mul_floor(FixedU256::new_from_int(4.into(), 18)?)?
+        .checked_mul_floor(FixedU256::new(4.into())?)?
         .checked_mul_floor(k)?
         .checked_mul_floor(q0)?
         .checked_mul_floor(q0)?;
@@ -80,7 +80,7 @@ pub fn solve_quadratic_function_for_trade(
     // final res
     let denominator = FixedU256::one()
         .checked_sub(k)?
-        .checked_mul_floor(FixedU256::new_from_float(2.into(), 18))?;
+        .checked_mul_floor(FixedU256::new(2.into())?)?;
 
     let numerator;
     if minus_b_sig {
@@ -108,7 +108,7 @@ pub fn solve_quadratic_function_for_target(
     // V0 = V1+V1*(sqrt-1)/2k
     let mut sqrt = k
         .checked_mul_floor(fair_amount)?
-        .checked_mul_floor(FixedU256::new_from_float(4.into(), 18))?
+        .checked_mul_floor(FixedU256::new(4.into())?)?
         .checked_div_ceil(v1)?;
     sqrt = sqrt
         .checked_add(FixedU256::one())?
@@ -117,7 +117,7 @@ pub fn solve_quadratic_function_for_target(
 
     let premium = sqrt
         .checked_sub(FixedU256::one())?
-        .checked_div_ceil(k.checked_mul_floor(FixedU256::new_from_float(2.into(), 18))?)?;
+        .checked_div_ceil(k.checked_mul_floor(FixedU256::new(2.into())?)?)?;
 
     // V0 is greater than or equal to V1 according to the solution
     v1.checked_mul_floor(premium.checked_add(FixedU256::one())?)
@@ -125,33 +125,33 @@ pub fn solve_quadratic_function_for_target(
 
 #[cfg(test)]
 mod tests {
-    use rand::Rng;
-
     use super::*;
 
     #[test]
     fn basic() {
-        let q0: FixedU256 = FixedU256::new_from_float(1000.into(), 18);
-        let q1: FixedU256 = FixedU256::new_from_float(1000.into(), 18);
-        let i: FixedU256 = FixedU256::new_from_float(100.into(), 18);
-        let delta_b: FixedU256 = FixedU256::new_from_float(50.into(), 18);
-        let i_delta_b: FixedU256 = FixedU256::new_from_float((100 * 50).into(), 18);
-        let k: FixedU256 = FixedU256::new_from_float(0.5.into(), 18);
-        let delta_b_sig: bool = rand::random();
+        let q0: FixedU256 = FixedU256::new_from_int(1000.into(), 18).unwrap();
+        let q1: FixedU256 = FixedU256::new_from_int(1000.into(), 18).unwrap();
+        let i: FixedU256 = FixedU256::new_from_int(100.into(), 18).unwrap();
+        let delta_b: FixedU256 = FixedU256::new_from_int(200.into(), 18).unwrap();
+        let i_delta_b: FixedU256 = i.checked_mul_floor(delta_b).unwrap();
+        let k: FixedU256 = FixedU256::one()
+            .checked_mul_floor(FixedU256::new(5.into()).unwrap()).unwrap()
+            .checked_div_floor(FixedU256::new(10.into()).unwrap()).unwrap();
 
-        // assert_eq!(
-        //     solve_quadratic_function_for_target(q0, k, i_delta_b).unwrap(),
-        //     FixedU256::new_from_float(10000.into(), 18)
-        // );
-        //
-        // assert_eq!(
-        //     general_integrate(q0, q1, q1.checked_sub(delta_b).unwrap(), i, k).unwrap(),
-        //     FixedU256::new_from_float(10000.into(), 18)
-        // );
-        //
-        // assert_eq!(
-        //     solve_quadratic_function_for_trade(q0, q1, i_delta_b, delta_b_sig, k).unwrap(),
-        //     FixedU256::new_from_float(100.into(), 18)
-        // );
+        assert_eq!(
+            general_integrate(q0, q1, q1.checked_sub(delta_b).unwrap(), i, k).unwrap(),
+            FixedU256::new_from_int(30000.into(), 18).unwrap()
+        );
+
+        assert_eq!(
+            solve_quadratic_function_for_trade(q0, q1, i_delta_b, false, k).unwrap(),
+            FixedU256::new_from_int(25.into(), 18).unwrap()
+        );
+
+        assert_eq!(
+            solve_quadratic_function_for_target(q0, k, i_delta_b).unwrap(),
+            FixedU256::new_from_int(7000.into(), 18).unwrap()
+        );
+
     }
 }
