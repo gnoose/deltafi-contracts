@@ -373,7 +373,7 @@ pub fn initialize_farm(
     let authority_info = next_account_info(account_info_iter)?;
     let admin_info = next_account_info(account_info_iter)?;
     let clock_sysvar_info = next_account_info(account_info_iter)?;
-    let pool_token_info = next_account_info(account_info_iter)?;
+    let pool_mint_info = next_account_info(account_info_iter)?;
 
     let mut farm = FarmInfo::unpack(&farm_info.data.borrow())?;
     let mut farm_base = FarmBaseInfo::unpack(&farm_base_info.data.borrow())?;
@@ -388,7 +388,7 @@ pub fn initialize_farm(
     farm.alloc_point = alloc_point;
     farm.acc_deltafi_per_share = 0;
     farm.last_reward_timestamp = clock.unix_timestamp;
-    farm.pool_mint = *pool_token_info.key;
+    farm.pool_mint = *pool_mint_info.key;
 
     // !!initialize other properties
     // ...
@@ -398,7 +398,7 @@ pub fn initialize_farm(
     Ok(())
 }
 
-fn set_farm(
+pub fn set_farm(
     program_id: &Pubkey,
     alloc_point: u64,
     reward_unit: u64,
@@ -1076,11 +1076,107 @@ mod tests {
 
     #[test]
     fn test_initialize_farm() {
+        let user_key = pubkey_rand();
+        let token_pool_amount = 1000;
+        let alloc_point = 200;
+        let reward_unit = 10;
+        let mut accounts = FarmAccountInfo::new(
+            &user_key,
+            token_pool_amount,
+            alloc_point,
+            reward_unit,
+            DEFAULT_TEST_FEES,
+        );
 
+        accounts.initialize_farm(ZERO_TS).unwrap();
+
+        // wrong nonce for authority_key
+        {
+            let old_authority = accounts.authority_key;
+            let (bad_authority_key, _nonce) = Pubkey::find_program_address(
+                &[&accounts.swap_key.to_bytes()[..]],
+                &TOKEN_PROGRAM_ID,
+            );
+            accounts.authority_key = bad_authority_key;
+            assert_eq!(
+                Err(SwapError::InvalidProgramAddress.into()),
+                accounts.apply_new_admin(ZERO_TS)
+            );
+            accounts.authority_key = old_authority;
+        }
+
+        // unauthorized account
+        {
+            let old_admin_key = accounts.admin_key;
+            let fake_admin_key = pubkey_rand();
+            accounts.admin_key = fake_admin_key;
+            assert_eq!(
+                Err(SwapError::Unauthorized.into()),
+                accounts.apply_new_admin(ZERO_TS)
+            );
+            accounts.admin_key = old_admin_key;
+        }
+
+        // initialize
+        {
+
+        }
     }
 
     #[test]
     fn test_set_farm() {
-        
+        let user_key = pubkey_rand();
+        let token_pool_amount = 1000;
+        let alloc_point = 200;
+        let reward_unit = 10;
+        let mut accounts = FarmAccountInfo::new(
+            &user_key,
+            token_pool_amount,
+            alloc_point,
+            reward_unit,
+            DEFAULT_TEST_FEES,
+        );
+
+        // farm not initialized
+        {
+            assert_eq!(
+                Err(ProgramError::UninitializedAccount),
+                accounts.apply_new_admin(ZERO_TS)
+            );
+        }
+
+        accounts.initialize_farm(ZERO_TS).unwrap();
+
+        // wrong nonce for authority_key
+        {
+            let old_authority = accounts.authority_key;
+            let (bad_authority_key, _nonce) = Pubkey::find_program_address(
+                &[&accounts.swap_key.to_bytes()[..]],
+                &TOKEN_PROGRAM_ID,
+            );
+            accounts.authority_key = bad_authority_key;
+            assert_eq!(
+                Err(SwapError::InvalidProgramAddress.into()),
+                accounts.apply_new_admin(ZERO_TS)
+            );
+            accounts.authority_key = old_authority;
+        }
+
+        // unauthorized account
+        {
+            let old_admin_key = accounts.admin_key;
+            let fake_admin_key = pubkey_rand();
+            accounts.admin_key = fake_admin_key;
+            assert_eq!(
+                Err(SwapError::Unauthorized.into()),
+                accounts.apply_new_admin(ZERO_TS)
+            );
+            accounts.admin_key = old_admin_key;
+        }
+
+        // initialize
+        {
+
+        }
     }
 }

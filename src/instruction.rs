@@ -1048,7 +1048,7 @@ pub fn farm_deposit(
     })
 }
 
-/// Creates a 'farm_deposit' instruction.
+/// Creates a 'farm_withdraw' instruction.
 pub fn farm_withdraw(
     program_id: &Pubkey,
     token_program_id: &Pubkey,
@@ -1089,7 +1089,7 @@ pub fn farm_withdraw(
     })
 }
 
-/// Creates a 'farm_deposit' instruction.
+/// Creates a 'farm_emergency_withdraw' instruction.
 pub fn farm_emergency_withdraw(
     program_id: &Pubkey,
     token_program_id: &Pubkey,
@@ -1124,7 +1124,7 @@ pub fn farm_emergency_withdraw(
     })
 }
 
-/// Creates a 'farm_deposit' instruction.
+/// Creates a 'farm_pending_deltafi' instruction.
 pub fn farm_pending_deltafi(
     program_id: &Pubkey,
     farm_base_pubkey: &Pubkey,
