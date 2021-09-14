@@ -18,7 +18,7 @@ use spl_token::state::Mint;
 
 use crate::{
     admin::process_admin_instruction,
-    bn::U256,
+    bn::{U256, FixedU256},
     curve::{StableSwap, MAX_AMP, MIN_AMP, ZERO_TS},
     error::SwapError,
     fees::Fees,
@@ -30,6 +30,7 @@ use crate::{
     pool_converter::PoolTokenConverter,
     state::SwapInfo,
     utils,
+    v1curve::{V1curve, RStatus},
 };
 
 /// Program state handler. (and general curve params)
@@ -347,6 +348,9 @@ impl Processor {
             .as_secs();
         let token_a = utils::unpack_token_account(&swap_source_info.data.borrow())?;
         let token_b = utils::unpack_token_account(&destination_info.data.borrow())?;
+
+        // oracle update
+
         let (price0_cumulative, price1_cumulative, block_timestamp) =
             token_swap.oracle.current_cumulative_price(
                 U256::from(token_a.amount),
@@ -430,6 +434,74 @@ impl Processor {
         let token_a = utils::unpack_token_account(&token_a_info.data.borrow())?;
         let token_b = utils::unpack_token_account(&token_b_info.data.borrow())?;
         let pool_mint = Self::unpack_mint(&pool_mint_info.data.borrow())?;
+
+        // oracle update
+
+        let current_timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        let (price0_cumulative, price1_cumulative, block_timestamp) =
+            token_swap.oracle.current_cumulative_price(
+                U256::from(token_a.amount),
+                U256::from(token_b.amount),
+                current_timestamp,
+            );
+        let mut swap = token_swap;
+
+        swap.oracle
+            .update(price0_cumulative, price1_cumulative, block_timestamp);
+
+        // impl pmm into deposit process
+
+        let k: FixedU256 = FixedU256::one()
+            .checked_mul_floor(FixedU256::new(5.into()).unwrap())
+            .unwrap()
+            .checked_div_floor(FixedU256::new(10.into()).unwrap())
+            .unwrap();
+        let r_status = RStatus::One;
+        let oracle = FixedU256::new_from_int(swap.oracle.consult(*token_a_info.key, 1.into()), 18)?;
+        let base_balance = FixedU256::new_from_int(U256::from(token_a.amount), 18)?;
+        let quote_balance = FixedU256::new_from_int(U256::from(token_b.amount), 18)?;
+
+        let token_a_mint = Self::unpack_mint(&token_a_info.data.borrow())?;
+        let token_b_mint = Self::unpack_mint(&token_b_info.data.borrow())?;
+        if token_a_mint.decimals != token_b_mint.decimals {
+            return Err(SwapError::MismatchedDecimals.into());
+        }
+        if pool_mint.decimals != token_a_mint.decimals {
+            return Err(SwapError::MismatchedDecimals.into());
+        }
+
+        let target_base_token_amount = FixedU256::new_from_int(U256::from(token_a_mint.decimals), 18)?;
+        let target_quote_token_amount = FixedU256::new_from_int(U256::from(token_b_mint.decimals), 18)?;
+
+        let v1curve = V1curve::new(
+            k,
+            r_status,
+            oracle,
+            base_balance,
+            quote_balance,
+            target_base_token_amount,
+            target_quote_token_amount
+        );
+
+        let (baseTarget, quoteTarget) =v1curve.get_expected_target()?;
+        let totalBaseCapital = FixedU256::new_from_int(U256::from(token_a_mint.supply), 18)?;
+        let mut capital = FixedU256::new_from_int(token_a_amount.into(), 18)?;
+
+        if capital.into_u256_ceil().is_zero() {
+            capital = capital.checked_add(baseTarget)?;
+        } else if baseTarget.into_u256_ceil() > 0.into() {
+            capital = FixedU256::new_from_int(token_a_amount.into(), 18)?
+                .checked_mul_floor(totalBaseCapital)?
+                .checked_div_floor(baseTarget)?;
+        }
+
+        // TODO: mint with capital varaible but not sure about amount - token_a_amount / token_b_amount
+
+
 
         let invariant = StableSwap::new(
             token_swap.initial_amp_factor,

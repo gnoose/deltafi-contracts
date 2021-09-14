@@ -213,7 +213,7 @@ impl V1curve {
     // ============ Helper functions ============
 
     /// return baseTarget, quoteTarget
-    fn _get_expected_target(&self) -> Option<(FixedU256, FixedU256)> {
+    pub fn get_expected_target(&self) -> Option<(FixedU256, FixedU256)> {
         let q = self.quote_balance;
         let b = self.base_balance;
 
@@ -241,7 +241,7 @@ impl V1curve {
 
     /// return midPrice
     fn _get_mid_price(&self) -> Option<FixedU256> {
-        let (base_target, quote_target) = self._get_expected_target()?;
+        let (base_target, quote_target) = self.get_expected_target()?;
 
         if self.r_status == RStatus::BelowOne {
             let mut r = quote_target
@@ -405,7 +405,7 @@ mod tests {
         );
 
         assert_eq!(
-            v1_curve._get_expected_target().unwrap(),
+            v1_curve.get_expected_target().unwrap(),
             (
                 FixedU256::new_from_int(500.into(), 18).unwrap(),
                 FixedU256::new_from_int(16000.into(), 18).unwrap()
