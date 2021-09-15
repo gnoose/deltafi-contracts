@@ -16,13 +16,13 @@ pub fn get_deposit_adjustment_amount(
     if quote_reserve_amount.into_u256_ceil().is_zero()
         && base_reserve_amount.into_u256_ceil().is_zero()
     {
-        return Some((base_in_amount, quote_in_amount))
+        return Some((base_in_amount, quote_in_amount));
     }
 
     if quote_reserve_amount.into_u256_ceil().is_zero()
         && base_reserve_amount.into_u256_ceil() > U256::zero()
     {
-        return Some((base_in_amount, FixedU256::new(U256::zero().into())?))
+        return Some((base_in_amount, FixedU256::new(U256::zero().into())?));
     }
 
     if quote_reserve_amount.into_u256_ceil() > U256::zero()
@@ -47,6 +47,49 @@ pub fn get_deposit_adjustment_amount(
     } else {
         Some((base_in_amount, quote_in_amount))
     }
+}
+
+/// buy shares [round down] - mint amount for lp
+pub fn get_buy_shares(
+    base_balance: FixedU256,
+    quote_balance: FixedU256,
+    base_reserve: FixedU256,
+    quote_reserve: FixedU256,
+    total_supply: FixedU256,
+) -> Option<(FixedU256, FixedU256, FixedU256)> {
+    let base_input = base_balance.checked_sub(base_reserve)?;
+    let quote_input = quote_balance.checked_sub(quote_reserve)?;
+
+    // Round down when withdrawing. Therefore, never be a situation occuring balance is 0 but totalsupply is not 0
+    // But May Happen，reserve >0 But totalSupply = 0
+    let mut share = FixedU256::new_from_int(U256::zero(), 18)?;
+    if total_supply.into_u256_ceil().is_zero() {
+        // case 1. initial supply
+        share = base_balance;
+    } else if base_reserve.into_u256_ceil() > U256::zero()
+        && quote_reserve.into_u256_ceil().is_zero()
+    {
+        // case 2. supply when quote reserve is 0
+        share = base_input
+            .checked_mul_floor(total_supply)?
+            .checked_div_floor(base_reserve)?;
+    } else if base_reserve.into_u256_ceil() > U256::zero()
+        && quote_reserve.into_u256_ceil() > U256::zero()
+    {
+        // case 3. normal case
+        let base_input_ratio = base_input.checked_div_floor(base_reserve)?;
+        let quote_input_ratio = quote_input.checked_div_floor(quote_reserve)?;
+        let mint_ratio;
+        let new_quote_input_ratio =
+            quote_input_ratio.take_and_scale(base_input_ratio.base_point)?;
+        if new_quote_input_ratio.inner < base_input_ratio.inner {
+            mint_ratio = quote_input_ratio;
+        } else {
+            mint_ratio = base_input_ratio;
+        }
+        share = total_supply.checked_mul_floor(mint_ratio)?;
+    }
+    Some((share, base_input, quote_input))
 }
 
 /// integrate curve from v1 to v2  = i * delta * (1 - k + k(v0^2 / v1 /v2))
@@ -186,6 +229,22 @@ mod tests {
             .unwrap()
             .checked_div_floor(FixedU256::new(10.into()).unwrap())
             .unwrap();
+
+        assert_eq!(
+            get_buy_shares(
+                FixedU256::new_from_int(1000.into(), 18).unwrap(),
+                FixedU256::new_from_int(2000.into(), 18).unwrap(),
+                FixedU256::new_from_int(800.into(), 18).unwrap(),
+                FixedU256::new_from_int(1600.into(), 18).unwrap(),
+                FixedU256::new_from_int(10000.into(), 18).unwrap(),
+            )
+            .unwrap(),
+            (
+                FixedU256::new_from_int(2500.into(), 18).unwrap(),
+                FixedU256::new_from_int(200.into(), 18).unwrap(),
+                FixedU256::new_from_int(400.into(), 18).unwrap()
+            )
+        );
 
         assert_eq!(
             get_deposit_adjustment_amount(
