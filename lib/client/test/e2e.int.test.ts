@@ -37,7 +37,10 @@ const FEES: Fees = {
 const INITIAL_TOKEN_A_AMOUNT = LAMPORTS_PER_SOL;
 const INITIAL_TOKEN_B_AMOUNT = LAMPORTS_PER_SOL;
 
-describe("e2e test", () => {
+// Initial amount in each LP token
+const INITIAL_TOKEN_LP_AMOUNT = LAMPORTS_PER_SOL;
+
+describe("e2e test for stable swap", () => {
   // Cluster connection
   let connection: Connection;
   // Fee payer
@@ -410,5 +413,262 @@ describe("e2e test", () => {
     expect(info.amount.toNumber()).toBe(
       oldSwapTokenA.amount.toNumber() - EXPECTED_AMOUNT_OUT
     );
+  });
+});
+
+describe("e2e test for liquidity mining", () => {
+  // Cluster connection
+  let connection: Connection;
+  // authority of the token and accounts
+  let authority: PublicKey;    
+  // nonce used to generate the authority public key
+  let nonce: number;  
+  // owner of the user accounts
+  let owner: Account;  
+  // Token deltafi
+  let tokenDeltafi: Token;
+  let userDeltafiAccount: PublicKey;
+  // Farming tokens
+  let mintPool: Token;
+  let tokenAccountPool: PublicKey;
+  // Admin fee accounts
+  let adminFeeAccountPool: PublicKey;
+  // Farm
+  let farm: Farm;
+  let farmAccount: Account;
+  let farmBaseAccount: Account;
+  let farmProgramId: PublicKey;
+
+  beforeAll(async (done) => {
+    connection = new Connection(CLUSTER_URL, "single");
+    payer = await newAccountWithLamports(connection, LAMPORTS_PER_SOL);
+    owner = await newAccountWithLamports(connection, LAMPORTS_PER_SOL);
+
+    farmProgramId = getDeploymentInfo().stableSwapProgramId;
+    farmAccount = new Account();
+    farmBaseAccount = new Account();
+    try {
+      [authority, nonce] = await PublicKey.findProgramAddress(
+        [farmAccount.publickKey.toBuffer()],
+        farmProgramId,
+      )
+    } catch (e) {
+      throw new Error(e);
+    }
+    // creating deltafi mint
+    try {
+      tokenDeltafi = await Token.createMint(
+        connection,
+        payer,
+        authority,
+        null,
+        DEFAULT_TOKEN_DECIMALS,
+        TOKEN_PROGRAM_ID,
+      );
+    } catch (e) {
+      throw new Error(e);
+    }
+    // creating deltafi account
+    try {
+      userDeltafiAccount = await tokenDeltafi.createAccount(owner.publicKey);
+    } catch (e) {
+      throw new Error(e);
+    }
+    // creating token LP
+    try {
+      mintPool = await Token.createMint(
+        connection,
+        payer,
+        owner.publicKey,
+        null,
+        DEFAULT_TOKEN_DECIMALS,
+        TOKEN_PROGRAM_ID,
+      );
+    } catch (e) {
+      throw new Error(e);
+    }
+    // create token pool account then mint to it
+    try {
+      adminFeeAccountPool = await mintPool.createAccount(owner.publicKey);
+      tokenAccountPool = await mintPool.createAccount(authority);
+      await mintPool.mintTo(tokenAccountPool, owner, [], INITIAL_TOKEN_LP_AMOUNT)
+    } catch (e) {
+      throw new Error(e);
+    }
+    // Sleep to make sure token accounts are created ...
+    await sleep(500);
+
+    // creating farm
+    try {
+      farm = await Farm.createFarm(
+        connection,
+        payer,
+        farmAccount,
+        authority,
+        owner.publicKey,
+        adminFeeAccountPool,
+        mintPool.publicKey,
+        tokenAccountPool,
+        tokenDeltafi.publicKey,
+        userDeltafiAccount,
+        farmProgramId,
+        TOKEN_PROGRAM_ID,
+        nonce,
+        FEES
+      );
+    } catch (e) {
+      throw new Error(e);
+    }
+
+    done();
+  }, BOOTSTRAP_TIMEOUT);
+
+  // not sure
+  // it("bootstrapper's LP balance", async () => {
+  //   const info = await tokenPool.getAccountInfo(userPoolAccount);
+  //   expect(info.amount.toNumber()).toEqual(
+  //     INITIAL_TOKEN_A_AMOUNT + INITIAL_TOKEN_B_AMOUNT
+  //   );
+  // });
+
+  it("loadFarm", async () => {
+    let fetchedFarm: Farm;
+    try {
+      fetchedFarm = await Farm.loadFarm(
+        connection,
+        farmAccount.publicKey,
+        farmBaseAccount.publicKey,
+        farmProgramId,
+      );
+    } catch (e) {
+      throw new Error(e);
+    }
+
+    expect(fetchedFarm.farm).toEqual(farmAccount.publicKey);
+    expect(fetchedFarm.adminFeeAccountPool).toEqual(adminFeeAccountPool);
+    // ...
+  });
+
+  // not sure
+  // it("getVirtualPrice", async () => {
+  //   expect(await stableSwap.getVirtualPrice()).toBe(1);
+  // });
+
+  it("deposit", async() => {
+    const depositeAmountPool = LAMPORTS_PER_SOL;
+    // creating depostor token lp account
+    const userAccountPool = await mintPool.createAccount(owner.publicKey);
+    await mintPool.mintTo(userAccountPool, owner, [], depositeAmountPool);
+    await mintPool.approve(userAccountPool, authority, owner, [], depositeAmountPool);
+    // Make sure all token accounts are created and approved
+    await sleep(500);
+    try {
+      // Depositing into swap
+      const txn = farm.deposit(
+        userAccountPool,
+        userDeltafiAccount,
+        depositeAmountPool,
+        0, // To avoid slippage errors
+      );
+      await sendAndConfirmTransaction("deposit", connection, txn, payer);
+    } catch (e) {
+      throw new Error(e);
+    }
+
+    let info = await mintPool.getAccountInfo(userAccountPool);
+    expect(info.amount.toNumber()).toBe(0);
+    info = await mintPool.getAccountInfo(tokenAccountPool);
+    expect(info.amount.toNumber()).toBe(
+      INITIAL_TOKEN_LP_AMOUNT + depositeAmountPool
+    );
+
+    // change the time with future then check reward using printPendingDetafi
+    // ...
+  });
+
+  it ("withdraw", async() => {
+    const withdrawalAmount = 100000;
+    const poolMintInfo = await tokenAccountPool.getMintInfo();
+    const oldSupply = poolMintInfo.supply.toNumber();
+    const oldFarmPool = await mintPool.getAccountInfo(tokenAccountPool);
+    const oldPoolToken = await tokenAccountPool.getAccountInfo(userPoolAcount);
+    const expectedWithdrawPool = Math.floor(
+      (oldFarmPool.amount.toNumber * withdrawalAmount) / oldSupply
+    );
+
+    // creating withdraw token LP account
+    const userAccountPool = await mintPool.createAccount(owner.publicKey);
+    // approving withdrawal from pool and deltafi account
+    await tokenAccountPool.approve(
+      userPoolAccount,
+      authority,
+      [],
+      withdrawalAmount
+    );
+    // make sure all token accounts are created and approved
+    await sleep(500);
+
+    try {
+      const txn = await farm.withdraw(
+        userAccountPool,
+        userDeltafiAccount,
+        withdrawalAmount,
+        0, // To avoid slippage errors
+        0, // To avoid slippage errors
+      );
+      await sendAndConfirmTransaction("withdraw", connection, txn, payer);
+    } catch(e) {
+      throw new Error(e);
+    }
+
+    let info = await mintPool.getAccountInfo(userAccountPool);
+    expect(info.amount.toNumber()).toBe(expectedWithdrawPool);
+    // ...
+
+    // change the time with future then check reward using printPendingDetafi
+    // ...    
+  });
+
+  it ("emergencyWithdraw", async() => {
+    const withdrawalAmount = 100000;
+    const poolMintInfo = await tokenAccountPool.getMintInfo();
+    const oldSupply = poolMintInfo.supply.toNumber();
+    const oldFarmPool = await mintPool.getAccountInfo(tokenAccountPool);
+    const oldPoolToken = await tokenAccountPool.getAccountInfo(userPoolAcount);
+    const expectedWithdrawPool = Math.floor(
+      (oldFarmPool.amount.toNumber * withdrawalAmount) / oldSupply
+    );
+
+    // creating withdraw token LP account
+    const userAccountPool = await mintPool.createAccount(owner.publicKey);
+    // approving withdrawal from pool and deltafi account
+    await tokenAccountPool.approve(
+      userPoolAccount,
+      authority,
+      [],
+      withdrawalAmount
+    );
+    // make sure all token accounts are created and approved
+    await sleep(500);
+
+    try {
+      const txn = await farm.emergencyWithdraw(
+        userAccountPool,
+        userDeltafiAccount,
+        withdrawalAmount,
+        0, // To avoid slippage errors
+        0, // To avoid slippage errors
+      );
+      await sendAndConfirmTransaction("emergencyWithdraw", connection, txn, payer);
+    } catch(e) {
+      throw new Error(e);
+    }
+
+    let info = await mintPool.getAccountInfo(userAccountPool);
+    expect(info.amount.toNumber()).toBe(expectedWithdrawPool);
+    // ...
+
+    // change the time with future then check reward is zero using printPendingDetafi
+    // ...    
   });
 });

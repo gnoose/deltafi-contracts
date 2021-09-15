@@ -246,3 +246,375 @@ export const withdrawInstruction = (
     data,
   });
 };
+
+
+export const createInitFarmInstruction = (
+  farmAccount: Account,
+  authority: PublicKey,
+  adminAccount: PublicKey,
+  adminFeeAccountPool: PublicKey,
+  tokenMintPool: PublicKey,
+  tokenAccountPool: PublicKey,
+  deltafiTokenMint: PublicKey,
+  deltafiTokenAccount: PublicKey,
+  farmProgramId: PublicKey,
+  tokenProgramId: PublicKey,
+  nonce: number,
+  fees: Fees,
+): TransactionInstruction => {
+  const keys = [
+    { pubkey: farmAccount.publicKey, isSigner: false, isWritable: true },
+    { pubkey: authority.publicKey, isSigner: false, isWritable: false },
+    { pubkey: adminAccount.publicKey, isSigner: false, isWritable: false },
+    { pubkey: adminFeeAccountPool.publicKey, isSigner: false, isWritable: false },
+    { pubkey: tokenMintPool.publicKey, isSigner: false, isWritable: false },
+    { pubkey: tokenAccountPool.publicKey, isSigner: false, isWritable: false },
+    { pubkey: deltafiTokenMint.publicKey, isSigner: false, isWritable: true },
+    { pubkey: deltafiTokenAccount.publicKey, isSigner: false, isWritable: true },
+    { pubkey: tokenProgramId.publicKey, isSigner: false, isWritable: false },
+  ];
+  const dataLayout = BufferLayout.struct([
+    BufferLayout.u8("instruction"),
+    BufferLayout.u8("nonce"),
+    Uint64Layout("adminTradeFeeNumerator"),
+    Uint64Layout("adminTradeFeeDenominator"),
+    Uint64Layout("adminWithdrawFeeNumerator"),
+    Uint64Layout("adminWithdrawFeeDenominator"),
+    Uint64Layout("tradeFeeNumerator"),
+    Uint64Layout("tradeFeeDenominator"),
+    Uint64Layout("withdrawFeeNumerator"),
+    Uint64Layout("withdrawFeeDenominator"),
+  ]);
+  let data = Buffer.alloc(dataLayout.span);
+  {
+    const encodeLength = dataLayout.encode(
+      {
+        instruction: 108, // InitializeFarm instruction
+        nonce,
+        adminTradeFeeNumerator: new NumberU64(
+          fees.adminTradeFeeNumerator
+        ).toBuffer(),
+        adminTradeFeeDenominator: new NumberU64(
+          fees.adminTradeFeeDenominator
+        ).toBuffer(),
+        adminWithdrawFeeNumerator: new NumberU64(
+          fees.adminWithdrawFeeNumerator
+        ).toBuffer(),
+        adminWithdrawFeeDenominator: new NumberU64(
+          fees.adminWithdrawFeeDenominator
+        ).toBuffer(),
+        tradeFeeNumerator: new NumberU64(fees.tradeFeeNumerator).toBuffer(),
+        tradeFeeDenominator: new NumberU64(fees.tradeFeeDenominator).toBuffer(),
+        withdrawFeeNumerator: new NumberU64(
+          fees.withdrawFeeNumerator
+        ).toBuffer(),
+        withdrawFeeDenominator: new NumberU64(
+          fees.withdrawFeeDenominator
+        ).toBuffer(),
+      },
+      data
+    );
+    data = data.slice(0, encodeLength);
+  }
+  return new TransactionInstruction({
+    keys,
+    programId: farmProgramId,
+    data,
+  });
+}
+
+export const farmDepositInstruction = (  farmAccount: Account,
+  authority: PublicKey,
+  adminAccount: PublicKey,
+  adminFeeAccountPool: PublicKey,
+  tokenMintPool: PublicKey,
+  tokenAccountPool: PublicKey,
+  deltafiTokenMint: PublicKey,
+  deltafiTokenAccount: PublicKey,
+  farmProgramId: PublicKey,
+  tokenProgramId: PublicKey,
+  nonce: number,
+  fees: Fees,
+): TransactionInstruction => {
+  const keys = [
+    { pubkey: farmAccount.publicKey, isSigner: false, isWritable: true },
+    { pubkey: authority.publicKey, isSigner: false, isWritable: false },
+    { pubkey: adminAccount.publicKey, isSigner: false, isWritable: false },
+    { pubkey: adminFeeAccountPool.publicKey, isSigner: false, isWritable: false },
+    { pubkey: tokenMintPool.publicKey, isSigner: false, isWritable: false },
+    { pubkey: tokenAccountPool.publicKey, isSigner: false, isWritable: false },
+    { pubkey: deltafiTokenMint.publicKey, isSigner: false, isWritable: true },
+    { pubkey: deltafiTokenAccount.publicKey, isSigner: false, isWritable: true },
+    { pubkey: tokenProgramId.publicKey, isSigner: false, isWritable: false },
+  ];
+  const dataLayout = BufferLayout.struct([
+    BufferLayout.u8("instruction"),
+    BufferLayout.u8("nonce"),
+    Uint64Layout("adminTradeFeeNumerator"),
+    Uint64Layout("adminTradeFeeDenominator"),
+    Uint64Layout("adminWithdrawFeeNumerator"),
+    Uint64Layout("adminWithdrawFeeDenominator"),
+    Uint64Layout("tradeFeeNumerator"),
+    Uint64Layout("tradeFeeDenominator"),
+    Uint64Layout("withdrawFeeNumerator"),
+    Uint64Layout("withdrawFeeDenominator"),
+  ]);
+  let data = Buffer.alloc(dataLayout.span);
+  {
+    const encodeLength = dataLayout.encode(
+      {
+        instruction: 108, // InitializeFarm instruction
+        nonce,
+        adminTradeFeeNumerator: new NumberU64(
+          fees.adminTradeFeeNumerator
+        ).toBuffer(),
+        adminTradeFeeDenominator: new NumberU64(
+          fees.adminTradeFeeDenominator
+        ).toBuffer(),
+        adminWithdrawFeeNumerator: new NumberU64(
+          fees.adminWithdrawFeeNumerator
+        ).toBuffer(),
+        adminWithdrawFeeDenominator: new NumberU64(
+          fees.adminWithdrawFeeDenominator
+        ).toBuffer(),
+        tradeFeeNumerator: new NumberU64(fees.tradeFeeNumerator).toBuffer(),
+        tradeFeeDenominator: new NumberU64(fees.tradeFeeDenominator).toBuffer(),
+        withdrawFeeNumerator: new NumberU64(
+          fees.withdrawFeeNumerator
+        ).toBuffer(),
+        withdrawFeeDenominator: new NumberU64(
+          fees.withdrawFeeDenominator
+        ).toBuffer(),
+      },
+      data
+    );
+    data = data.slice(0, encodeLength);
+  }
+  return new TransactionInstruction({
+    keys,
+    programId: farmProgramId,
+    data,
+  });
+}
+
+export const farmWithdrawInstruction = (  farmAccount: Account,
+  authority: PublicKey,
+  adminAccount: PublicKey,
+  adminFeeAccountPool: PublicKey,
+  tokenMintPool: PublicKey,
+  tokenAccountPool: PublicKey,
+  deltafiTokenMint: PublicKey,
+  deltafiTokenAccount: PublicKey,
+  farmProgramId: PublicKey,
+  tokenProgramId: PublicKey,
+  nonce: number,
+  fees: Fees,
+): TransactionInstruction => {
+  const keys = [
+    { pubkey: farmAccount.publicKey, isSigner: false, isWritable: true },
+    { pubkey: authority.publicKey, isSigner: false, isWritable: false },
+    { pubkey: adminAccount.publicKey, isSigner: false, isWritable: false },
+    { pubkey: adminFeeAccountPool.publicKey, isSigner: false, isWritable: false },
+    { pubkey: tokenMintPool.publicKey, isSigner: false, isWritable: false },
+    { pubkey: tokenAccountPool.publicKey, isSigner: false, isWritable: false },
+    { pubkey: deltafiTokenMint.publicKey, isSigner: false, isWritable: true },
+    { pubkey: deltafiTokenAccount.publicKey, isSigner: false, isWritable: true },
+    { pubkey: tokenProgramId.publicKey, isSigner: false, isWritable: false },
+  ];
+  const dataLayout = BufferLayout.struct([
+    BufferLayout.u8("instruction"),
+    BufferLayout.u8("nonce"),
+    Uint64Layout("adminTradeFeeNumerator"),
+    Uint64Layout("adminTradeFeeDenominator"),
+    Uint64Layout("adminWithdrawFeeNumerator"),
+    Uint64Layout("adminWithdrawFeeDenominator"),
+    Uint64Layout("tradeFeeNumerator"),
+    Uint64Layout("tradeFeeDenominator"),
+    Uint64Layout("withdrawFeeNumerator"),
+    Uint64Layout("withdrawFeeDenominator"),
+  ]);
+  let data = Buffer.alloc(dataLayout.span);
+  {
+    const encodeLength = dataLayout.encode(
+      {
+        instruction: 108, // InitializeFarm instruction
+        nonce,
+        adminTradeFeeNumerator: new NumberU64(
+          fees.adminTradeFeeNumerator
+        ).toBuffer(),
+        adminTradeFeeDenominator: new NumberU64(
+          fees.adminTradeFeeDenominator
+        ).toBuffer(),
+        adminWithdrawFeeNumerator: new NumberU64(
+          fees.adminWithdrawFeeNumerator
+        ).toBuffer(),
+        adminWithdrawFeeDenominator: new NumberU64(
+          fees.adminWithdrawFeeDenominator
+        ).toBuffer(),
+        tradeFeeNumerator: new NumberU64(fees.tradeFeeNumerator).toBuffer(),
+        tradeFeeDenominator: new NumberU64(fees.tradeFeeDenominator).toBuffer(),
+        withdrawFeeNumerator: new NumberU64(
+          fees.withdrawFeeNumerator
+        ).toBuffer(),
+        withdrawFeeDenominator: new NumberU64(
+          fees.withdrawFeeDenominator
+        ).toBuffer(),
+      },
+      data
+    );
+    data = data.slice(0, encodeLength);
+  }
+  return new TransactionInstruction({
+    keys,
+    programId: farmProgramId,
+    data,
+  });
+}
+
+export const farmEmergencyWithdrawInstruction = (  farmAccount: Account,
+  authority: PublicKey,
+  adminAccount: PublicKey,
+  adminFeeAccountPool: PublicKey,
+  tokenMintPool: PublicKey,
+  tokenAccountPool: PublicKey,
+  deltafiTokenMint: PublicKey,
+  deltafiTokenAccount: PublicKey,
+  farmProgramId: PublicKey,
+  tokenProgramId: PublicKey,
+  nonce: number,
+  fees: Fees,
+): TransactionInstruction => {
+  const keys = [
+    { pubkey: farmAccount.publicKey, isSigner: false, isWritable: true },
+    { pubkey: authority.publicKey, isSigner: false, isWritable: false },
+    { pubkey: adminAccount.publicKey, isSigner: false, isWritable: false },
+    { pubkey: adminFeeAccountPool.publicKey, isSigner: false, isWritable: false },
+    { pubkey: tokenMintPool.publicKey, isSigner: false, isWritable: false },
+    { pubkey: tokenAccountPool.publicKey, isSigner: false, isWritable: false },
+    { pubkey: deltafiTokenMint.publicKey, isSigner: false, isWritable: true },
+    { pubkey: deltafiTokenAccount.publicKey, isSigner: false, isWritable: true },
+    { pubkey: tokenProgramId.publicKey, isSigner: false, isWritable: false },
+  ];
+  const dataLayout = BufferLayout.struct([
+    BufferLayout.u8("instruction"),
+    BufferLayout.u8("nonce"),
+    Uint64Layout("adminTradeFeeNumerator"),
+    Uint64Layout("adminTradeFeeDenominator"),
+    Uint64Layout("adminWithdrawFeeNumerator"),
+    Uint64Layout("adminWithdrawFeeDenominator"),
+    Uint64Layout("tradeFeeNumerator"),
+    Uint64Layout("tradeFeeDenominator"),
+    Uint64Layout("withdrawFeeNumerator"),
+    Uint64Layout("withdrawFeeDenominator"),
+  ]);
+  let data = Buffer.alloc(dataLayout.span);
+  {
+    const encodeLength = dataLayout.encode(
+      {
+        instruction: 108, // InitializeFarm instruction
+        nonce,
+        adminTradeFeeNumerator: new NumberU64(
+          fees.adminTradeFeeNumerator
+        ).toBuffer(),
+        adminTradeFeeDenominator: new NumberU64(
+          fees.adminTradeFeeDenominator
+        ).toBuffer(),
+        adminWithdrawFeeNumerator: new NumberU64(
+          fees.adminWithdrawFeeNumerator
+        ).toBuffer(),
+        adminWithdrawFeeDenominator: new NumberU64(
+          fees.adminWithdrawFeeDenominator
+        ).toBuffer(),
+        tradeFeeNumerator: new NumberU64(fees.tradeFeeNumerator).toBuffer(),
+        tradeFeeDenominator: new NumberU64(fees.tradeFeeDenominator).toBuffer(),
+        withdrawFeeNumerator: new NumberU64(
+          fees.withdrawFeeNumerator
+        ).toBuffer(),
+        withdrawFeeDenominator: new NumberU64(
+          fees.withdrawFeeDenominator
+        ).toBuffer(),
+      },
+      data
+    );
+    data = data.slice(0, encodeLength);
+  }
+  return new TransactionInstruction({
+    keys,
+    programId: farmProgramId,
+    data,
+  });
+}
+
+export const farmPrintPendingDeltafiInstruction = (  farmAccount: Account,
+  authority: PublicKey,
+  adminAccount: PublicKey,
+  adminFeeAccountPool: PublicKey,
+  tokenMintPool: PublicKey,
+  tokenAccountPool: PublicKey,
+  deltafiTokenMint: PublicKey,
+  deltafiTokenAccount: PublicKey,
+  farmProgramId: PublicKey,
+  tokenProgramId: PublicKey,
+  nonce: number,
+  fees: Fees,
+): TransactionInstruction => {
+  const keys = [
+    { pubkey: farmAccount.publicKey, isSigner: false, isWritable: true },
+    { pubkey: authority.publicKey, isSigner: false, isWritable: false },
+    { pubkey: adminAccount.publicKey, isSigner: false, isWritable: false },
+    { pubkey: adminFeeAccountPool.publicKey, isSigner: false, isWritable: false },
+    { pubkey: tokenMintPool.publicKey, isSigner: false, isWritable: false },
+    { pubkey: tokenAccountPool.publicKey, isSigner: false, isWritable: false },
+    { pubkey: deltafiTokenMint.publicKey, isSigner: false, isWritable: true },
+    { pubkey: deltafiTokenAccount.publicKey, isSigner: false, isWritable: true },
+    { pubkey: tokenProgramId.publicKey, isSigner: false, isWritable: false },
+  ];
+  const dataLayout = BufferLayout.struct([
+    BufferLayout.u8("instruction"),
+    BufferLayout.u8("nonce"),
+    Uint64Layout("adminTradeFeeNumerator"),
+    Uint64Layout("adminTradeFeeDenominator"),
+    Uint64Layout("adminWithdrawFeeNumerator"),
+    Uint64Layout("adminWithdrawFeeDenominator"),
+    Uint64Layout("tradeFeeNumerator"),
+    Uint64Layout("tradeFeeDenominator"),
+    Uint64Layout("withdrawFeeNumerator"),
+    Uint64Layout("withdrawFeeDenominator"),
+  ]);
+  let data = Buffer.alloc(dataLayout.span);
+  {
+    const encodeLength = dataLayout.encode(
+      {
+        instruction: 108, // InitializeFarm instruction
+        nonce,
+        adminTradeFeeNumerator: new NumberU64(
+          fees.adminTradeFeeNumerator
+        ).toBuffer(),
+        adminTradeFeeDenominator: new NumberU64(
+          fees.adminTradeFeeDenominator
+        ).toBuffer(),
+        adminWithdrawFeeNumerator: new NumberU64(
+          fees.adminWithdrawFeeNumerator
+        ).toBuffer(),
+        adminWithdrawFeeDenominator: new NumberU64(
+          fees.adminWithdrawFeeDenominator
+        ).toBuffer(),
+        tradeFeeNumerator: new NumberU64(fees.tradeFeeNumerator).toBuffer(),
+        tradeFeeDenominator: new NumberU64(fees.tradeFeeDenominator).toBuffer(),
+        withdrawFeeNumerator: new NumberU64(
+          fees.withdrawFeeNumerator
+        ).toBuffer(),
+        withdrawFeeDenominator: new NumberU64(
+          fees.withdrawFeeDenominator
+        ).toBuffer(),
+      },
+      data
+    );
+    data = data.slice(0, encodeLength);
+  }
+  return new TransactionInstruction({
+    keys,
+    programId: farmProgramId,
+    data,
+  });
+}
