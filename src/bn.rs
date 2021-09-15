@@ -59,9 +59,11 @@ impl U256 {
 /// FixedU256 struct
 #[derive(Clone, Copy, Debug, PartialEq, Ord, PartialOrd, Eq)]
 pub struct FixedU256 {
-    inner: U256,
+    /// 10**precision * value
+    pub inner: U256,
+
     /// 10**precision
-    base_point: U256,
+    pub base_point: U256,
 }
 
 impl Default for FixedU256 {

@@ -1,6 +1,53 @@
 //! Implement DODOMath calculation
 
-use crate::bn::FixedU256;
+use crate::bn::{FixedU256, U256};
+
+/// calculate deposit amount according to the reserve amount
+//      a_reserve = 0 & b_reserve = 0 => (a_amount, b_amount)
+//      a_reserve > 0 & b_reserve = 0 => (a_amount, 0)
+//      a_reserve > 0 & b_reserve > 0 => (a_amount*ratio1, b_amount*ratio2)
+
+pub fn get_deposit_adjustment_amount(
+    base_in_amount: FixedU256,
+    quote_in_amount: FixedU256,
+    base_reserve_amount: FixedU256,
+    quote_reserve_amount: FixedU256,
+) -> Option<(FixedU256, FixedU256)> {
+    if quote_reserve_amount.into_u256_ceil().is_zero()
+        && base_reserve_amount.into_u256_ceil().is_zero()
+    {
+        return Some((base_in_amount, quote_in_amount))
+    }
+
+    if quote_reserve_amount.into_u256_ceil().is_zero()
+        && base_reserve_amount.into_u256_ceil() > U256::zero()
+    {
+        return Some((base_in_amount, FixedU256::new(U256::zero().into())?))
+    }
+
+    if quote_reserve_amount.into_u256_ceil() > U256::zero()
+        && base_reserve_amount.into_u256_ceil() > U256::zero()
+    {
+        let base_increase_ratio = base_in_amount.checked_div_floor(base_reserve_amount)?;
+        let quote_increase_ratio = quote_in_amount.checked_div_floor(quote_reserve_amount)?;
+
+        let new_quote_increase_ratio =
+            quote_increase_ratio.take_and_scale(base_increase_ratio.base_point)?;
+        if base_increase_ratio.inner <= new_quote_increase_ratio.inner {
+            Some((
+                base_in_amount,
+                quote_reserve_amount.checked_mul_floor(base_increase_ratio)?,
+            ))
+        } else {
+            Some((
+                base_reserve_amount.checked_mul_floor(quote_increase_ratio)?,
+                quote_in_amount,
+            ))
+        }
+    } else {
+        Some((base_in_amount, quote_in_amount))
+    }
+}
 
 /// integrate curve from v1 to v2  = i * delta * (1 - k + k(v0^2 / v1 /v2))
 //         require V0>=V1>=V2>0
@@ -139,6 +186,20 @@ mod tests {
             .unwrap()
             .checked_div_floor(FixedU256::new(10.into()).unwrap())
             .unwrap();
+
+        assert_eq!(
+            get_deposit_adjustment_amount(
+                FixedU256::new_from_int(10.into(), 18).unwrap(),
+                FixedU256::new_from_int(20.into(), 18).unwrap(),
+                FixedU256::new_from_int(500.into(), 18).unwrap(),
+                FixedU256::new_from_int(2000.into(), 18).unwrap(),
+            )
+            .unwrap(),
+            (
+                FixedU256::new_from_int(5.into(), 18).unwrap(),
+                FixedU256::new_from_int(20.into(), 18).unwrap()
+            )
+        );
 
         assert_eq!(
             general_integrate(q0, q1, q1.checked_sub(delta_b).unwrap(), i, k).unwrap(),
