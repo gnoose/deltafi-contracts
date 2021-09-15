@@ -18,7 +18,7 @@ use spl_token::state::Mint;
 
 use crate::{
     admin::process_admin_instruction,
-    bn::{U256, FixedU256},
+    bn::{FixedU256, U256},
     curve::{StableSwap, MAX_AMP, MIN_AMP, ZERO_TS},
     error::SwapError,
     fees::Fees,
@@ -26,11 +26,12 @@ use crate::{
         AdminInstruction, DepositData, InitializeData, SwapData, SwapInstruction, WithdrawData,
         WithdrawOneData,
     },
+    math::{get_deposit_adjustment_amount, get_buy_shares},
     oracle::Oracle,
     pool_converter::PoolTokenConverter,
     state::SwapInfo,
     utils,
-    v1curve::{V1curve, RStatus},
+    v1curve::{RStatus, V1curve},
 };
 
 /// Program state handler. (and general curve params)
@@ -455,72 +456,22 @@ impl Processor {
 
         // impl pmm into deposit process
 
-        let k: FixedU256 = FixedU256::one()
-            .checked_mul_floor(FixedU256::new(5.into()).unwrap())
-            .unwrap()
-            .checked_div_floor(FixedU256::new(10.into()).unwrap())
-            .unwrap();
-        let r_status = RStatus::One;
-        let oracle = FixedU256::new_from_int(swap.oracle.consult(*token_a_info.key, 1.into()), 18)?;
-        let base_balance = FixedU256::new_from_int(U256::from(token_a.amount), 18)?;
-        let quote_balance = FixedU256::new_from_int(U256::from(token_b.amount), 18)?;
+        let (base_adjusted_in_amount, quote_adjusted_in_amount) = get_deposit_adjustment_amount(
+            FixedU256::new_from_int(token_a_amount.into(), 18)?,
+            FixedU256::new_from_int(token_a_amount.into(), 18)?,
+            FixedU256::new_from_int(token_a.amount.into(), 18)?,
+            FixedU256::new_from_int(token_b.amount.into(), 18)?,
+        )?;
 
-        let token_a_mint = Self::unpack_mint(&token_a_info.data.borrow())?;
-        let token_b_mint = Self::unpack_mint(&token_b_info.data.borrow())?;
-        if token_a_mint.decimals != token_b_mint.decimals {
-            return Err(SwapError::MismatchedDecimals.into());
-        }
-        if pool_mint.decimals != token_a_mint.decimals {
-            return Err(SwapError::MismatchedDecimals.into());
-        }
+        let (share_amount, base_input, quote_amount) = get_buy_shares(
+            FixedU256::new_from_int(token_a_amount.into(), 18)?,
+            FixedU256::new_from_int(token_a_amount.into(), 18)?,
+            FixedU256::new_from_int(token_a.amount.into(), 18)?,
+            FixedU256::new_from_int(token_b.amount.into(), 18)?,
+            FixedU256::new_from_int(pool_mint.supply.into(), 18)?
+        )?;
 
-        let target_base_token_amount = FixedU256::new_from_int(U256::from(token_a_mint.decimals), 18)?;
-        let target_quote_token_amount = FixedU256::new_from_int(U256::from(token_b_mint.decimals), 18)?;
-
-        let v1curve = V1curve::new(
-            k,
-            r_status,
-            oracle,
-            base_balance,
-            quote_balance,
-            target_base_token_amount,
-            target_quote_token_amount
-        );
-
-        let (baseTarget, quoteTarget) =v1curve.get_expected_target()?;
-        let totalBaseCapital = FixedU256::new_from_int(U256::from(token_a_mint.supply), 18)?;
-        let mut capital = FixedU256::new_from_int(token_a_amount.into(), 18)?;
-
-        if capital.into_u256_ceil().is_zero() {
-            capital = capital.checked_add(baseTarget)?;
-        } else if baseTarget.into_u256_ceil() > 0.into() {
-            capital = FixedU256::new_from_int(token_a_amount.into(), 18)?
-                .checked_mul_floor(totalBaseCapital)?
-                .checked_div_floor(baseTarget)?;
-        }
-
-        // TODO: mint with capital varaible but not sure about amount - token_a_amount / token_b_amount
-
-
-
-        let invariant = StableSwap::new(
-            token_swap.initial_amp_factor,
-            token_swap.target_amp_factor,
-            clock.unix_timestamp,
-            token_swap.start_ramp_ts,
-            token_swap.stop_ramp_ts,
-        );
-        let mint_amount_u256 = invariant
-            .compute_mint_amount_for_deposit(
-                U256::from(token_a_amount),
-                U256::from(token_b_amount),
-                U256::from(token_a.amount),
-                U256::from(token_b.amount),
-                U256::from(pool_mint.supply),
-                &token_swap.fees,
-            )
-            .ok_or(SwapError::CalculationFailure)?;
-        let mint_amount = U256::to_u64(mint_amount_u256)?;
+        let mint_amount = U256::to_u64(share_amount.into_u256_ceil())?;
         if mint_amount < min_mint_amount {
             return Err(SwapError::ExceededSlippage.into());
         }
@@ -532,7 +483,7 @@ impl Processor {
             token_a_info.clone(),
             authority_info.clone(),
             token_swap.nonce,
-            token_a_amount,
+            U256::to_u64(base_adjusted_in_amount.into_u256_ceil())?,
         )?;
         Self::token_transfer(
             swap_info.key,
@@ -541,7 +492,7 @@ impl Processor {
             token_b_info.clone(),
             authority_info.clone(),
             token_swap.nonce,
-            token_b_amount,
+            U256::to_u64(quote_adjusted_in_amount.into_u256_ceil())?,
         )?;
         Self::token_mint_to(
             swap_info.key,
@@ -552,6 +503,107 @@ impl Processor {
             token_swap.nonce,
             mint_amount,
         )?;
+
+        /***
+
+               let k: FixedU256 = FixedU256::one()
+                   .checked_mul_floor(FixedU256::new(5.into()).unwrap())
+                   .unwrap()
+                   .checked_div_floor(FixedU256::new(10.into()).unwrap())
+                   .unwrap();
+               let r_status = RStatus::One;
+               let oracle = FixedU256::new_from_int(swap.oracle.consult(*token_a_info.key, 1.into()), 18)?;
+               let base_balance = FixedU256::new_from_int(U256::from(token_a.amount), 18)?;
+               let quote_balance = FixedU256::new_from_int(U256::from(token_b.amount), 18)?;
+
+               let token_a_mint = Self::unpack_mint(&token_a_info.data.borrow())?;
+               let token_b_mint = Self::unpack_mint(&token_b_info.data.borrow())?;
+               if token_a_mint.decimals != token_b_mint.decimals {
+                   return Err(SwapError::MismatchedDecimals.into());
+               }
+               if pool_mint.decimals != token_a_mint.decimals {
+                   return Err(SwapError::MismatchedDecimals.into());
+               }
+
+               let target_base_token_amount = FixedU256::new_from_int(U256::from(token_a_mint.decimals), 18)?;
+               let target_quote_token_amount = FixedU256::new_from_int(U256::from(token_b_mint.decimals), 18)?;
+
+               let v1curve = V1curve::new(
+                   k,
+                   r_status,
+                   oracle,
+                   base_balance,
+                   quote_balance,
+                   target_base_token_amount,
+                   target_quote_token_amount
+               );
+
+               let (baseTarget, quoteTarget) =v1curve.get_expected_target()?;
+               let totalBaseCapital = FixedU256::new_from_int(U256::from(token_a_mint.supply), 18)?;
+               let mut capital = FixedU256::new_from_int(token_a_amount.into(), 18)?;
+
+               if capital.into_u256_ceil().is_zero() {
+                   capital = capital.checked_add(baseTarget)?;
+               } else if baseTarget.into_u256_ceil() > U256::zero() {
+                   capital = FixedU256::new_from_int(token_a_amount.into(), 18)?
+                       .checked_mul_floor(totalBaseCapital)?
+                       .checked_div_floor(baseTarget)?;
+               }
+
+               // TODO: mint with capital varaible but not sure about amount - token_a_amount / token_b_amount
+
+
+
+               let invariant = StableSwap::new(
+                   token_swap.initial_amp_factor,
+                   token_swap.target_amp_factor,
+                   clock.unix_timestamp,
+                   token_swap.start_ramp_ts,
+                   token_swap.stop_ramp_ts,
+               );
+               let mint_amount_u256 = invariant
+                   .compute_mint_amount_for_deposit(
+                       U256::from(token_a_amount),
+                       U256::from(token_b_amount),
+                       U256::from(token_a.amount),
+                       U256::from(token_b.amount),
+                       U256::from(pool_mint.supply),
+                       &token_swap.fees,
+                   )
+                   .ok_or(SwapError::CalculationFailure)?;
+               let mint_amount = U256::to_u64(mint_amount_u256)?;
+               if mint_amount < min_mint_amount {
+                   return Err(SwapError::ExceededSlippage.into());
+               }
+
+               Self::token_transfer(
+                   swap_info.key,
+                   token_program_info.clone(),
+                   source_a_info.clone(),
+                   token_a_info.clone(),
+                   authority_info.clone(),
+                   token_swap.nonce,
+                   token_a_amount,
+               )?;
+               Self::token_transfer(
+                   swap_info.key,
+                   token_program_info.clone(),
+                   source_b_info.clone(),
+                   token_b_info.clone(),
+                   authority_info.clone(),
+                   token_swap.nonce,
+                   token_b_amount,
+               )?;
+               Self::token_mint_to(
+                   swap_info.key,
+                   token_program_info.clone(),
+                   pool_mint_info.clone(),
+                   dest_info.clone(),
+                   authority_info.clone(),
+                   token_swap.nonce,
+                   mint_amount,
+               )?;
+        ***/
         Ok(())
     }
 
