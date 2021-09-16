@@ -22,7 +22,7 @@ pub fn get_deposit_adjustment_amount(
     if quote_reserve_amount.into_u256_ceil().is_zero()
         && base_reserve_amount.into_u256_ceil() > U256::zero()
     {
-        return Some((base_in_amount, FixedU256::new(U256::zero().into())?));
+        return Some((base_in_amount, FixedU256::new(U256::zero().into())));
     }
 
     if quote_reserve_amount.into_u256_ceil() > U256::zero()
@@ -62,7 +62,7 @@ pub fn get_buy_shares(
 
     // Round down when withdrawing. Therefore, never be a situation occuring balance is 0 but totalsupply is not 0
     // But May Happen，reserve >0 But totalSupply = 0
-    let mut share = FixedU256::new_from_int(U256::zero(), 18)?;
+    let mut share = FixedU256::zero();
     if total_supply.into_u256_ceil().is_zero() {
         // case 1. initial supply
         share = base_balance;
@@ -161,7 +161,7 @@ pub fn solve_quadratic_function_for_trade(
     // // calculate sqrt
     let mut square_root = FixedU256::one()
         .checked_sub(k)?
-        .checked_mul_floor(FixedU256::new(4.into())?)?
+        .checked_mul_floor(FixedU256::new(4.into()))?
         .checked_mul_floor(k)?
         .checked_mul_floor(q0)?
         .checked_mul_floor(q0)?;
@@ -170,7 +170,7 @@ pub fn solve_quadratic_function_for_trade(
     // final res
     let denominator = FixedU256::one()
         .checked_sub(k)?
-        .checked_mul_floor(FixedU256::new(2.into())?)?;
+        .checked_mul_floor(FixedU256::new(2.into()))?;
 
     let numerator;
     if minus_b_sig {
@@ -198,7 +198,7 @@ pub fn solve_quadratic_function_for_target(
     // V0 = V1+V1*(sqrt-1)/2k
     let mut sqrt = k
         .checked_mul_floor(fair_amount)?
-        .checked_mul_floor(FixedU256::new(4.into())?)?
+        .checked_mul_floor(FixedU256::new(4.into()))?
         .checked_div_ceil(v1)?;
     sqrt = sqrt
         .checked_add(FixedU256::one())?
@@ -207,7 +207,7 @@ pub fn solve_quadratic_function_for_target(
 
     let premium = sqrt
         .checked_sub(FixedU256::one())?
-        .checked_div_ceil(k.checked_mul_floor(FixedU256::new(2.into())?)?)?;
+        .checked_div_ceil(k.checked_mul_floor(FixedU256::new(2.into()))?)?;
 
     // V0 is greater than or equal to V1 according to the solution
     v1.checked_mul_floor(premium.checked_add(FixedU256::one())?)
@@ -225,9 +225,9 @@ mod tests {
         let delta_b: FixedU256 = FixedU256::new_from_int(200.into(), 18).unwrap();
         let i_delta_b: FixedU256 = i.checked_mul_floor(delta_b).unwrap();
         let k: FixedU256 = FixedU256::one()
-            .checked_mul_floor(FixedU256::new(5.into()).unwrap())
+            .checked_mul_floor(FixedU256::new(5.into()))
             .unwrap()
-            .checked_div_floor(FixedU256::new(10.into()).unwrap())
+            .checked_div_floor(FixedU256::new(10.into()))
             .unwrap();
 
         assert_eq!(

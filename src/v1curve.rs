@@ -283,9 +283,9 @@ mod tests {
     #[test]
     fn basic() {
         let k: FixedU256 = FixedU256::one()
-            .checked_mul_floor(FixedU256::new(5.into()).unwrap())
+            .checked_mul_floor(FixedU256::new(5.into()))
             .unwrap()
-            .checked_div_floor(FixedU256::new(10.into()).unwrap())
+            .checked_div_floor(FixedU256::new(10.into()))
             .unwrap();
         let mut r_status = RStatus::One;
         let oracle: FixedU256 = FixedU256::new_from_int(100.into(), 18).unwrap();
@@ -381,10 +381,9 @@ mod tests {
         );
 
         let value = FixedU256::new(995049300.into())
+            .checked_mul_floor(FixedU256::new(100000.into()))
             .unwrap()
-            .checked_mul_floor(FixedU256::new(100000.into()).unwrap())
-            .unwrap()
-            .checked_mul_floor(FixedU256::new(100000.into()).unwrap())
+            .checked_mul_floor(FixedU256::new(100000.into()))
             .unwrap();
         assert_eq!(
             v1_curve.r_above_back_to_one().unwrap(),
