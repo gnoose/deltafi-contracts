@@ -1,6 +1,9 @@
 //! Implement DODOMath calculation
 
 use crate::bn::{FixedU256, U256};
+use solana_program::{
+    program_error::{PrintProgramError, ProgramError},
+};
 
 /// calculate deposit amount according to the reserve amount
 //      a_reserve = 0 & b_reserve = 0 => (a_amount, b_amount)
@@ -12,17 +15,17 @@ pub fn get_deposit_adjustment_amount(
     quote_in_amount: FixedU256,
     base_reserve_amount: FixedU256,
     quote_reserve_amount: FixedU256,
-) -> Option<(FixedU256, FixedU256)> {
+) -> Result<(FixedU256, FixedU256), ProgramError> {
     if quote_reserve_amount.into_u256_ceil().is_zero()
         && base_reserve_amount.into_u256_ceil().is_zero()
     {
-        return Some((base_in_amount, quote_in_amount));
+        return Ok((base_in_amount, quote_in_amount));
     }
 
     if quote_reserve_amount.into_u256_ceil().is_zero()
         && base_reserve_amount.into_u256_ceil() > U256::zero()
     {
-        return Some((base_in_amount, FixedU256::new(U256::zero().into())));
+        return Ok((base_in_amount, FixedU256::new(U256::zero().into())));
     }
 
     if quote_reserve_amount.into_u256_ceil() > U256::zero()
@@ -34,18 +37,18 @@ pub fn get_deposit_adjustment_amount(
         let new_quote_increase_ratio =
             quote_increase_ratio.take_and_scale(base_increase_ratio.base_point())?;
         if base_increase_ratio.inner() <= new_quote_increase_ratio.inner() {
-            Some((
+            Ok((
                 base_in_amount,
                 quote_reserve_amount.checked_mul_floor(base_increase_ratio)?,
             ))
         } else {
-            Some((
+            Ok((
                 base_reserve_amount.checked_mul_floor(quote_increase_ratio)?,
                 quote_in_amount,
             ))
         }
     } else {
-        Some((base_in_amount, quote_in_amount))
+        Ok((base_in_amount, quote_in_amount))
     }
 }
 
@@ -56,7 +59,7 @@ pub fn get_buy_shares(
     base_reserve: FixedU256,
     quote_reserve: FixedU256,
     total_supply: FixedU256,
-) -> Option<(FixedU256, FixedU256, FixedU256)> {
+) -> Result<(FixedU256, FixedU256, FixedU256), ProgramError> {
     let base_input = base_balance.checked_sub(base_reserve)?;
     let quote_input = quote_balance.checked_sub(quote_reserve)?;
 
@@ -89,7 +92,7 @@ pub fn get_buy_shares(
         }
         share = total_supply.checked_mul_floor(mint_ratio)?;
     }
-    Some((share, base_input, quote_input))
+    Ok((share, base_input, quote_input))
 }
 
 /// integrate curve from v1 to v2  = i * delta * (1 - k + k(v0^2 / v1 /v2))
@@ -103,7 +106,7 @@ pub fn general_integrate(
     v2: FixedU256,
     i: FixedU256,
     k: FixedU256,
-) -> Option<FixedU256> {
+) -> Result<FixedU256, ProgramError> {
     let fair_amount = i.checked_mul_floor(v1.checked_sub(v2)?)?;
 
     let v0v0v1v2 = v0
@@ -113,7 +116,7 @@ pub fn general_integrate(
 
     let penalty = k.checked_mul_floor(v0v0v1v2)?;
 
-    fair_amount.checked_mul_floor(FixedU256::one().checked_sub(k)?.checked_add(penalty)?)
+    Ok(fair_amount.checked_mul_floor(FixedU256::one().checked_sub(k)?.checked_add(penalty)?)?)
 }
 
 /// The same with integration expression above, we have:
@@ -134,7 +137,7 @@ pub fn solve_quadratic_function_for_trade(
     i_delta_b: FixedU256,
     delta_b_sig: bool,
     k: FixedU256,
-) -> Option<FixedU256> {
+) -> Result<FixedU256, ProgramError> {
     // calculate -b value and sig
     // -b = (1-k)Q1-kQ0^2/Q1+i*deltaB
     let mut kq02q1 = k
@@ -180,9 +183,9 @@ pub fn solve_quadratic_function_for_trade(
     }
 
     if delta_b_sig {
-        numerator.checked_div_floor(denominator)
+        Ok(numerator.checked_div_floor(denominator)?)
     } else {
-        numerator.checked_div_ceil(denominator)
+        Ok(numerator.checked_div_ceil(denominator)?)
     }
 }
 
@@ -194,7 +197,7 @@ pub fn solve_quadratic_function_for_target(
     v1: FixedU256,
     k: FixedU256,
     fair_amount: FixedU256,
-) -> Option<FixedU256> {
+) -> Result<FixedU256, ProgramError> {
     // V0 = V1+V1*(sqrt-1)/2k
     let mut sqrt = k
         .checked_mul_floor(fair_amount)?
@@ -210,7 +213,7 @@ pub fn solve_quadratic_function_for_target(
         .checked_div_ceil(k.checked_mul_floor(FixedU256::new(2.into()))?)?;
 
     // V0 is greater than or equal to V1 according to the solution
-    v1.checked_mul_floor(premium.checked_add(FixedU256::one())?)
+    Ok(v1.checked_mul_floor(premium.checked_add(FixedU256::one())?)?)
 }
 
 #[cfg(test)]

@@ -1,5 +1,7 @@
 //! Implement DODOMath_v2 calculation
 
+use solana_program::program_error::ProgramError;
+
 use crate::bn::{FixedU256, U256};
 
 /// calculate deposit amount according to the reserve amount
@@ -7,22 +9,22 @@ use crate::bn::{FixedU256, U256};
 //      a_reserve > 0 & b_reserve = 0 => (a_amount, 0)
 //      a_reserve > 0 & b_reserve > 0 => (a_amount*ratio1, b_amount*ratio2)
 
-pub fn get_deposit_adjustment_amount_v2(
+pub fn get_deposit_adjustment_amount(
     base_in_amount: FixedU256,
     quote_in_amount: FixedU256,
     base_reserve_amount: FixedU256,
     quote_reserve_amount: FixedU256,
-) -> Option<(FixedU256, FixedU256)> {
+) -> Result<(FixedU256, FixedU256), ProgramError> {
     if quote_reserve_amount.into_u256_ceil().is_zero()
         && base_reserve_amount.into_u256_ceil().is_zero()
     {
-        return Some((base_in_amount, quote_in_amount));
+        return Ok((base_in_amount, quote_in_amount));
     }
 
     if quote_reserve_amount.into_u256_ceil().is_zero()
         && base_reserve_amount.into_u256_ceil() > U256::zero()
     {
-        return Some((base_in_amount, FixedU256::new(U256::zero().into())));
+        return Ok((base_in_amount, FixedU256::new(U256::zero().into())));
     }
 
     if quote_reserve_amount.into_u256_ceil() > U256::zero()
@@ -34,29 +36,29 @@ pub fn get_deposit_adjustment_amount_v2(
         let new_quote_increase_ratio =
             quote_increase_ratio.take_and_scale(base_increase_ratio.base_point())?;
         if base_increase_ratio.inner() <= new_quote_increase_ratio.inner() {
-            Some((
+            Ok((
                 base_in_amount,
                 quote_reserve_amount.checked_mul_floor(base_increase_ratio)?,
             ))
         } else {
-            Some((
+            Ok((
                 base_reserve_amount.checked_mul_floor(quote_increase_ratio)?,
                 quote_in_amount,
             ))
         }
     } else {
-        Some((base_in_amount, quote_in_amount))
+        Ok((base_in_amount, quote_in_amount))
     }
 }
 
 /// buy shares [round down] - mint amount for lp
-pub fn get_buy_shares_v2(
+pub fn get_buy_shares(
     base_balance: FixedU256,
     quote_balance: FixedU256,
     base_reserve: FixedU256,
     quote_reserve: FixedU256,
     total_supply: FixedU256,
-) -> Option<(FixedU256, FixedU256, FixedU256)> {
+) -> Result<(FixedU256, FixedU256, FixedU256), ProgramError> {
     let base_input = base_balance.checked_sub(base_reserve)?;
     let quote_input = quote_balance.checked_sub(quote_reserve)?;
 
@@ -89,7 +91,7 @@ pub fn get_buy_shares_v2(
         }
         share = total_supply.checked_mul_floor(mint_ratio)?;
     }
-    Some((share, base_input, quote_input))
+    Ok((share, base_input, quote_input))
 }
 
 /// Integrate dodo curve from V1 to V2
@@ -104,13 +106,13 @@ pub fn get_buy_shares_v2(
 
 //        [round down]
 
-pub fn general_integrate_v2(
+pub fn general_integrate(
     v0: FixedU256,
     v1: FixedU256,
     v2: FixedU256,
     i: FixedU256,
     k: FixedU256,
-) -> Option<FixedU256> {
+) -> Result<FixedU256, ProgramError> {
     let fair_amount = i.checked_mul_floor(v1.checked_sub(v2)?)?;
 
     let v0v0v1v2 = v0
@@ -120,7 +122,7 @@ pub fn general_integrate_v2(
 
     let penalty = k.checked_mul_floor(v0v0v1v2)?; // k(V0^2/V1/V2)
 
-    fair_amount.checked_mul_floor(FixedU256::one().checked_sub(k)?.checked_add(penalty)?)
+    Ok(fair_amount.checked_mul_floor(FixedU256::one().checked_sub(k)?.checked_add(penalty)?)?)
 }
 
 /// Follow the integration function above
@@ -134,18 +136,18 @@ pub fn general_integrate_v2(
 
 //    [round down]
 
-pub fn solve_quadratic_function_for_target_v2(
+pub fn solve_quadratic_function_for_target(
     v1: FixedU256,
     delta: FixedU256,
     i: FixedU256,
     k: FixedU256,
-) -> Option<FixedU256> {
+) -> Result<FixedU256, ProgramError> {
     if v1.into_u256_ceil().is_zero() {
-        return Some(FixedU256::zero());
+        return Ok(FixedU256::zero());
     }
 
     if k.into_u256_ceil().is_zero() {
-        return v1.checked_add(i.checked_mul_floor(delta)?);
+        return Ok(v1.checked_add(i.checked_mul_floor(delta)?)?);
     }
 
     // V0 = V1*(1+(sqrt-1)/2k)
@@ -167,7 +169,7 @@ pub fn solve_quadratic_function_for_target_v2(
             .checked_add(FixedU256::one())?
             .sqrt()?;
     } else {
-        sqrt =ki
+        sqrt = ki
             .checked_div_floor(v1)?
             .checked_mul_floor(delta)?
             .checked_add(FixedU256::one())?
@@ -176,12 +178,10 @@ pub fn solve_quadratic_function_for_target_v2(
 
     let premium = sqrt
         .checked_sub(FixedU256::one())?
-        .checked_mul_floor(
-            k.checked_mul_floor(FixedU256::new(2.into()))?
-        )?
+        .checked_mul_floor(k.checked_mul_floor(FixedU256::new(2.into()))?)?
         .checked_add(FixedU256::one())?;
 
-    v1.checked_mul_floor(premium)
+    Ok(v1.checked_mul_floor(premium)?)
 }
 
 /// Follow the integration expression above, we have:
@@ -208,27 +208,26 @@ pub fn solve_quadratic_function_for_target_v2(
 //
 //        [round down]
 
-pub fn solve_quadratic_function_for_trade_v2(
+pub fn solve_quadratic_function_for_trade(
     v0: FixedU256,
     v1: FixedU256,
     delta: FixedU256,
     i: FixedU256,
     k: FixedU256,
-) -> Option<FixedU256> {
-
+) -> Result<FixedU256, ProgramError> {
     if v0.into_u256_ceil() <= U256::zero() {
-        return Some(FixedU256::zero());
+        return Ok(FixedU256::zero());
     }
 
     if delta.into_u256_ceil().is_zero() {
-        return Some(FixedU256::zero());
+        return Ok(FixedU256::zero());
     }
 
     if k.into_u256_ceil().is_zero() {
         if i.checked_mul_floor(delta)?.into_u256_ceil() > v1.into_u256_ceil() {
-            return Some(v1);
+            return Ok(v1);
         } else {
-            return i.checked_mul_floor(delta);
+            return Ok(i.checked_mul_floor(delta)?);
         }
     }
 
@@ -243,12 +242,15 @@ pub fn solve_quadratic_function_for_trade_v2(
         let i_delta = i.checked_mul_floor(delta)?;
         if i_delta.into_u256_ceil().is_zero() {
             temp = FixedU256::zero();
-        } else if i_delta.checked_mul_floor(v1)?.checked_div_floor(i_delta)?.into_u256_ceil() == v1.into_u256_ceil() {
+        } else if i_delta
+            .checked_mul_floor(v1)?
+            .checked_div_floor(i_delta)?
+            .into_u256_ceil()
+            == v1.into_u256_ceil()
+        {
             temp = i_delta
                 .checked_mul_floor(v1)?
-                .checked_div_floor(
-                    v0.checked_mul_floor(v0)?
-                )?;
+                .checked_div_floor(v0.checked_mul_floor(v0)?)?;
         } else {
             temp = delta
                 .checked_mul_floor(v1)?
@@ -256,11 +258,9 @@ pub fn solve_quadratic_function_for_trade_v2(
                 .checked_mul_floor(i)?
                 .checked_div_floor(v0)?;
         }
-        return v1
+        return Ok(v1
             .checked_mul_floor(temp)?
-            .checked_div_floor(
-                temp.checked_add(FixedU256::one())?
-            );
+            .checked_div_floor(temp.checked_add(FixedU256::one())?)?);
     }
 
     // calculate -b value and sig
@@ -275,13 +275,9 @@ pub fn solve_quadratic_function_for_trade_v2(
         .checked_mul_floor(v0)?
         .checked_div_floor(v1)?
         .checked_mul_floor(v0)?
-        .checked_add(
-            i.checked_mul_floor(delta)?
-        )?; // kQ0^2/Q1-i*deltaB
+        .checked_add(i.checked_mul_floor(delta)?)?; // kQ0^2/Q1-i*deltaB
 
-    let mut b_abs = FixedU256::one()
-        .checked_sub(k)?
-        .checked_mul_floor(v1)?; // (1-k)Q1
+    let mut b_abs = FixedU256::one().checked_sub(k)?.checked_mul_floor(v1)?; // (1-k)Q1
 
     let b_sig;
     if b_abs >= part_2 {
@@ -299,10 +295,7 @@ pub fn solve_quadratic_function_for_trade_v2(
     let mut square_root = FixedU256::one()
         .checked_sub(k)?
         .checked_mul_floor(FixedU256::new(4.into()))?
-        .checked_mul_floor(
-            k.checked_mul_floor(v0)?
-                .checked_mul_floor(v0)?
-        )?; // 4(1-k)kQ0^2
+        .checked_mul_floor(k.checked_mul_floor(v0)?.checked_mul_floor(v0)?)?; // 4(1-k)kQ0^2
 
     square_root = b_abs
         .checked_mul_floor(b_abs)?
@@ -324,9 +317,9 @@ pub fn solve_quadratic_function_for_trade_v2(
 
     let v2 = numerator.checked_div_ceil(denominator)?;
     if v2.into_u256_ceil() > v1.into_u256_ceil() {
-        Some(FixedU256::zero())
+        Ok(FixedU256::zero())
     } else {
-        v1.checked_sub(v2)
+        Ok(v1.checked_sub(v2)?)
     }
 }
 
@@ -347,14 +340,14 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            get_buy_shares_v2(
+            get_buy_shares(
                 FixedU256::new_from_int(1000.into(), 18).unwrap(),
                 FixedU256::new_from_int(2000.into(), 18).unwrap(),
                 FixedU256::new_from_int(800.into(), 18).unwrap(),
                 FixedU256::new_from_int(1600.into(), 18).unwrap(),
                 FixedU256::new_from_int(10000.into(), 18).unwrap(),
             )
-                .unwrap(),
+            .unwrap(),
             (
                 FixedU256::new_from_int(2500.into(), 18).unwrap(),
                 FixedU256::new_from_int(200.into(), 18).unwrap(),
@@ -363,13 +356,13 @@ mod tests {
         );
 
         assert_eq!(
-            get_deposit_adjustment_amount_v2(
+            get_deposit_adjustment_amount(
                 FixedU256::new_from_int(10.into(), 18).unwrap(),
                 FixedU256::new_from_int(20.into(), 18).unwrap(),
                 FixedU256::new_from_int(500.into(), 18).unwrap(),
                 FixedU256::new_from_int(2000.into(), 18).unwrap(),
             )
-                .unwrap(),
+            .unwrap(),
             (
                 FixedU256::new_from_int(5.into(), 18).unwrap(),
                 FixedU256::new_from_int(20.into(), 18).unwrap()
@@ -377,25 +370,26 @@ mod tests {
         );
 
         assert_eq!(
-            general_integrate_v2(q0, q1, q1.checked_sub(delta_b).unwrap(), i, k).unwrap(),
+            general_integrate(q0, q1, q1.checked_sub(delta_b).unwrap(), i, k).unwrap(),
             FixedU256::new_from_int(30000.into(), 18).unwrap()
         );
 
         assert_eq!(
-            solve_quadratic_function_for_trade_v2(q0, q1, delta_b, i, k).unwrap(),
+            solve_quadratic_function_for_trade(q0, q1, delta_b, i, k).unwrap(),
             FixedU256::new_from_int(952.into(), 18).unwrap()
         );
 
         let value = FixedU256::new(64031.into())
             .checked_mul_floor(FixedU256::new(100000.into()))
             .unwrap()
-            .checked_add(FixedU256::new(24237.into())).unwrap()
+            .checked_add(FixedU256::new(24237.into()))
+            .unwrap()
             .checked_mul_floor(FixedU256::new(1000000.into()))
             .unwrap()
             .checked_mul_floor(FixedU256::new(1000000.into()))
             .unwrap();
         assert_eq!(
-            solve_quadratic_function_for_target_v2(q1, delta_b, i, k).unwrap(),
+            solve_quadratic_function_for_target(q1, delta_b, i, k).unwrap(),
             FixedU256::new_from_fixed(value.into_u256_ceil(), 18)
         );
     }
