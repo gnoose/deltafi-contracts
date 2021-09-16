@@ -32,8 +32,8 @@ pub fn get_deposit_adjustment_amount_v2(
         let quote_increase_ratio = quote_in_amount.checked_div_floor(quote_reserve_amount)?;
 
         let new_quote_increase_ratio =
-            quote_increase_ratio.take_and_scale(base_increase_ratio.base_point)?;
-        if base_increase_ratio.inner <= new_quote_increase_ratio.inner {
+            quote_increase_ratio.take_and_scale(base_increase_ratio.base_point())?;
+        if base_increase_ratio.inner() <= new_quote_increase_ratio.inner() {
             Some((
                 base_in_amount,
                 quote_reserve_amount.checked_mul_floor(base_increase_ratio)?,
@@ -81,8 +81,8 @@ pub fn get_buy_shares_v2(
         let quote_input_ratio = quote_input.checked_div_floor(quote_reserve)?;
         let mint_ratio;
         let new_quote_input_ratio =
-            quote_input_ratio.take_and_scale(base_input_ratio.base_point)?;
-        if new_quote_input_ratio.inner < base_input_ratio.inner {
+            quote_input_ratio.take_and_scale(base_input_ratio.base_point())?;
+        if new_quote_input_ratio.inner() < base_input_ratio.inner() {
             mint_ratio = quote_input_ratio;
         } else {
             mint_ratio = base_input_ratio;
