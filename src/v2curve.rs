@@ -103,7 +103,7 @@ pub fn sell_base_token(
 
                 receive_quote_amount = back_to_one_receive_quote;
             }
-        } else if (pay_base_amount.into_u256_ceil() == back_to_one_pay_base.into_u256_ceil()) {
+        } else if pay_base_amount.into_u256_ceil() == back_to_one_pay_base.into_u256_ceil() {
             // case 2.2: R status changes to ONE
             receive_quote_amount = back_to_one_receive_quote;
             new_r = RState::One;

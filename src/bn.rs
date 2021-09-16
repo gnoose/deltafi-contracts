@@ -60,10 +60,10 @@ impl U256 {
 #[derive(Clone, Copy, Debug, PartialEq, Ord, PartialOrd, Eq)]
 pub struct FixedU256 {
     /// 10**precision * value
-    pub inner: U256,
+    inner: U256,
 
     /// 10**precision
-    pub base_point: U256,
+    base_point: U256,
 }
 
 impl Default for FixedU256 {
@@ -73,6 +73,16 @@ impl Default for FixedU256 {
 }
 
 impl FixedU256 {
+    /// Getter function for inner
+    pub fn inner(&self) -> U256 {
+        self.inner
+    }
+
+    /// Getter function for base_point
+    pub fn base_point(&self) -> U256 {
+        self.base_point
+    }
+
     /// Return a new [`FixedU256`] from an integer without fixed-point
     pub fn new(value: U256) -> Self {
         Self {
