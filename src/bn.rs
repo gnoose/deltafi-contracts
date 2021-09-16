@@ -74,11 +74,11 @@ impl Default for FixedU256 {
 
 impl FixedU256 {
     /// Return a new [`FixedU256`] from an integer without fixed-point
-    pub fn new(value: U256) -> Option<Self> {
-        Some(Self {
+    pub fn new(value: U256) -> Self {
+        Self {
             inner: value,
             base_point: U256::one(),
-        })
+        }
     }
 
     /// Returns a new [`FixedU256`] from an integer not in fixed-point representation.
@@ -105,9 +105,19 @@ impl FixedU256 {
         }
     }
 
+    /// Return zero = 0, 10**18
+    pub fn zero() -> Self {
+        Self::new_from_int(U256::zero(), 18).unwrap()
+    }
+
     /// Return One = 10**18
     pub fn one() -> Self {
         Self::new_from_int(U256::one(), 18).unwrap()
+    }
+
+    /// Return One2 = 10**36
+    pub fn one2() -> Self {
+        Self::new_from_int(U256::from(10).pow(18.into()), 18).unwrap()
     }
 
     /// Return a new ['FixedU256'] with new base point
@@ -283,6 +293,16 @@ impl FixedU256 {
         }
     }
 
+    /// calculate 1/target - floor
+    pub fn reciprocal_floor(target: FixedU256) -> Option<Self> {
+        FixedU256::one().checked_div_floor(target)
+    }
+
+    /// calculate 1/target - ceil
+    pub fn reciprocal_ceil(target: FixedU256) -> Option<Self> {
+        FixedU256::one().checked_div_ceil(target)
+    }
+
     /// Returns the non-fixed point representation, discarding the fractional component.
     pub fn into_u256_floor(self) -> U256 {
         self.inner.checked_div(self.base_point).unwrap_or_default()
@@ -305,6 +325,10 @@ mod tests {
         let a = FixedU256::new_from_int(2.into(), 0).unwrap();
         let b = FixedU256::new_from_int(42.into(), 0).unwrap();
         let c = FixedU256::new_from_int(4.into(), 0).unwrap();
+        let d = FixedU256::new_from_int(2.into(), 18).unwrap()
+            .checked_div_floor(FixedU256::new(10.into())).unwrap();
+        assert_eq!(FixedU256::reciprocal_floor(FixedU256::new(4.into())).unwrap(), d);
+        assert_eq!(FixedU256::reciprocal_ceil(FixedU256::new(4.into())).unwrap(), d);
         assert_eq!(b.checked_mul_ceil(a).unwrap().into_u256_ceil(), 84.into());
         assert_eq!(c.sqrt().unwrap().into_u256_ceil(), 2.into());
         assert_eq!(b.checked_sub(c).unwrap().into_u256_ceil(), 38.into());
@@ -313,7 +337,7 @@ mod tests {
             FixedU256::one().checked_add(c).unwrap().into_u256_ceil(),
             5.into()
         );
-        assert_eq!(FixedU256::new(4.into()).unwrap().into_u256_ceil(), 4.into());
+        assert_eq!(FixedU256::new(4.into()).into_u256_ceil(), 4.into());
         assert_eq!(
             b.take_and_scale(100.into()).unwrap().into_u256_ceil(),
             42.into()
