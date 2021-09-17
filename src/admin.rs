@@ -16,6 +16,7 @@ use crate::{
     error::SwapError,
     fees::Fees,
     instruction::{AdminInstruction, RampAData},
+    rewards::Rewards,
     state::SwapInfo,
     utils,
 };
@@ -61,6 +62,14 @@ pub fn process_admin_instruction(
         AdminInstruction::SetNewFees(new_fees) => {
             msg!("Instruction: SetNewFees");
             set_new_fees(program_id, &new_fees, accounts)
+        }
+        AdminInstruction::SetRewardAccount => {
+            msg!("Instruction: SetRewardAccount");
+            set_reward_account(program_id, accounts)
+        }
+        AdminInstruction::SetNewRewards(new_rewards) => {
+            msg!("Instruction: SetRewards");
+            set_new_rewards(program_id, &new_rewards, accounts)
         }
     }
 }
@@ -320,6 +329,16 @@ fn set_new_fees(program_id: &Pubkey, new_fees: &Fees, accounts: &[AccountInfo]) 
     Ok(())
 }
 
+/// [Draft]
+/// Set reward account
+fn set_reward_account(_: &Pubkey, _: &[AccountInfo]) -> ProgramResult {
+    Ok(())
+}
+
+fn set_new_rewards(_: &Pubkey, _: &Rewards, _: &[AccountInfo]) -> ProgramResult {
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use solana_sdk::clock::Epoch;
@@ -378,6 +397,7 @@ mod tests {
             DEFAULT_TOKEN_A_AMOUNT,
             DEFAULT_TOKEN_B_AMOUNT,
             DEFAULT_TEST_FEES,
+            DEFAULT_TEST_REWARDS,
         );
 
         // swap not initialized
@@ -489,6 +509,7 @@ mod tests {
             DEFAULT_TOKEN_A_AMOUNT,
             DEFAULT_TOKEN_B_AMOUNT,
             DEFAULT_TEST_FEES,
+            DEFAULT_TEST_REWARDS,
         );
 
         // swap not initialized
@@ -550,6 +571,7 @@ mod tests {
             DEFAULT_TOKEN_A_AMOUNT,
             DEFAULT_TOKEN_B_AMOUNT,
             DEFAULT_TEST_FEES,
+            DEFAULT_TEST_REWARDS,
         );
 
         // swap not initialized
@@ -601,6 +623,7 @@ mod tests {
             DEFAULT_TOKEN_A_AMOUNT,
             DEFAULT_TOKEN_B_AMOUNT,
             DEFAULT_TEST_FEES,
+            DEFAULT_TEST_REWARDS,
         );
 
         // swap not initialized
@@ -659,6 +682,7 @@ mod tests {
             DEFAULT_TOKEN_A_AMOUNT,
             DEFAULT_TOKEN_B_AMOUNT,
             DEFAULT_TEST_FEES,
+            DEFAULT_TEST_REWARDS,
         );
         let (
             admin_fee_key_a,
@@ -747,6 +771,7 @@ mod tests {
             DEFAULT_TOKEN_A_AMOUNT,
             DEFAULT_TOKEN_B_AMOUNT,
             DEFAULT_TEST_FEES,
+            DEFAULT_TEST_REWARDS,
         );
 
         // swap not initialized
@@ -832,6 +857,7 @@ mod tests {
             DEFAULT_TOKEN_A_AMOUNT,
             DEFAULT_TOKEN_B_AMOUNT,
             DEFAULT_TEST_FEES,
+            DEFAULT_TEST_REWARDS,
         );
 
         // swap not initialized
@@ -912,6 +938,7 @@ mod tests {
             DEFAULT_TOKEN_A_AMOUNT,
             DEFAULT_TOKEN_B_AMOUNT,
             DEFAULT_TEST_FEES,
+            DEFAULT_TEST_REWARDS,
         );
 
         let new_fees: Fees = Fees {

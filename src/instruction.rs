@@ -12,7 +12,7 @@ use solana_program::{
     sysvar::clock,
 };
 
-use crate::{error::SwapError, fees::Fees};
+use crate::{error::SwapError, fees::Fees, rewards::Rewards};
 
 /// Initialize instruction data
 #[repr(C)]
@@ -24,6 +24,8 @@ pub struct InitializeData {
     pub amp_factor: u64,
     /// Fees
     pub fees: Fees,
+    /// Rewards
+    pub rewards: Rewards,
 }
 
 /// Swap instruction data
@@ -102,6 +104,10 @@ pub enum AdminInstruction {
     CommitNewAdmin,
     /// TODO: Docs
     SetNewFees(Fees),
+    /// TODO: Docs
+    SetRewardAccount,
+    /// TODO: Docs
+    SetNewRewards(Rewards),
 }
 
 impl AdminInstruction {
@@ -126,6 +132,11 @@ impl AdminInstruction {
             107 => {
                 let fees = Fees::unpack_unchecked(rest)?;
                 Some(Self::SetNewFees(fees))
+            }
+            108 => Some(Self::SetRewardAccount),
+            109 => {
+                let rewards = Rewards::unpack_unchecked(rest)?;
+                Some(Self::SetNewRewards(rewards))
             }
             _ => None,
         })
@@ -154,6 +165,13 @@ impl AdminInstruction {
                 let mut fees_slice = [0u8; Fees::LEN];
                 Pack::pack_into_slice(&fees, &mut fees_slice[..]);
                 buf.extend_from_slice(&fees_slice);
+            }
+            Self::SetRewardAccount => buf.push(108),
+            Self::SetNewRewards(rewards) => {
+                buf.push(109);
+                let mut rewards_slice = [0u8; Rewards::LEN];
+                Pack::pack_into_slice(&rewards, &mut rewards_slice[..]);
+                buf.extend_from_slice(&rewards_slice);
             }
         }
         buf
@@ -351,6 +369,53 @@ pub fn set_new_fees(
     })
 }
 
+/// Creates a 'set_reward_account' instruction.
+pub fn set_reward_account(
+    program_id: &Pubkey,
+    swap_pubkey: &Pubkey,
+    authority_pubkey: &Pubkey,
+    admin_pubkey: &Pubkey,
+    new_reward_account: &Pubkey,
+) -> Result<Instruction, ProgramError> {
+    let data = AdminInstruction::SetFeeAccount.pack();
+
+    let accounts = vec![
+        AccountMeta::new(*swap_pubkey, true),
+        AccountMeta::new(*authority_pubkey, false),
+        AccountMeta::new(*admin_pubkey, true),
+        AccountMeta::new(*new_reward_account, false),
+    ];
+
+    Ok(Instruction {
+        program_id: *program_id,
+        accounts,
+        data,
+    })
+}
+
+/// Creates a 'set_rewards' instruction.
+pub fn set_rewards(
+    program_id: &Pubkey,
+    swap_pubkey: &Pubkey,
+    authority_pubkey: &Pubkey,
+    admin_pubkey: &Pubkey,
+    new_rewards: Rewards,
+) -> Result<Instruction, ProgramError> {
+    let data = AdminInstruction::SetNewRewards(new_rewards).pack();
+
+    let accounts = vec![
+        AccountMeta::new(*swap_pubkey, true),
+        AccountMeta::new(*authority_pubkey, false),
+        AccountMeta::new(*admin_pubkey, true),
+    ];
+
+    Ok(Instruction {
+        program_id: *program_id,
+        accounts,
+        data,
+    })
+}
+
 /// Instructions supported by the SwapInfo program.
 #[repr(C)]
 #[derive(Debug, PartialEq)]
@@ -433,11 +498,14 @@ impl SwapInstruction {
             0 => {
                 let (&nonce, rest) = rest.split_first().ok_or(SwapError::InvalidInstruction)?;
                 let (amp_factor, rest) = unpack_u64(rest)?;
-                let fees = Fees::unpack_unchecked(rest)?;
+                let (fees, rest) = rest.split_at(Fees::LEN);
+                let fees = Fees::unpack_unchecked(fees)?;
+                let rewards = Rewards::unpack_unchecked(rest)?;
                 Self::Initialize(InitializeData {
                     nonce,
                     amp_factor,
                     fees,
+                    rewards,
                 })
             }
             1 => {
@@ -488,6 +556,7 @@ impl SwapInstruction {
                 nonce,
                 amp_factor,
                 fees,
+                rewards,
             }) => {
                 buf.push(0);
                 buf.push(nonce);
@@ -495,6 +564,9 @@ impl SwapInstruction {
                 let mut fees_slice = [0u8; Fees::LEN];
                 Pack::pack_into_slice(&fees, &mut fees_slice[..]);
                 buf.extend_from_slice(&fees_slice);
+                let mut rewards_slice = [0u8; Rewards::LEN];
+                Pack::pack_into_slice(&rewards, &mut rewards_slice[..]);
+                buf.extend_from_slice(&rewards_slice);
             }
             Self::Swap(SwapData {
                 amount_in,
@@ -555,11 +627,13 @@ pub fn initialize(
     nonce: u8,
     amp_factor: u64,
     fees: Fees,
+    rewards: Rewards,
 ) -> Result<Instruction, ProgramError> {
     let data = SwapInstruction::Initialize(InitializeData {
         nonce,
         amp_factor,
         fees,
+        rewards,
     })
     .pack();
 
@@ -890,10 +964,15 @@ mod tests {
             withdraw_fee_numerator: 7,
             withdraw_fee_denominator: 8,
         };
+        let rewards = Rewards {
+            trade_reward_numerator: 1,
+            trade_reward_denominator: 2,
+        };
         let check = SwapInstruction::Initialize(InitializeData {
             nonce,
             amp_factor,
             fees,
+            rewards,
         });
         let packed = check.pack();
         let mut expect: Vec<u8> = vec![0, nonce];
@@ -901,6 +980,9 @@ mod tests {
         let mut fees_slice = [0u8; Fees::LEN];
         fees.pack_into_slice(&mut fees_slice[..]);
         expect.extend_from_slice(&fees_slice);
+        let mut rewards_slice = [0u8; Rewards::LEN];
+        rewards.pack_into_slice(&mut rewards_slice);
+        expect.extend_from_slice(&rewards_slice);
         assert_eq!(packed, expect);
         let unpacked = SwapInstruction::unpack(&expect).unwrap();
         assert_eq!(unpacked, check);

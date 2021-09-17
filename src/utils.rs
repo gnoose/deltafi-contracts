@@ -29,9 +29,7 @@ pub mod test_utils {
         state::{Account as SplAccount, Mint as SplMint},
     };
 
-    use crate::{
-        curve::ZERO_TS, fees::Fees, instruction::*, processor::Processor, state::SwapInfo,
-    };
+    use crate::{curve::ZERO_TS, fees::Fees, instruction::*, processor::Processor, rewards::Rewards, state::SwapInfo};
 
     /// Test program id for the swap program.
     pub const SWAP_PROGRAM_ID: Pubkey = Pubkey::new_from_array([2u8; 32]);
@@ -48,6 +46,12 @@ pub mod test_utils {
         trade_fee_denominator: 100,
         withdraw_fee_numerator: 6,
         withdraw_fee_denominator: 100,
+    };
+
+    /// Rewards for testing
+    pub const DEFAULT_TEST_REWARDS: Rewards = Rewards {
+        trade_reward_numerator: 1,
+        trade_reward_denominator: 2,
     };
 
     /// Default token decimals
@@ -91,6 +95,7 @@ pub mod test_utils {
         pub admin_fee_b_key: Pubkey,
         pub admin_fee_b_account: Account,
         pub fees: Fees,
+        pub rewards: Rewards,
     }
 
     impl SwapAccountInfo {
@@ -100,6 +105,7 @@ pub mod test_utils {
             token_a_amount: u64,
             token_b_amount: u64,
             fees: Fees,
+            rewards: Rewards,
         ) -> Self {
             let swap_key = pubkey_rand();
             let swap_account = Account::new(0, SwapInfo::get_packed_len(), &SWAP_PROGRAM_ID);
@@ -185,6 +191,7 @@ pub mod test_utils {
                 admin_fee_b_key,
                 admin_fee_b_account,
                 fees,
+                rewards,
             }
         }
 
@@ -207,6 +214,7 @@ pub mod test_utils {
                     self.nonce,
                     self.initial_amp_factor,
                     self.fees,
+                    self.rewards,
                 )
                 .unwrap(),
                 vec![

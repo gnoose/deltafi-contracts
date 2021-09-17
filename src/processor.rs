@@ -28,6 +28,7 @@ use crate::{
     },
     oracle::Oracle,
     pool_converter::PoolTokenConverter,
+    rewards::Rewards,
     state::SwapInfo,
     utils,
 };
@@ -130,6 +131,7 @@ impl Processor {
         nonce: u8,
         amp_factor: u64,
         fees: Fees,
+        rewards: Rewards,
         accounts: &[AccountInfo],
     ) -> ProgramResult {
         let account_info_iter = &mut accounts.iter();
@@ -260,6 +262,7 @@ impl Processor {
             admin_fee_key_a: *admin_fee_a_info.key,
             admin_fee_key_b: *admin_fee_b_info.key,
             fees,
+            rewards,
             oracle: Oracle::new(*token_a_info.key, *token_b_info.key),
         };
         SwapInfo::pack(obj, &mut swap_info.data.borrow_mut())?;
@@ -761,9 +764,10 @@ impl Processor {
                 nonce,
                 amp_factor,
                 fees,
+                rewards,
             }) => {
                 msg!("Instruction: Init");
-                Self::process_initialize(program_id, nonce, amp_factor, fees, accounts)
+                Self::process_initialize(program_id, nonce, amp_factor, fees, rewards, accounts)
             }
             SwapInstruction::Swap(SwapData {
                 amount_in,
@@ -939,6 +943,7 @@ mod tests {
             token_a_amount,
             token_b_amount,
             DEFAULT_TEST_FEES,
+            DEFAULT_TEST_REWARDS,
         );
         // wrong nonce for authority_key
         {
@@ -1479,6 +1484,7 @@ mod tests {
             token_a_amount,
             token_b_amount,
             DEFAULT_TEST_FEES,
+            DEFAULT_TEST_REWARDS,
         );
 
         let deposit_a = token_a_amount / 10;
@@ -1988,6 +1994,7 @@ mod tests {
             token_a_amount,
             token_b_amount,
             DEFAULT_TEST_FEES,
+            DEFAULT_TEST_REWARDS,
         );
         let withdrawer_key = pubkey_rand();
         let initial_a = token_a_amount / 10;
@@ -2609,6 +2616,7 @@ mod tests {
             token_a_amount,
             token_b_amount,
             DEFAULT_TEST_FEES,
+            DEFAULT_TEST_REWARDS,
         );
         let initial_a = token_a_amount / 5;
         let initial_b = token_b_amount / 5;
@@ -3134,6 +3142,7 @@ mod tests {
             token_a_amount,
             token_b_amount,
             DEFAULT_TEST_FEES,
+            DEFAULT_TEST_REWARDS,
         );
         let withdrawer_key = pubkey_rand();
         let initial_a = token_a_amount / 10;
