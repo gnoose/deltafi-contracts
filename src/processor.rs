@@ -26,12 +26,11 @@ use crate::{
         AdminInstruction, DepositData, InitializeData, SwapData, SwapInstruction, WithdrawData,
         WithdrawOneData,
     },
-    math::{get_deposit_adjustment_amount, get_buy_shares},
+    math2::{get_buy_shares, get_deposit_adjustment_amount},
     oracle::Oracle,
     pool_converter::PoolTokenConverter,
     state::SwapInfo,
     utils,
-    v1curve::{RStatus, V1curve},
 };
 
 /// Program state handler. (and general curve params)
@@ -431,7 +430,7 @@ impl Processor {
             return Err(SwapError::IncorrectMint.into());
         }
 
-        let clock = Clock::from_account_info(clock_sysvar_info)?;
+        let _clock = Clock::from_account_info(clock_sysvar_info)?;
         let token_a = utils::unpack_token_account(&token_a_info.data.borrow())?;
         let token_b = utils::unpack_token_account(&token_b_info.data.borrow())?;
         let pool_mint = Self::unpack_mint(&pool_mint_info.data.borrow())?;
@@ -458,17 +457,17 @@ impl Processor {
 
         let (base_adjusted_in_amount, quote_adjusted_in_amount) = get_deposit_adjustment_amount(
             FixedU256::new_from_int(token_a_amount.into(), 18)?,
-            FixedU256::new_from_int(token_a_amount.into(), 18)?,
+            FixedU256::new_from_int(token_b_amount.into(), 18)?,
             FixedU256::new_from_int(token_a.amount.into(), 18)?,
             FixedU256::new_from_int(token_b.amount.into(), 18)?,
         )?;
 
-        let (share_amount, base_input, quote_amount) = get_buy_shares(
+        let (share_amount, _base_input, _quote_amount) = get_buy_shares(
             FixedU256::new_from_int(token_a_amount.into(), 18)?,
-            FixedU256::new_from_int(token_a_amount.into(), 18)?,
+            FixedU256::new_from_int(token_b_amount.into(), 18)?,
             FixedU256::new_from_int(token_a.amount.into(), 18)?,
             FixedU256::new_from_int(token_b.amount.into(), 18)?,
-            FixedU256::new_from_int(pool_mint.supply.into(), 18)?
+            FixedU256::new_from_int(pool_mint.supply.into(), 18)?,
         )?;
 
         let mint_amount = U256::to_u64(share_amount.into_u256_ceil())?;
@@ -782,25 +781,25 @@ impl Processor {
         let instruction = SwapInstruction::unpack(input)?;
         match instruction {
             SwapInstruction::Initialize(InitializeData {
-                nonce,
-                amp_factor,
-                fees,
-            }) => {
+                                            nonce,
+                                            amp_factor,
+                                            fees,
+                                        }) => {
                 msg!("Instruction: Init");
                 Self::process_initialize(program_id, nonce, amp_factor, fees, accounts)
             }
             SwapInstruction::Swap(SwapData {
-                amount_in,
-                minimum_amount_out,
-            }) => {
+                                      amount_in,
+                                      minimum_amount_out,
+                                  }) => {
                 msg!("Instruction: Swap");
                 Self::process_swap(program_id, amount_in, minimum_amount_out, accounts)
             }
             SwapInstruction::Deposit(DepositData {
-                token_a_amount,
-                token_b_amount,
-                min_mint_amount,
-            }) => {
+                                         token_a_amount,
+                                         token_b_amount,
+                                         min_mint_amount,
+                                     }) => {
                 msg!("Instruction: Deposit");
                 Self::process_deposit(
                     program_id,
@@ -811,10 +810,10 @@ impl Processor {
                 )
             }
             SwapInstruction::Withdraw(WithdrawData {
-                pool_token_amount,
-                minimum_token_a_amount,
-                minimum_token_b_amount,
-            }) => {
+                                          pool_token_amount,
+                                          minimum_token_a_amount,
+                                          minimum_token_b_amount,
+                                      }) => {
                 msg!("Instruction: Withdraw");
                 Self::process_withdraw(
                     program_id,
@@ -825,9 +824,9 @@ impl Processor {
                 )
             }
             SwapInstruction::WithdrawOne(WithdrawOneData {
-                pool_token_amount,
-                minimum_token_amount,
-            }) => {
+                                             pool_token_amount,
+                                             minimum_token_amount,
+                                         }) => {
                 msg!("Instruction: Withdraw One");
                 Self::process_withdraw_one(
                     program_id,
@@ -842,8 +841,8 @@ impl Processor {
 
 impl PrintProgramError for SwapError {
     fn print<E>(&self)
-    where
-        E: 'static + std::error::Error + DecodeError<E> + PrintProgramError + FromPrimitive,
+        where
+            E: 'static + std::error::Error + DecodeError<E> + PrintProgramError + FromPrimitive,
     {
         match self {
             SwapError::AlreadyInUse => msg!("Error: Swap account already in use"),
@@ -941,7 +940,7 @@ mod tests {
             &[],
             10,
         )
-        .unwrap();
+            .unwrap();
         let mint = (&mut mint).into();
         let destination = (&mut destination).into();
         let authority = (&mut authority).into();
@@ -1211,14 +1210,14 @@ mod tests {
                     &[],
                     1,
                 )
-                .unwrap(),
+                    .unwrap(),
                 vec![
                     &mut accounts.token_a_account,
                     &mut Account::default(),
                     &mut Account::default(),
                 ],
             )
-            .unwrap();
+                .unwrap();
             assert_eq!(
                 Err(SwapError::InvalidDelegate.into()),
                 accounts.initialize_swap()
@@ -1231,10 +1230,10 @@ mod tests {
                     &accounts.authority_key,
                     &[],
                 )
-                .unwrap(),
+                    .unwrap(),
                 vec![&mut accounts.token_a_account, &mut Account::default()],
             )
-            .unwrap();
+                .unwrap();
         }
 
         // token B account is delegated
@@ -1248,14 +1247,14 @@ mod tests {
                     &[],
                     1,
                 )
-                .unwrap(),
+                    .unwrap(),
                 vec![
                     &mut accounts.token_b_account,
                     &mut Account::default(),
                     &mut Account::default(),
                 ],
             )
-            .unwrap();
+                .unwrap();
             assert_eq!(
                 Err(SwapError::InvalidDelegate.into()),
                 accounts.initialize_swap()
@@ -1268,10 +1267,10 @@ mod tests {
                     &accounts.authority_key,
                     &[],
                 )
-                .unwrap(),
+                    .unwrap(),
                 vec![&mut accounts.token_b_account, &mut Account::default()],
             )
-            .unwrap();
+                .unwrap();
         }
 
         // token A account has close authority
@@ -1285,10 +1284,10 @@ mod tests {
                     &accounts.authority_key,
                     &[],
                 )
-                .unwrap(),
+                    .unwrap(),
                 vec![&mut accounts.token_a_account, &mut Account::default()],
             )
-            .unwrap();
+                .unwrap();
             assert_eq!(
                 Err(SwapError::InvalidCloseAuthority.into()),
                 accounts.initialize_swap()
@@ -1303,10 +1302,10 @@ mod tests {
                     &user_key,
                     &[],
                 )
-                .unwrap(),
+                    .unwrap(),
                 vec![&mut accounts.token_a_account, &mut Account::default()],
             )
-            .unwrap();
+                .unwrap();
         }
 
         // token B account has close authority
@@ -1320,10 +1319,10 @@ mod tests {
                     &accounts.authority_key,
                     &[],
                 )
-                .unwrap(),
+                    .unwrap(),
                 vec![&mut accounts.token_b_account, &mut Account::default()],
             )
-            .unwrap();
+                .unwrap();
             assert_eq!(
                 Err(SwapError::InvalidCloseAuthority.into()),
                 accounts.initialize_swap()
@@ -1338,10 +1337,10 @@ mod tests {
                     &user_key,
                     &[],
                 )
-                .unwrap(),
+                    .unwrap(),
                 vec![&mut accounts.token_b_account, &mut Account::default()],
             )
-            .unwrap();
+                .unwrap();
         }
 
         // mismatched admin mints
@@ -1728,7 +1727,7 @@ mod tests {
                         deposit_b,
                         min_mint_amount,
                     )
-                    .unwrap(),
+                        .unwrap(),
                     vec![
                         &mut accounts.swap_account,
                         &mut Account::default(),
@@ -1774,7 +1773,7 @@ mod tests {
                         deposit_b,
                         min_mint_amount,
                     )
-                    .unwrap(),
+                        .unwrap(),
                     vec![
                         &mut accounts.swap_account,
                         &mut Account::default(),
@@ -2307,7 +2306,7 @@ mod tests {
                         minimum_a_amount,
                         minimum_b_amount,
                     )
-                    .unwrap(),
+                        .unwrap(),
                     vec![
                         &mut accounts.swap_account,
                         &mut Account::default(),
@@ -2362,7 +2361,7 @@ mod tests {
                         minimum_a_amount,
                         minimum_b_amount,
                     )
-                    .unwrap(),
+                        .unwrap(),
                     vec![
                         &mut accounts.swap_account,
                         &mut Account::default(),
@@ -2729,7 +2728,7 @@ mod tests {
                         initial_a,
                         minimum_b_amount,
                     )
-                    .unwrap(),
+                        .unwrap(),
                     vec![
                         &mut accounts.swap_account,
                         &mut Account::default(),
@@ -2797,7 +2796,7 @@ mod tests {
                         initial_a,
                         minimum_b_amount,
                     )
-                    .unwrap(),
+                        .unwrap(),
                     vec![
                         &mut accounts.swap_account,
                         &mut Account::default(),
@@ -2839,7 +2838,7 @@ mod tests {
                         initial_a,
                         minimum_b_amount,
                     )
-                    .unwrap(),
+                        .unwrap(),
                     vec![
                         &mut accounts.swap_account,
                         &mut Account::default(),
@@ -2933,7 +2932,7 @@ mod tests {
                         initial_a,
                         minimum_b_amount,
                     )
-                    .unwrap(),
+                        .unwrap(),
                     vec![
                         &mut accounts.swap_account,
                         &mut Account::default(),
@@ -3425,7 +3424,7 @@ mod tests {
                         withdraw_amount,
                         minimum_amount,
                     )
-                    .unwrap(),
+                        .unwrap(),
                     vec![
                         &mut accounts.swap_account,
                         &mut Account::default(),
@@ -3476,7 +3475,7 @@ mod tests {
                         withdraw_amount,
                         minimum_amount,
                     )
-                    .unwrap(),
+                        .unwrap(),
                     vec![
                         &mut accounts.swap_account,
                         &mut Account::default(),
@@ -3688,10 +3687,10 @@ mod tests {
                     .admin_trade_fee(withdraw_one_trade_fee)
                     .unwrap()
                     + DEFAULT_TEST_FEES
-                        .admin_withdraw_fee(withdraw_one_withdraw_fee)
-                        .unwrap(),
+                    .admin_withdraw_fee(withdraw_one_withdraw_fee)
+                    .unwrap(),
             )
-            .unwrap();
+                .unwrap();
 
             accounts
                 .withdraw_one(
