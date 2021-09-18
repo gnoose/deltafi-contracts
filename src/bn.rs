@@ -6,7 +6,11 @@
 
 use std::{cmp::Ordering, convert::TryInto};
 
-use solana_program::program_error::ProgramError;
+use arrayref::{array_mut_ref, array_ref, array_refs, mut_array_refs};
+use solana_program::{
+    program_error::ProgramError,
+    program_pack::{Pack, Sealed},
+};
 use uint::construct_uint;
 
 use crate::error::SwapError;
@@ -357,6 +361,27 @@ impl FixedU256 {
         self.inner
             .checked_ceil_div(self.base_point)
             .unwrap_or_default()
+    }
+}
+
+impl Sealed for FixedU256 {}
+impl Pack for FixedU256 {
+    const LEN: usize = 64;
+    fn unpack_from_slice(input: &[u8]) -> Result<Self, ProgramError> {
+        let input = array_ref![input, 0, 64];
+        #[allow(clippy::ptr_offset_with_cast)]
+        let (inner, base_point) = array_refs![input, 32, 32];
+        Ok(Self {
+            inner: U256::from(inner),
+            base_point: U256::from(base_point),
+        })
+    }
+
+    fn pack_into_slice(&self, output: &mut [u8]) {
+        let output = array_mut_ref![output, 0, 64];
+        let (inner, base_point) = mut_array_refs![output, 32, 32];
+        self.inner.to_little_endian(inner);
+        self.base_point.to_little_endian(base_point);
     }
 }
 

@@ -7,7 +7,7 @@ use solana_program::{
     pubkey::Pubkey,
 };
 
-use crate::{fees::Fees, oracle::Oracle};
+use crate::{bn::FixedU256, fees::Fees, oracle::Oracle};
 
 /// Program states.
 #[repr(C)]
@@ -61,8 +61,13 @@ pub struct SwapInfo {
     pub admin_fee_key_b: Pubkey,
     /// Fees
     pub fees: Fees,
+
     /// Oracle
     pub oracle: Oracle,
+    /// Slope value - 0 < k < 1
+    pub k: FixedU256,
+    /// Mid price
+    pub i: FixedU256,
 }
 
 impl Sealed for SwapInfo {}
@@ -73,11 +78,11 @@ impl IsInitialized for SwapInfo {
 }
 
 impl Pack for SwapInfo {
-    const LEN: usize = 599;
+    const LEN: usize = 727;
 
     /// Unpacks a byte buffer into a [SwapInfo](struct.SwapInfo.html).
     fn unpack_from_slice(input: &[u8]) -> Result<Self, ProgramError> {
-        let input = array_ref![input, 0, 599];
+        let input = array_ref![input, 0, 727];
         #[allow(clippy::ptr_offset_with_cast)]
         let (
             is_initialized,
@@ -99,7 +104,11 @@ impl Pack for SwapInfo {
             admin_fee_key_b,
             fees,
             oracle,
-        ) = array_refs![input, 1, 1, 1, 8, 8, 8, 8, 8, 32, 32, 32, 32, 32, 32, 32, 32, 32, 64, 204];
+            k,
+            i,
+        ) = array_refs![
+            input, 1, 1, 1, 8, 8, 8, 8, 8, 32, 32, 32, 32, 32, 32, 32, 32, 32, 64, 204, 64, 64
+        ];
         Ok(Self {
             is_initialized: match is_initialized {
                 [0] => false,
@@ -128,11 +137,13 @@ impl Pack for SwapInfo {
             admin_fee_key_b: Pubkey::new_from_array(*admin_fee_key_b),
             fees: Fees::unpack_from_slice(fees)?,
             oracle: Oracle::unpack_from_slice(oracle)?,
+            k: FixedU256::unpack_from_slice(k)?,
+            i: FixedU256::unpack_from_slice(i)?,
         })
     }
 
     fn pack_into_slice(&self, output: &mut [u8]) {
-        let output = array_mut_ref![output, 0, 599];
+        let output = array_mut_ref![output, 0, 727];
         let (
             is_initialized,
             is_paused,
@@ -153,8 +164,10 @@ impl Pack for SwapInfo {
             admin_fee_key_b,
             fees,
             oracle,
+            k,
+            i,
         ) = mut_array_refs![
-            output, 1, 1, 1, 8, 8, 8, 8, 8, 32, 32, 32, 32, 32, 32, 32, 32, 32, 64, 204
+            output, 1, 1, 1, 8, 8, 8, 8, 8, 32, 32, 32, 32, 32, 32, 32, 32, 32, 64, 204, 64, 64
         ];
         is_initialized[0] = self.is_initialized as u8;
         is_paused[0] = self.is_paused as u8;
@@ -175,6 +188,8 @@ impl Pack for SwapInfo {
         admin_fee_key_b.copy_from_slice(self.admin_fee_key_b.as_ref());
         self.fees.pack_into_slice(&mut fees[..]);
         self.oracle.pack_into_slice(&mut oracle[..]);
+        self.k.pack_into_slice(&mut k[..]);
+        self.i.pack_into_slice(&mut i[..]);
     }
 }
 
@@ -227,6 +242,10 @@ mod tests {
             withdraw_fee_denominator,
         };
         let oracle = Oracle::new(token_a, token_b);
+        let k = FixedU256::one()
+            .checked_div_floor(FixedU256::new(2.into()))
+            .unwrap();
+        let i = FixedU256::new_from_int(10.into(), 18).unwrap();
 
         let is_initialized = true;
         let is_paused = false;
@@ -250,6 +269,8 @@ mod tests {
             admin_fee_key_b,
             fees,
             oracle,
+            k,
+            i,
         };
 
         let mut packed = [0u8; SwapInfo::LEN];
@@ -283,6 +304,13 @@ mod tests {
         let mut packed_oracle = [0u8; Oracle::LEN];
         oracle.pack_into_slice(&mut packed_oracle);
         packed.extend_from_slice(&packed_oracle);
+        let mut packed_k = [0u8; FixedU256::LEN];
+        k.pack_into_slice(&mut packed_k);
+        packed.extend_from_slice(&packed_k);
+        let mut packed_i = [0u8; FixedU256::LEN];
+        i.pack_into_slice(&mut packed_i);
+        packed.extend_from_slice(&packed_i);
+
         let unpacked = SwapInfo::unpack(&packed).unwrap();
         assert_eq!(swap_info, unpacked);
 
