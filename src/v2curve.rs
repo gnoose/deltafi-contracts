@@ -1,5 +1,5 @@
 //! Implement pricing of PMM
-use solana_program::program_error::ProgramError;
+use solana_program::{entrypoint::ProgramResult, program_error::ProgramError};
 
 use crate::{
     bn::FixedU256,
@@ -254,30 +254,23 @@ pub fn r_above_sell_quote_token(
 // ============ Helper functions ============
 
 /// adjust target value
-pub fn adjusted_target(state: PMMState) -> Result<PMMState, ProgramError> {
+pub fn adjusted_target(state: &mut PMMState) -> ProgramResult {
     if state.r == RState::BelowOne {
-        let new_q_0 = solve_quadratic_function_for_target(
+        state.q_0 = solve_quadratic_function_for_target(
             state.q,
             state.b.checked_sub(state.b_0)?,
             state.i,
             state.k,
         )?;
-        Ok(PMMState::new(
-            state.i, state.k, state.b, state.q, state.b_0, new_q_0, state.r,
-        ))
     } else if state.r == RState::AboveOne {
-        let new_b_0 = solve_quadratic_function_for_target(
+        state.b_0 = solve_quadratic_function_for_target(
             state.b,
             state.q.checked_sub(state.q_0)?,
             FixedU256::reciprocal_floor(state.i)?,
             state.k,
         )?;
-        Ok(PMMState::new(
-            state.i, state.k, state.b, state.q, new_b_0, state.q_0, state.r,
-        ))
-    } else {
-        Ok(state)
     }
+    Ok(())
 }
 
 /// get mid price
@@ -413,7 +406,17 @@ mod tests {
             r,
         );
 
-        assert_eq!(adjusted_target(state).unwrap(), state);
+        let mut new_state = PMMState::new(
+            i,
+            k,
+            base_balance,
+            quote_balance,
+            target_base_token_amount,
+            target_quote_token_amount,
+            r,
+        );
+        adjusted_target(&mut new_state).unwrap();
+        assert_eq!(new_state, state);
 
         let value = FixedU256::new_from_int(625.into(), 18)
             .unwrap()
