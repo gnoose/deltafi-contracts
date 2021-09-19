@@ -135,11 +135,11 @@ impl Pack for Oracle {
             period: u32::from_le_bytes(*period),
             token0: Pubkey::new_from_array(*token0),
             token1: Pubkey::new_from_array(*token1),
-            price0_cumulative_last: U256::from(price0_cumulative_last),
-            price1_cumulative_last: U256::from(price1_cumulative_last),
+            price0_cumulative_last: U256::from_little_endian(price0_cumulative_last),
+            price1_cumulative_last: U256::from_little_endian(price1_cumulative_last),
             block_timestamp_last: u64::from_le_bytes(*block_timestamp_last),
-            price0_average: U256::from(price0_average),
-            price1_average: U256::from(price1_average),
+            price0_average: U256::from_little_endian(price0_average),
+            price1_average: U256::from_little_endian(price1_average),
         })
     }
 

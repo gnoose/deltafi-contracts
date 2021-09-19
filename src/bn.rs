@@ -112,7 +112,10 @@ pub struct FixedU256 {
 
 impl Default for FixedU256 {
     fn default() -> Self {
-        Self::new_from_int(U256::zero(), 18).unwrap()
+        Self {
+            inner: U256::zero(),
+            base_point: U256::zero(),
+        }
     }
 }
 
@@ -372,8 +375,8 @@ impl Pack for FixedU256 {
         #[allow(clippy::ptr_offset_with_cast)]
         let (inner, base_point) = array_refs![input, 32, 32];
         Ok(Self {
-            inner: U256::from(inner),
-            base_point: U256::from(base_point),
+            inner: U256::from_little_endian(inner),
+            base_point: U256::from_little_endian(base_point),
         })
     }
 
