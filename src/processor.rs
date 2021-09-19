@@ -23,8 +23,8 @@ use crate::{
     error::SwapError,
     fees::Fees,
     instruction::{
-        AdminInstruction, DepositData, InitializeData, SwapData, SwapInstruction, WithdrawData,
-        WithdrawOneData,
+        AdminInstruction, DepositData, InitializeData, SwapData, SwapInstruction,
+        SwapInstruction::Swap, WithdrawData, WithdrawOneData,
     },
     math2::{get_buy_shares, get_deposit_adjustment_amount},
     oracle::Oracle,
@@ -132,6 +132,8 @@ impl Processor {
         nonce: u8,
         amp_factor: u64,
         fees: Fees,
+        k: FixedU256,
+        i: FixedU256,
         accounts: &[AccountInfo],
     ) -> ProgramResult {
         let account_info_iter = &mut accounts.iter();
@@ -263,8 +265,8 @@ impl Processor {
             admin_fee_key_b: *admin_fee_b_info.key,
             fees,
             oracle: Oracle::new(*token_a_info.key, *token_b_info.key),
-            k: token_swap.k,
-            i: token_swap.i,
+            k,
+            i,
         };
         SwapInfo::pack(obj, &mut swap_info.data.borrow_mut())?;
         Ok(())
@@ -344,6 +346,11 @@ impl Processor {
 
         let base_balance = FixedU256::new_from_int(U256::from(token_a.amount), 18)?;
         let pay_base_amount = FixedU256::new_from_int(U256::from(amount_in), 18)?;
+
+        if base_balance.inner() < pay_base_amount.inner() {
+            return Err(ProgramError::InsufficientFunds);
+        }
+
         let base_reserve = base_balance.checked_sub(pay_base_amount)?;
         let quote_reserve = FixedU256::new_from_int(U256::from(token_b.amount), 18)?;
 
@@ -477,19 +484,28 @@ impl Processor {
             .update(price0_cumulative, price1_cumulative, block_timestamp);
 
         // impl pmm into deposit process
+        let base_reserve = FixedU256::new_from_int(token_a.amount.into(), 18)?;
+        let quote_reserve = FixedU256::new_from_int(token_b.amount.into(), 18)?;
+        let mut base_blance = FixedU256::new_from_int(token_a.amount.into(), 18)?;
+        let mut quote_blance = FixedU256::new_from_int(token_b.amount.into(), 18)?;
+        let base_in_amount = FixedU256::new_from_int(token_a_amount.into(), 18)?;
+        let quote_in_amount = FixedU256::new_from_int(token_b_amount.into(), 18)?;
 
         let (base_adjusted_in_amount, quote_adjusted_in_amount) = get_deposit_adjustment_amount(
-            FixedU256::new_from_int(token_a_amount.into(), 18)?,
-            FixedU256::new_from_int(token_b_amount.into(), 18)?,
-            FixedU256::new_from_int(token_a.amount.into(), 18)?,
-            FixedU256::new_from_int(token_b.amount.into(), 18)?,
+            base_in_amount,
+            quote_in_amount,
+            base_reserve,
+            quote_reserve,
         )?;
 
+        base_blance = base_blance.checked_add(base_adjusted_in_amount)?;
+        quote_blance = quote_blance.checked_add(quote_adjusted_in_amount)?;
+
         let (share_amount, _base_input, _quote_amount) = get_buy_shares(
-            FixedU256::new_from_int(token_a_amount.into(), 18)?,
-            FixedU256::new_from_int(token_b_amount.into(), 18)?,
-            FixedU256::new_from_int(token_a.amount.into(), 18)?,
-            FixedU256::new_from_int(token_b.amount.into(), 18)?,
+            base_blance,
+            quote_blance,
+            base_reserve,
+            quote_reserve,
             FixedU256::new_from_int(pool_mint.supply.into(), 18)?,
         )?;
 
@@ -525,7 +541,6 @@ impl Processor {
             token_swap.nonce,
             mint_amount,
         )?;
-
         Ok(())
     }
 
@@ -807,9 +822,11 @@ impl Processor {
                 nonce,
                 amp_factor,
                 fees,
+                k,
+                i,
             }) => {
                 msg!("Instruction: Init");
-                Self::process_initialize(program_id, nonce, amp_factor, fees, accounts)
+                Self::process_initialize(program_id, nonce, amp_factor, fees, k, i, accounts)
             }
             SwapInstruction::Swap(SwapData {
                 amount_in,
@@ -985,6 +1002,8 @@ mod tests {
             token_a_amount,
             token_b_amount,
             DEFAULT_TEST_FEES,
+            default_k(),
+            default_i(),
         );
         // wrong nonce for authority_key
         {
@@ -1503,6 +1522,8 @@ mod tests {
         assert_eq!(swap_info.admin_fee_key_a, accounts.admin_fee_a_key);
         assert_eq!(swap_info.admin_fee_key_b, accounts.admin_fee_b_key);
         assert_eq!(swap_info.fees, DEFAULT_TEST_FEES);
+        assert_eq!(swap_info.k, default_k());
+        assert_eq!(swap_info.i, default_i());
         let token_a = utils::unpack_token_account(&accounts.token_a_account.data).unwrap();
         assert_eq!(token_a.amount, token_a_amount);
         let token_b = utils::unpack_token_account(&accounts.token_b_account.data).unwrap();
@@ -1525,6 +1546,8 @@ mod tests {
             token_a_amount,
             token_b_amount,
             DEFAULT_TEST_FEES,
+            default_k(),
+            default_i(),
         );
 
         let deposit_a = token_a_amount / 10;
@@ -2034,6 +2057,8 @@ mod tests {
             token_a_amount,
             token_b_amount,
             DEFAULT_TEST_FEES,
+            default_k(),
+            default_i(),
         );
         let withdrawer_key = pubkey_rand();
         let initial_a = token_a_amount / 10;
@@ -2655,6 +2680,8 @@ mod tests {
             token_a_amount,
             token_b_amount,
             DEFAULT_TEST_FEES,
+            default_k(),
+            default_i(),
         );
         let initial_a = token_a_amount / 5;
         let initial_b = token_b_amount / 5;
@@ -3180,6 +3207,8 @@ mod tests {
             token_a_amount,
             token_b_amount,
             DEFAULT_TEST_FEES,
+            default_k(),
+            default_i(),
         );
         let withdrawer_key = pubkey_rand();
         let initial_a = token_a_amount / 10;

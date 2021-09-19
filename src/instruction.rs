@@ -12,7 +12,7 @@ use solana_program::{
     sysvar::clock,
 };
 
-use crate::{error::SwapError, fees::Fees};
+use crate::{bn::FixedU256, error::SwapError, fees::Fees};
 
 /// Initialize instruction data
 #[repr(C)]
@@ -24,6 +24,10 @@ pub struct InitializeData {
     pub amp_factor: u64,
     /// Fees
     pub fees: Fees,
+    /// Slope variable
+    pub k: FixedU256,
+    /// mid price
+    pub i: FixedU256,
 }
 
 /// Swap instruction data
@@ -433,11 +437,17 @@ impl SwapInstruction {
             0 => {
                 let (&nonce, rest) = rest.split_first().ok_or(SwapError::InvalidInstruction)?;
                 let (amp_factor, rest) = unpack_u64(rest)?;
-                let fees = Fees::unpack_unchecked(rest)?;
+                let (fee_byte, rest) = rest.split_at(Fees::LEN);
+                let fees = Fees::unpack_unchecked(fee_byte)?;
+                let (k_byte, rest) = rest.split_at(FixedU256::LEN);
+                let k = FixedU256::unpack_from_slice(k_byte)?;
+                let i = FixedU256::unpack_from_slice(rest)?;
                 Self::Initialize(InitializeData {
                     nonce,
                     amp_factor,
                     fees,
+                    k,
+                    i,
                 })
             }
             1 => {
@@ -488,6 +498,8 @@ impl SwapInstruction {
                 nonce,
                 amp_factor,
                 fees,
+                k,
+                i,
             }) => {
                 buf.push(0);
                 buf.push(nonce);
@@ -495,6 +507,12 @@ impl SwapInstruction {
                 let mut fees_slice = [0u8; Fees::LEN];
                 Pack::pack_into_slice(&fees, &mut fees_slice[..]);
                 buf.extend_from_slice(&fees_slice);
+                let mut packed_k = [0u8; FixedU256::LEN];
+                k.pack_into_slice(&mut packed_k);
+                buf.extend_from_slice(&packed_k);
+                let mut packed_i = [0u8; FixedU256::LEN];
+                i.pack_into_slice(&mut packed_i);
+                buf.extend_from_slice(&packed_i);
             }
             Self::Swap(SwapData {
                 amount_in,
@@ -555,11 +573,15 @@ pub fn initialize(
     nonce: u8,
     amp_factor: u64,
     fees: Fees,
+    k: FixedU256,
+    i: FixedU256,
 ) -> Result<Instruction, ProgramError> {
     let data = SwapInstruction::Initialize(InitializeData {
         nonce,
         amp_factor,
         fees,
+        k,
+        i,
     })
     .pack();
 
@@ -890,10 +912,19 @@ mod tests {
             withdraw_fee_numerator: 7,
             withdraw_fee_denominator: 8,
         };
+        let k = FixedU256::one()
+            .checked_mul_floor(FixedU256::new(5.into()))
+            .unwrap()
+            .checked_div_floor(FixedU256::new(10.into()))
+            .unwrap();
+        let i = FixedU256::new_from_int(100.into(), 18).unwrap();
+
         let check = SwapInstruction::Initialize(InitializeData {
             nonce,
             amp_factor,
             fees,
+            k,
+            i,
         });
         let packed = check.pack();
         let mut expect: Vec<u8> = vec![0, nonce];
@@ -901,6 +932,13 @@ mod tests {
         let mut fees_slice = [0u8; Fees::LEN];
         fees.pack_into_slice(&mut fees_slice[..]);
         expect.extend_from_slice(&fees_slice);
+        let mut packed_k = [0u8; FixedU256::LEN];
+        k.pack_into_slice(&mut packed_k);
+        expect.extend_from_slice(&packed_k);
+        let mut packed_i = [0u8; FixedU256::LEN];
+        i.pack_into_slice(&mut packed_i);
+        expect.extend_from_slice(&packed_i);
+
         assert_eq!(packed, expect);
         let unpacked = SwapInstruction::unpack(&expect).unwrap();
         assert_eq!(unpacked, check);
