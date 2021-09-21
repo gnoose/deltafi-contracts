@@ -105,8 +105,6 @@ pub enum AdminInstruction {
     /// TODO: Docs
     SetNewFees(Fees),
     /// TODO: Docs
-    SetRewardAccount,
-    /// TODO: Docs
     SetNewRewards(Rewards),
 }
 
@@ -133,8 +131,7 @@ impl AdminInstruction {
                 let fees = Fees::unpack_unchecked(rest)?;
                 Some(Self::SetNewFees(fees))
             }
-            108 => Some(Self::SetRewardAccount),
-            109 => {
+            108 => {
                 let rewards = Rewards::unpack_unchecked(rest)?;
                 Some(Self::SetNewRewards(rewards))
             }
@@ -166,9 +163,8 @@ impl AdminInstruction {
                 Pack::pack_into_slice(&fees, &mut fees_slice[..]);
                 buf.extend_from_slice(&fees_slice);
             }
-            Self::SetRewardAccount => buf.push(108),
             Self::SetNewRewards(rewards) => {
-                buf.push(109);
+                buf.push(108);
                 let mut rewards_slice = [0u8; Rewards::LEN];
                 Pack::pack_into_slice(&rewards, &mut rewards_slice[..]);
                 buf.extend_from_slice(&rewards_slice);
@@ -360,30 +356,6 @@ pub fn set_new_fees(
         AccountMeta::new(*swap_pubkey, true),
         AccountMeta::new(*authority_pubkey, false),
         AccountMeta::new(*admin_pubkey, true),
-    ];
-
-    Ok(Instruction {
-        program_id: *program_id,
-        accounts,
-        data,
-    })
-}
-
-/// Creates a 'set_reward_account' instruction.
-pub fn set_reward_account(
-    program_id: &Pubkey,
-    swap_pubkey: &Pubkey,
-    authority_pubkey: &Pubkey,
-    admin_pubkey: &Pubkey,
-    new_reward_account: &Pubkey,
-) -> Result<Instruction, ProgramError> {
-    let data = AdminInstruction::SetFeeAccount.pack();
-
-    let accounts = vec![
-        AccountMeta::new(*swap_pubkey, true),
-        AccountMeta::new(*authority_pubkey, false),
-        AccountMeta::new(*admin_pubkey, true),
-        AccountMeta::new(*new_reward_account, false),
     ];
 
     Ok(Instruction {

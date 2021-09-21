@@ -29,7 +29,10 @@ pub mod test_utils {
         state::{Account as SplAccount, Mint as SplMint},
     };
 
-    use crate::{curve::ZERO_TS, fees::Fees, instruction::*, processor::Processor, rewards::Rewards, state::SwapInfo};
+    use crate::{
+        curve::ZERO_TS, fees::Fees, instruction::*, processor::Processor, rewards::Rewards,
+        state::SwapInfo,
+    };
 
     /// Test program id for the swap program.
     pub const SWAP_PROGRAM_ID: Pubkey = Pubkey::new_from_array([2u8; 32]);
@@ -767,6 +770,24 @@ pub mod test_utils {
                     &self.authority_key,
                     &self.admin_key,
                     new_fees,
+                )
+                .unwrap(),
+                vec![
+                    &mut self.swap_account,
+                    &mut Account::default(),
+                    &mut self.admin_account,
+                ],
+            )
+        }
+
+        pub fn set_new_rewards(&mut self, new_rewards: Rewards) -> ProgramResult {
+            do_process_instruction(
+                set_rewards(
+                    &SWAP_PROGRAM_ID,
+                    &self.swap_key,
+                    &self.authority_key,
+                    &self.admin_key,
+                    new_rewards,
                 )
                 .unwrap(),
                 vec![
