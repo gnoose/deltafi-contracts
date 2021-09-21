@@ -2815,7 +2815,7 @@ mod tests {
                     &token_b_key,
                     &mut token_b_account,
                     initial_a * 2,
-                    minimum_b_amount * 2,
+                    minimum_b_amount,
                 )
             );
         }
