@@ -920,6 +920,20 @@ mod tests {
         assert_eq!(packed, expect);
         let unpacked = AdminInstruction::unpack(&expect).unwrap();
         assert_eq!(unpacked, Some(check));
+
+        let new_rewards = Rewards {
+            trade_reward_numerator: 1,
+            trade_reward_denominator: 2,
+        };
+        let check = AdminInstruction::SetNewRewards(new_rewards);
+        let packed = check.pack();
+        let mut expect: Vec<u8> = vec![108];
+        let mut new_rewards_slice = [0u8; Rewards::LEN];
+        new_rewards.pack_into_slice(&mut new_rewards_slice[..]);
+        expect.extend_from_slice(&new_rewards_slice);
+        assert_eq!(packed, expect);
+        let unpacked = AdminInstruction::unpack(&expect).unwrap();
+        assert_eq!(unpacked, Some(check));
     }
 
     #[test]
