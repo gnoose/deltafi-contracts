@@ -14,17 +14,22 @@ pub fn get_deposit_adjustment_amount(
     quote_in_amount: FixedU256,
     base_reserve_amount: FixedU256,
     quote_reserve_amount: FixedU256,
+    i: FixedU256,
 ) -> Result<(FixedU256, FixedU256), ProgramError> {
     if quote_reserve_amount.into_u256_ceil().is_zero()
         && base_reserve_amount.into_u256_ceil().is_zero()
     {
-        return Ok((base_in_amount, quote_in_amount));
-    }
+        let shares;
+        if quote_in_amount.into_u256_ceil() < base_in_amount.checked_mul_floor(i)?.into_u256_ceil()
+        {
+            shares = quote_in_amount.checked_div_floor(i)?;
+        } else {
+            shares = base_in_amount;
+        }
+        let base_adjusted_in_amount = shares;
+        let quote_adjusted_in_amount = shares.checked_mul_floor(i)?;
 
-    if quote_reserve_amount.into_u256_ceil().is_zero()
-        && base_reserve_amount.into_u256_ceil() > U256::zero()
-    {
-        return Ok((base_in_amount, FixedU256::new(U256::zero().into())));
+        return Ok((base_adjusted_in_amount, quote_adjusted_in_amount));
     }
 
     if quote_reserve_amount.into_u256_ceil() > U256::zero()
@@ -50,9 +55,74 @@ pub fn get_deposit_adjustment_amount(
         Ok((base_in_amount, quote_in_amount))
     }
 }
+/// buy shares [round down] - mint amount for lp - dsp
+pub fn get_buy_shares(
+    base_balance: FixedU256,
+    quote_balance: FixedU256,
+    base_reserve: FixedU256,
+    quote_reserve: FixedU256,
+    base_target: FixedU256,
+    quote_target: FixedU256,
+    total_supply: FixedU256,
+    i: FixedU256,
+) -> Result<(FixedU256, FixedU256, FixedU256, FixedU256, FixedU256), ProgramError> {
+    let base_input = base_balance.checked_sub(base_reserve)?;
+    let quote_input = quote_balance.checked_sub(quote_reserve)?;
+
+    if base_input.into_u256_ceil() <= U256::zero() {
+        return Err(ProgramError::InvalidArgument);
+    }
+
+    // Round down when withdrawing. Therefore, never be a situation occuring balance is 0 but totalsupply is not 0
+    // But May Happen，reserve >0 But totalSupply = 0
+
+    let mut share = FixedU256::zero();
+    let mut new_base_target = base_target;
+    let mut new_quote_target = quote_target;
+    if total_supply.into_u256_ceil().is_zero() {
+        // case 1. initial supply
+        if quote_balance.into_u256_ceil() < base_balance.checked_mul_floor(i)?.into_u256_ceil() {
+            share = quote_balance.checked_div_floor(i)?;
+        } else {
+            share = base_balance;
+        }
+        new_base_target = share;
+        new_quote_target = share.checked_mul_floor(i)?;
+    } else if base_reserve.into_u256_ceil() > U256::zero()
+        && quote_reserve.into_u256_ceil() > U256::zero()
+    {
+        let base_input_ratio = base_input.checked_div_floor(base_reserve)?;
+        let quote_input_ratio = quote_input.checked_div_floor(quote_reserve)?;
+        let mint_ratio;
+        let new_quote_input_ratio =
+            quote_input_ratio.take_and_scale(base_input_ratio.base_point())?;
+        if new_quote_input_ratio.inner() < base_input_ratio.inner() {
+            mint_ratio = quote_input_ratio;
+        } else {
+            mint_ratio = base_input_ratio;
+        }
+        share = total_supply.checked_mul_floor(mint_ratio)?;
+        new_base_target =
+            new_base_target.checked_add(new_base_target.checked_mul_floor(mint_ratio)?)?;
+        new_quote_target =
+            new_quote_target.checked_add(new_quote_target.checked_mul_floor(mint_ratio)?)?;
+    }
+
+    // _mint(to, shares);
+    // _setReserve(baseBalance, quoteBalance);
+    let new_base_reserve = base_balance;
+    let new_quote_reserve = quote_balance;
+    Ok((
+        share,
+        new_base_target,
+        new_quote_target,
+        new_base_reserve,
+        new_quote_reserve,
+    ))
+}
 
 /// buy shares [round down] - mint amount for lp
-pub fn get_buy_shares(
+pub fn get_buy_shares_dvm(
     base_balance: FixedU256,
     quote_balance: FixedU256,
     base_reserve: FixedU256,
@@ -326,71 +396,132 @@ pub fn solve_quadratic_function_for_trade(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::utils::test_utils::{default_i, default_k};
 
     #[test]
     fn basic() {
-        let q0: FixedU256 = FixedU256::new_from_int(1000.into(), 18).unwrap();
-        let q1: FixedU256 = FixedU256::new_from_int(1000.into(), 18).unwrap();
-        let i: FixedU256 = FixedU256::new_from_int(100.into(), 18).unwrap();
-        let delta_b: FixedU256 = FixedU256::new_from_int(200.into(), 18).unwrap();
-        let k: FixedU256 = FixedU256::one()
-            .checked_mul_floor(FixedU256::new(5.into()))
-            .unwrap()
-            .checked_div_floor(FixedU256::new(10.into()))
-            .unwrap();
+        let q0: FixedU256 = FixedU256::new_from_int(5000.into(), 18).unwrap();
+        let q1: FixedU256 = FixedU256::new_from_int(5000.into(), 18).unwrap();
+        let i: FixedU256 = default_i();
+        let delta_b: FixedU256 = FixedU256::new_from_int(100.into(), 18).unwrap();
+        let k: FixedU256 = default_k();
 
         assert_eq!(
-            get_buy_shares(
-                FixedU256::new_from_int(1000.into(), 18).unwrap(),
-                FixedU256::new_from_int(2000.into(), 18).unwrap(),
-                FixedU256::new_from_int(800.into(), 18).unwrap(),
-                FixedU256::new_from_int(1600.into(), 18).unwrap(),
+            get_deposit_adjustment_amount(
+                FixedU256::new_from_int(100.into(), 18).unwrap(),
                 FixedU256::new_from_int(10000.into(), 18).unwrap(),
+                FixedU256::new_from_int(0.into(), 18).unwrap(),
+                FixedU256::new_from_int(0.into(), 18).unwrap(),
+                i
             )
             .unwrap(),
             (
-                FixedU256::new_from_int(2500.into(), 18).unwrap(),
-                FixedU256::new_from_int(200.into(), 18).unwrap(),
-                FixedU256::new_from_int(400.into(), 18).unwrap()
+                FixedU256::new_from_int(100.into(), 18).unwrap(),
+                FixedU256::new_from_int(10000.into(), 18).unwrap()
             )
         );
+
+        assert_eq!(
+            get_buy_shares(
+                FixedU256::new_from_int(100.into(), 18).unwrap(),
+                FixedU256::new_from_int(10000.into(), 18).unwrap(),
+                FixedU256::new_from_int(0.into(), 18).unwrap(),
+                FixedU256::new_from_int(0.into(), 18).unwrap(),
+                FixedU256::zero(),
+                FixedU256::zero(),
+                FixedU256::zero(),
+                default_i()
+            )
+            .unwrap(),
+            (
+                FixedU256::new_from_int(100.into(), 18).unwrap(),
+                FixedU256::new_from_int(100.into(), 18).unwrap(),
+                FixedU256::new_from_int(10000.into(), 18).unwrap(),
+                FixedU256::new_from_int(100.into(), 18).unwrap(),
+                FixedU256::new_from_int(10000.into(), 18).unwrap(),
+            )
+        );
+
+        //  above result is for initialize result
+        //  Input
+        //  token_a_amount = 100, token_b_amount = 10000, k = 0.5, i = 100,
+        //  Result
+        //  base_target = 100, base_reserve = 100, quote_target = 10000, quote_reserve = 10000
+        //  pool_mint_supply = 100
 
         assert_eq!(
             get_deposit_adjustment_amount(
                 FixedU256::new_from_int(10.into(), 18).unwrap(),
-                FixedU256::new_from_int(20.into(), 18).unwrap(),
-                FixedU256::new_from_int(500.into(), 18).unwrap(),
-                FixedU256::new_from_int(2000.into(), 18).unwrap(),
+                FixedU256::new_from_int(1000.into(), 18).unwrap(),
+                FixedU256::new_from_int(100.into(), 18).unwrap(),
+                FixedU256::new_from_int(10000.into(), 18).unwrap(),
+                i
             )
             .unwrap(),
             (
-                FixedU256::new_from_int(5.into(), 18).unwrap(),
-                FixedU256::new_from_int(20.into(), 18).unwrap()
+                FixedU256::new_from_int(10.into(), 18).unwrap(),
+                FixedU256::new_from_int(1000.into(), 18).unwrap()
             )
         );
 
         assert_eq!(
-            general_integrate(q0, q1, q1.checked_sub(delta_b).unwrap(), i, k).unwrap(),
-            FixedU256::new_from_int(30000.into(), 18).unwrap()
+            get_buy_shares(
+                FixedU256::new_from_int(110.into(), 18).unwrap(),
+                FixedU256::new_from_int(11000.into(), 18).unwrap(),
+                FixedU256::new_from_int(100.into(), 18).unwrap(),
+                FixedU256::new_from_int(10000.into(), 18).unwrap(),
+                FixedU256::new_from_int(100.into(), 18).unwrap(),
+                FixedU256::new_from_int(10000.into(), 18).unwrap(),
+                FixedU256::new_from_int(100.into(), 18).unwrap(),
+                default_i()
+            )
+            .unwrap(),
+            (
+                FixedU256::new_from_int(10.into(), 18).unwrap(),
+                FixedU256::new_from_int(110.into(), 18).unwrap(),
+                FixedU256::new_from_int(11000.into(), 18).unwrap(),
+                FixedU256::new_from_int(110.into(), 18).unwrap(),
+                FixedU256::new_from_int(11000.into(), 18).unwrap(),
+            )
+        );
+
+        //  above result is for deposit result
+        //  Input
+        //  deposit_token_a_amount = 10, deposit_token_b_amount = 1000,
+        //  token_a_amount = 100, token_b_amount = 10000, k = 0.5, i = 100,
+        //  base_target = 100, base_reserve = 100, quote_target = 10000, quote_reserve = 10000
+        //  Result
+        //  base_target = 110, base_reserve = 110, quote_target = 11000, quote_reserve = 11000
+        //  pool_mint_supply = 110
+
+        assert_eq!(
+            U256::to_u64(
+                general_integrate(q0, q1, q1.checked_sub(delta_b).unwrap(), i, k)
+                    .unwrap()
+                    .into_u256_ceil()
+            )
+            .unwrap(),
+            15000
         );
 
         assert_eq!(
-            solve_quadratic_function_for_trade(q0, q1, delta_b, i, k).unwrap(),
-            FixedU256::new_from_int(952.into(), 18).unwrap()
+            U256::to_u64(
+                solve_quadratic_function_for_trade(q0, q1, delta_b, i, k)
+                    .unwrap()
+                    .into_u256_ceil()
+            )
+            .unwrap(),
+            3333
         );
 
-        let value = FixedU256::new(64031.into())
-            .checked_mul_floor(FixedU256::new(100000.into()))
-            .unwrap()
-            .checked_add(FixedU256::new(24237.into()))
-            .unwrap()
-            .checked_mul_floor(FixedU256::new(1000000.into()))
-            .unwrap()
-            .checked_mul_floor(FixedU256::new(1000000.into()))
-            .unwrap();
         assert_eq!(
-            solve_quadratic_function_for_target(q1, delta_b, i, k).unwrap(),
-            FixedU256::new_from_fixed(value.into_u256_ceil(), 18)
+            U256::to_u64(
+                solve_quadratic_function_for_target(q1, delta_b, i, k)
+                    .unwrap()
+                    .into_u256_ceil()
+            )
+            .unwrap(),
+            10000
         );
     }
 }

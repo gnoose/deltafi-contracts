@@ -108,6 +108,10 @@ pub mod test_utils {
         pub fees: Fees,
         pub k: FixedU256,
         pub i: FixedU256,
+        pub base_target: FixedU256,
+        pub quote_target: FixedU256,
+        pub base_reserve: FixedU256,
+        pub quote_reserve: FixedU256,
     }
 
     impl SwapAccountInfo {
@@ -177,6 +181,10 @@ pub mod test_utils {
             );
 
             let admin_account = Account::default();
+            let base_target = FixedU256::zero();
+            let quote_target = FixedU256::zero();
+            let base_reserve = FixedU256::zero();
+            let quote_reserve = FixedU256::zero();
 
             SwapAccountInfo {
                 nonce,
@@ -206,6 +214,10 @@ pub mod test_utils {
                 fees,
                 k,
                 i,
+                base_target,
+                quote_target,
+                base_reserve,
+                quote_reserve,
             }
         }
 
