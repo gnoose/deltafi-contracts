@@ -178,7 +178,7 @@ pub fn solve_quadratic_function_for_target(
 
     let premium = sqrt
         .checked_sub(FixedU256::one())?
-        .checked_mul_floor(k.checked_mul_floor(FixedU256::new(2.into()))?)?
+        .checked_div_floor(k.checked_mul_floor(FixedU256::new(2.into()))?)?
         .checked_add(FixedU256::one())?;
 
     Ok(v1.checked_mul_floor(premium)?)
