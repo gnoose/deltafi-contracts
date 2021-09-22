@@ -1,5 +1,4 @@
-//! Implement DODOMath_v2 calculation
-
+//! math formulas for proactive market maker
 use solana_program::program_error::ProgramError;
 
 use crate::bn::{FixedU256, U256};
@@ -8,7 +7,6 @@ use crate::bn::{FixedU256, U256};
 //      a_reserve = 0 & b_reserve = 0 => (a_amount, b_amount)
 //      a_reserve > 0 & b_reserve = 0 => (a_amount, 0)
 //      a_reserve > 0 & b_reserve > 0 => (a_amount*ratio1, b_amount*ratio2)
-
 pub fn get_deposit_adjustment_amount(
     base_in_amount: FixedU256,
     quote_in_amount: FixedU256,
@@ -55,7 +53,8 @@ pub fn get_deposit_adjustment_amount(
         Ok((base_in_amount, quote_in_amount))
     }
 }
-/// buy shares [round down] - mint amount for lp - dsp
+
+/// buy shares [round down] - mint amount for lp - sp
 pub fn get_buy_shares(
     base_balance: FixedU256,
     quote_balance: FixedU256,
@@ -72,9 +71,6 @@ pub fn get_buy_shares(
     if base_input.into_u256_ceil() <= U256::zero() {
         return Err(ProgramError::InvalidArgument);
     }
-
-    // Round down when withdrawing. Therefore, never be a situation occuring balance is 0 but totalsupply is not 0
-    // But May Happen，reserve >0 But totalSupply = 0
 
     let mut share = FixedU256::zero();
     let mut new_base_target = base_target;
@@ -108,8 +104,6 @@ pub fn get_buy_shares(
             new_quote_target.checked_add(new_quote_target.checked_mul_floor(mint_ratio)?)?;
     }
 
-    // _mint(to, shares);
-    // _setReserve(baseBalance, quoteBalance);
     let new_base_reserve = base_balance;
     let new_quote_reserve = quote_balance;
     Ok((
@@ -121,61 +115,7 @@ pub fn get_buy_shares(
     ))
 }
 
-/// buy shares [round down] - mint amount for lp
-pub fn get_buy_shares_dvm(
-    base_balance: FixedU256,
-    quote_balance: FixedU256,
-    base_reserve: FixedU256,
-    quote_reserve: FixedU256,
-    total_supply: FixedU256,
-) -> Result<(FixedU256, FixedU256, FixedU256), ProgramError> {
-    let base_input = base_balance.checked_sub(base_reserve)?;
-    let quote_input = quote_balance.checked_sub(quote_reserve)?;
-
-    // Round down when withdrawing. Therefore, never be a situation occuring balance is 0 but totalsupply is not 0
-    // But May Happen，reserve >0 But totalSupply = 0
-    let mut share = FixedU256::zero();
-    if total_supply.into_u256_ceil().is_zero() {
-        // case 1. initial supply
-        share = base_balance;
-    } else if base_reserve.into_u256_ceil() > U256::zero()
-        && quote_reserve.into_u256_ceil().is_zero()
-    {
-        // case 2. supply when quote reserve is 0
-        share = base_input
-            .checked_mul_floor(total_supply)?
-            .checked_div_floor(base_reserve)?;
-    } else if base_reserve.into_u256_ceil() > U256::zero()
-        && quote_reserve.into_u256_ceil() > U256::zero()
-    {
-        // case 3. normal case
-        let base_input_ratio = base_input.checked_div_floor(base_reserve)?;
-        let quote_input_ratio = quote_input.checked_div_floor(quote_reserve)?;
-        let mint_ratio;
-        let new_quote_input_ratio =
-            quote_input_ratio.take_and_scale(base_input_ratio.base_point())?;
-        if new_quote_input_ratio.inner() < base_input_ratio.inner() {
-            mint_ratio = quote_input_ratio;
-        } else {
-            mint_ratio = base_input_ratio;
-        }
-        share = total_supply.checked_mul_floor(mint_ratio)?;
-    }
-    Ok((share, base_input, quote_input))
-}
-
 /// Integrate dodo curve from V1 to V2
-//        require V0>=V1>=V2>0
-//        res = (1-k)i(V1-V2)+ikV0*V0(1/V2-1/V1)
-//        let V1-V2=delta
-//        res = i*delta*(1-k+k(V0^2/V1/V2))
-
-//        i is the price of V-res trading pair
-
-//        support k=1 & k=0 case
-
-//        [round down]
-
 pub fn general_integrate(
     v0: FixedU256,
     v1: FixedU256,
@@ -196,16 +136,6 @@ pub fn general_integrate(
 }
 
 /// Follow the integration function above
-//    i*deltaB = (Q2-Q1)*(1-k+kQ0^2/Q1/Q2)
-//    Assume Q2=Q0, Given Q1 and deltaB, solve Q0
-
-//    i is the price of delta-V trading pair
-//    give out target of V
-
-//    support k=1 & k=0 case
-
-//    [round down]
-
 pub fn solve_quadratic_function_for_target(
     v1: FixedU256,
     delta: FixedU256,
@@ -219,11 +149,6 @@ pub fn solve_quadratic_function_for_target(
     if k.into_u256_ceil().is_zero() {
         return Ok(v1.checked_add(i.checked_mul_floor(delta)?)?);
     }
-
-    // V0 = V1*(1+(sqrt-1)/2k)
-    // sqrt = √(1+4kidelta/V1)
-    // premium = 1+(sqrt-1)/2k
-    // uint256 sqrt = (4 * k).mul(i).mul(delta).div(V1).add(DecimalMath.ONE2).sqrt();
 
     let sqrt;
     let ki = k
@@ -254,30 +179,7 @@ pub fn solve_quadratic_function_for_target(
     Ok(v1.checked_mul_floor(premium)?)
 }
 
-/// Follow the integration expression above, we have:
-//        i*deltaB = (Q2-Q1)*(1-k+kQ0^2/Q1/Q2)
-//        Given Q1 and deltaB, solve Q2
-//        This is a quadratic function and the standard version is
-//        aQ2^2 + bQ2 + c = 0, where
-//        a=1-k
-//        -b=(1-k)Q1-kQ0^2/Q1+i*deltaB
-//        c=-kQ0^2
-//        and Q2=(-b+sqrt(b^2+4(1-k)kQ0^2))/2(1-k)
-//        note: another root is negative, abondan
-//
-//        if deltaBSig=true, then Q2>Q1, user sell Q and receive B
-//        if deltaBSig=false, then Q2<Q1, user sell B and receive Q
-//        return |Q1-Q2|
-//
-//        as we only support sell amount as delta, the deltaB is always negative
-//        the input ideltaB is actually -ideltaB in the equation
-//
-//        i is the price of delta-V trading pair
-//
-//        support k=1 & k=0 case
-//
-//        [round down]
-
+/// Follow the integration expression above
 pub fn solve_quadratic_function_for_trade(
     v0: FixedU256,
     v1: FixedU256,
@@ -302,12 +204,6 @@ pub fn solve_quadratic_function_for_trade(
     }
 
     if k.into_u256_ceil() == U256::one() {
-        // if k==1
-        // Q2=Q1/(1+ideltaBQ1/Q0/Q0)
-        // temp = ideltaBQ1/Q0/Q0
-        // Q2 = Q1/(1+temp)
-        // Q1-Q2 = Q1*(1-1/(1+temp)) = Q1*(temp/(1+temp))
-        // uint256 temp = i.mul(delta).mul(V1).div(V0.mul(V0));
         let temp;
         let i_delta = i.checked_mul_floor(delta)?;
         if i_delta.into_u256_ceil().is_zero() {
@@ -333,14 +229,6 @@ pub fn solve_quadratic_function_for_trade(
             .checked_div_floor(temp.checked_add(FixedU256::one())?)?);
     }
 
-    // calculate -b value and sig
-    // b = kQ0^2/Q1-i*deltaB-(1-k)Q1
-    // part1 = (1-k)Q1 >=0
-    // part2 = kQ0^2/Q1-i*deltaB >=0
-    // bAbs = abs(part1-part2)
-    // if part1>part2 => b is negative => bSig is false
-    // if part2>part1 => b is positive => bSig is true
-
     let part_2 = k
         .checked_mul_floor(v0)?
         .checked_div_floor(v1)?
@@ -360,8 +248,6 @@ pub fn solve_quadratic_function_for_trade(
 
     b_abs = b_abs.checked_div_floor(FixedU256::one())?;
 
-    // calculate sqrt
-
     let mut square_root = FixedU256::one()
         .checked_sub(k)?
         .checked_mul_floor(FixedU256::new(4.into()))?
@@ -370,9 +256,7 @@ pub fn solve_quadratic_function_for_trade(
     square_root = b_abs
         .checked_mul_floor(b_abs)?
         .checked_add(square_root)?
-        .sqrt()?; // sqrt(b*b+4(1-k)kQ0*Q0)
-
-    // final res
+        .sqrt()?;
 
     let denominator = FixedU256::one()
         .checked_sub(k)?
