@@ -818,6 +818,7 @@ pub fn unpack<T>(input: &[u8]) -> Result<&T, ProgramError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::utils::test_utils::{default_i, default_k};
 
     #[test]
     fn test_admin_instruction_packing() {
@@ -912,12 +913,8 @@ mod tests {
             withdraw_fee_numerator: 7,
             withdraw_fee_denominator: 8,
         };
-        let k = FixedU256::one()
-            .checked_mul_floor(FixedU256::new(5.into()))
-            .unwrap()
-            .checked_div_floor(FixedU256::new(10.into()))
-            .unwrap();
-        let i = FixedU256::new_from_int(100.into(), 18).unwrap();
+        let k = default_k();
+        let i = default_i();
 
         let check = SwapInstruction::Initialize(InitializeData {
             nonce,
