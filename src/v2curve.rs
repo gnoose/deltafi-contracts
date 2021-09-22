@@ -1,11 +1,10 @@
-//! Implement pricing of PMM
+//! pricing for proactive market maker
 use std::mem::size_of;
 
 use solana_program::{entrypoint::ProgramResult, program_error::ProgramError};
 
 use crate::{
     bn::FixedU256,
-    fees::Fees,
     math2::{
         general_integrate, solve_quadratic_function_for_target, solve_quadratic_function_for_trade,
     },
@@ -114,35 +113,23 @@ pub fn sell_base_token(
     let mut receive_quote_amount;
     let new_r;
     if state.r == RState::One {
-        // case 1: R=1
-        // R falls below one
-
         receive_quote_amount = r_one_sell_base_token(state, pay_base_amount)?;
         new_r = RState::BelowOne;
     } else if state.r == RState::AboveOne {
         let back_to_one_pay_base = state.b_0.checked_sub(state.b)?;
         let back_to_one_receive_quote = state.q.checked_sub(state.q_0)?;
 
-        // case 2: R>1
-        // complex case, R status depends on trading amount
-
         if pay_base_amount.into_u256_ceil() < back_to_one_pay_base.into_u256_ceil() {
-            // case 2.1: R status do not change
             receive_quote_amount = r_above_sell_base_token(state, pay_base_amount)?;
             new_r = RState::AboveOne;
 
             if receive_quote_amount.into_u256_ceil() > back_to_one_receive_quote.into_u256_ceil() {
-                // [Important corner case!] may enter this branch when some precision problem happens. And consequently contribute to negative spare quote amount
-                // to make sure spare quote>=0, mannually set receiveQuote=backToOneReceiveQuote
-
                 receive_quote_amount = back_to_one_receive_quote;
             }
         } else if pay_base_amount.into_u256_ceil() == back_to_one_pay_base.into_u256_ceil() {
-            // case 2.2: R status changes to ONE
             receive_quote_amount = back_to_one_receive_quote;
             new_r = RState::One;
         } else {
-            // case 2.3: R status changes to BELOW_ONE
             receive_quote_amount = back_to_one_receive_quote.checked_add(r_one_sell_base_token(
                 state,
                 pay_base_amount.checked_sub(back_to_one_pay_base)?,
@@ -150,8 +137,6 @@ pub fn sell_base_token(
             new_r = RState::BelowOne;
         }
     } else {
-        // state.R == RState.BELOW_ONE
-        // case 3: R<1
         receive_quote_amount = r_below_sell_base_token(state, pay_base_amount)?;
         new_r = RState::BelowOne;
     }
@@ -205,8 +190,6 @@ pub fn r_one_sell_base_token(
     state: PMMState,
     pay_base_amount: FixedU256,
 ) -> Result<FixedU256, ProgramError> {
-    // in theory Q2 <= targetQuoteTokenAmount
-    // however when amount is close to 0, precision problems may cause Q2 > targetQuoteTokenAmount
     solve_quadratic_function_for_trade(state.q_0, state.q_0, pay_base_amount, state.i, state.k)
 }
 
