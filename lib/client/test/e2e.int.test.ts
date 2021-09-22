@@ -8,7 +8,7 @@ import {
   PublicKey,
 } from "@solana/web3.js";
 
-import { StableSwap } from "../src";
+import { StableSwap, Farm } from "../src";
 import { DEFAULT_TOKEN_DECIMALS, TOKEN_PROGRAM_ID } from "../src/constants";
 import {
   DEFAULT_FEE_DENOMINATOR,
@@ -419,25 +419,28 @@ describe("e2e test for stable swap", () => {
 describe("e2e test for liquidity mining", () => {
   // Cluster connection
   let connection: Connection;
+  // Fee payer
+  let payer: Account;
   // authority of the token and accounts
-  let authority: PublicKey;    
+  let authority: PublicKey;
   // nonce used to generate the authority public key
-  let nonce: number;  
+  let nonce: number;
   // owner of the user accounts
-  let owner: Account;  
+  let owner: Account;
   // Token deltafi
   let tokenDeltafi: Token;
   let userDeltafiAccount: PublicKey;
   // Farming tokens
-  let mintPool: Token;
+  let tokenPool: Token;
   let tokenAccountPool: PublicKey;
   // Admin fee accounts
-  let adminFeeAccountPool: PublicKey;
+  let adminFeeAccountDeltafi: PublicKey;
   // Farm
   let farm: Farm;
   let farmAccount: Account;
   let farmBaseAccount: Account;
   let farmProgramId: PublicKey;
+  let userFarmingAccount: Account;
 
   beforeAll(async (done) => {
     connection = new Connection(CLUSTER_URL, "single");
@@ -447,11 +450,13 @@ describe("e2e test for liquidity mining", () => {
     farmProgramId = getDeploymentInfo().stableSwapProgramId;
     farmAccount = new Account();
     farmBaseAccount = new Account();
+    userFarmingAccount = new Account();
+
     try {
       [authority, nonce] = await PublicKey.findProgramAddress(
-        [farmAccount.publickKey.toBuffer()],
-        farmProgramId,
-      )
+        [farmAccount.publicKey.toBuffer()],
+        farmProgramId
+      );
     } catch (e) {
       throw new Error(e);
     }
@@ -463,7 +468,7 @@ describe("e2e test for liquidity mining", () => {
         authority,
         null,
         DEFAULT_TOKEN_DECIMALS,
-        TOKEN_PROGRAM_ID,
+        TOKEN_PROGRAM_ID
       );
     } catch (e) {
       throw new Error(e);
@@ -476,22 +481,27 @@ describe("e2e test for liquidity mining", () => {
     }
     // creating token LP
     try {
-      mintPool = await Token.createMint(
+      tokenPool = await Token.createMint(
         connection,
         payer,
         owner.publicKey,
         null,
         DEFAULT_TOKEN_DECIMALS,
-        TOKEN_PROGRAM_ID,
+        TOKEN_PROGRAM_ID
       );
     } catch (e) {
       throw new Error(e);
     }
     // create token pool account then mint to it
     try {
-      adminFeeAccountPool = await mintPool.createAccount(owner.publicKey);
-      tokenAccountPool = await mintPool.createAccount(authority);
-      await mintPool.mintTo(tokenAccountPool, owner, [], INITIAL_TOKEN_LP_AMOUNT)
+      adminFeeAccountDeltafi = await tokenPool.createAccount(owner.publicKey);
+      tokenAccountPool = await tokenPool.createAccount(authority);
+      await tokenPool.mintTo(
+        tokenAccountPool,
+        owner,
+        [],
+        INITIAL_TOKEN_LP_AMOUNT
+      );
     } catch (e) {
       throw new Error(e);
     }
@@ -503,14 +513,16 @@ describe("e2e test for liquidity mining", () => {
       farm = await Farm.createFarm(
         connection,
         payer,
+        farmBaseAccount,
         farmAccount,
         authority,
         owner.publicKey,
-        adminFeeAccountPool,
-        mintPool.publicKey,
+        adminFeeAccountDeltafi,
+        tokenPool.publicKey,
         tokenAccountPool,
         tokenDeltafi.publicKey,
         userDeltafiAccount,
+        tokenPool.publicKey,
         farmProgramId,
         TOKEN_PROGRAM_ID,
         nonce,
@@ -519,6 +531,21 @@ describe("e2e test for liquidity mining", () => {
     } catch (e) {
       throw new Error(e);
     }
+
+    // emulate the action when clicking, so create and register userFarmmingAccount
+    userFarmingAccount = new Account();
+    try {
+      const txn = farm.enableUser(
+        userFarmingAccount.publicKey,
+        owner.publicKey
+      );
+      await sendAndConfirmTransaction("enableUser", connection, txn, payer);
+    } catch (e) {
+      throw new Error(e);
+    }
+
+    await sleep(500);
+    farm.userFarming = userFarmingAccount.publicKey;
 
     done();
   }, BOOTSTRAP_TIMEOUT);
@@ -537,47 +564,56 @@ describe("e2e test for liquidity mining", () => {
       fetchedFarm = await Farm.loadFarm(
         connection,
         farmAccount.publicKey,
-        farmBaseAccount.publicKey,
-        farmProgramId,
+        farmProgramId
       );
     } catch (e) {
       throw new Error(e);
     }
 
     expect(fetchedFarm.farm).toEqual(farmAccount.publicKey);
-    expect(fetchedFarm.adminFeeAccountPool).toEqual(adminFeeAccountPool);
-    // ...
+    expect(fetchedFarm.adminFeeAccountDeltafi).toEqual(adminFeeAccountDeltafi);
+    expect(fetchedFarm.tokenAccountPool).toEqual(tokenAccountPool);
+    expect(fetchedFarm.mintPool).toEqual(tokenPool);
+    expect(fetchedFarm.deltafiTokenMint).toEqual(tokenDeltafi);
   });
 
-  // not sure
+  // not sure and I guess maybe this is the real price of deltafi
   // it("getVirtualPrice", async () => {
   //   expect(await stableSwap.getVirtualPrice()).toBe(1);
   // });
 
-  it("deposit", async() => {
+  it("deposit", async () => {
     const depositeAmountPool = LAMPORTS_PER_SOL;
     // creating depostor token lp account
-    const userAccountPool = await mintPool.createAccount(owner.publicKey);
-    await mintPool.mintTo(userAccountPool, owner, [], depositeAmountPool);
-    await mintPool.approve(userAccountPool, authority, owner, [], depositeAmountPool);
+    const userAccountPool = await tokenPool.createAccount(owner.publicKey);
+    await tokenPool.mintTo(userAccountPool, owner, [], depositeAmountPool);
+    await tokenPool.approve(
+      userAccountPool,
+      authority,
+      owner,
+      [],
+      depositeAmountPool
+    );
     // Make sure all token accounts are created and approved
     await sleep(500);
     try {
-      // Depositing into swap
+      // Depositing into farm
       const txn = farm.deposit(
         userAccountPool,
+        userFarmingAccount.publicKey,
         userDeltafiAccount,
+        nonce,
         depositeAmountPool,
-        0, // To avoid slippage errors
+        0 // To avoid slippage errors
       );
       await sendAndConfirmTransaction("deposit", connection, txn, payer);
     } catch (e) {
       throw new Error(e);
     }
 
-    let info = await mintPool.getAccountInfo(userAccountPool);
+    let info = await tokenPool.getAccountInfo(userAccountPool);
     expect(info.amount.toNumber()).toBe(0);
-    info = await mintPool.getAccountInfo(tokenAccountPool);
+    info = await tokenPool.getAccountInfo(tokenAccountPool);
     expect(info.amount.toNumber()).toBe(
       INITIAL_TOKEN_LP_AMOUNT + depositeAmountPool
     );
@@ -586,22 +622,23 @@ describe("e2e test for liquidity mining", () => {
     // ...
   });
 
-  it ("withdraw", async() => {
+  it("withdraw", async () => {
     const withdrawalAmount = 100000;
-    const poolMintInfo = await tokenAccountPool.getMintInfo();
+    // creating depostor token lp account
+    const userAccountPool = await tokenPool.createAccount(owner.publicKey);
+    const poolMintInfo = await tokenPool.getMintInfo();
     const oldSupply = poolMintInfo.supply.toNumber();
-    const oldFarmPool = await mintPool.getAccountInfo(tokenAccountPool);
-    const oldPoolToken = await tokenAccountPool.getAccountInfo(userPoolAcount);
+    const oldFarmPool = await tokenPool.getAccountInfo(tokenAccountPool);
+    const oldPoolToken = await tokenPool.getAccountInfo(userAccountPool);
     const expectedWithdrawPool = Math.floor(
-      (oldFarmPool.amount.toNumber * withdrawalAmount) / oldSupply
+      (oldFarmPool.amount.toNumber() * withdrawalAmount) / oldSupply
     );
 
-    // creating withdraw token LP account
-    const userAccountPool = await mintPool.createAccount(owner.publicKey);
     // approving withdrawal from pool and deltafi account
-    await tokenAccountPool.approve(
-      userPoolAccount,
+    await tokenPool.approve(
+      userAccountPool,
       authority,
+      owner,
       [],
       withdrawalAmount
     );
@@ -614,37 +651,38 @@ describe("e2e test for liquidity mining", () => {
         userDeltafiAccount,
         withdrawalAmount,
         0, // To avoid slippage errors
-        0, // To avoid slippage errors
+        0 // To avoid slippage errors
       );
       await sendAndConfirmTransaction("withdraw", connection, txn, payer);
-    } catch(e) {
+    } catch (e) {
       throw new Error(e);
     }
 
-    let info = await mintPool.getAccountInfo(userAccountPool);
+    let info = await tokenPool.getAccountInfo(userAccountPool);
     expect(info.amount.toNumber()).toBe(expectedWithdrawPool);
+    // !! confirm reward
     // ...
 
     // change the time with future then check reward using printPendingDetafi
-    // ...    
+    // ...
   });
 
-  it ("emergencyWithdraw", async() => {
+  it("emergencyWithdraw", async () => {
     const withdrawalAmount = 100000;
-    const poolMintInfo = await tokenAccountPool.getMintInfo();
+    const userAccountPool = await tokenPool.createAccount(owner.publicKey);
+    const poolMintInfo = await tokenPool.getMintInfo();
     const oldSupply = poolMintInfo.supply.toNumber();
-    const oldFarmPool = await mintPool.getAccountInfo(tokenAccountPool);
-    const oldPoolToken = await tokenAccountPool.getAccountInfo(userPoolAcount);
+    const oldFarmPool = await tokenPool.getAccountInfo(tokenAccountPool);
+    const oldPoolToken = await tokenPool.getAccountInfo(userAccountPool);
     const expectedWithdrawPool = Math.floor(
-      (oldFarmPool.amount.toNumber * withdrawalAmount) / oldSupply
+      (oldFarmPool.amount.toNumber() * withdrawalAmount) / oldSupply
     );
 
-    // creating withdraw token LP account
-    const userAccountPool = await mintPool.createAccount(owner.publicKey);
     // approving withdrawal from pool and deltafi account
-    await tokenAccountPool.approve(
-      userPoolAccount,
+    await tokenPool.approve(
+      userAccountPool,
       authority,
+      owner,
       [],
       withdrawalAmount
     );
@@ -654,21 +692,22 @@ describe("e2e test for liquidity mining", () => {
     try {
       const txn = await farm.emergencyWithdraw(
         userAccountPool,
-        userDeltafiAccount,
-        withdrawalAmount,
-        0, // To avoid slippage errors
-        0, // To avoid slippage errors
+        userDeltafiAccount
       );
-      await sendAndConfirmTransaction("emergencyWithdraw", connection, txn, payer);
-    } catch(e) {
+      await sendAndConfirmTransaction(
+        "emergencyWithdraw",
+        connection,
+        txn,
+        payer
+      );
+    } catch (e) {
       throw new Error(e);
     }
 
-    let info = await mintPool.getAccountInfo(userAccountPool);
+    let info = await tokenPool.getAccountInfo(userAccountPool);
     expect(info.amount.toNumber()).toBe(expectedWithdrawPool);
-    // ...
 
     // change the time with future then check reward is zero using printPendingDetafi
-    // ...    
+    // ...
   });
 });

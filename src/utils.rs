@@ -903,6 +903,7 @@ pub mod test_utils {
             lp_amount: u64,
             deltafi_amount: u64,
         ) -> (Pubkey, Account, Pubkey, Account, Pubkey, Account) {
+            // please care this as only testing purpose.
             let user_farming_key = pubkey_rand();
             let user_farming_account = Account::new(0, FarmingUserInfo::get_packed_len(), &SWAP_PROGRAM_ID);
 

@@ -5,12 +5,12 @@ import {
   SystemProgram,
   Transaction,
 } from "@solana/web3.js";
-import { instructions, TOKEN_PROGRAM_ID } from 'src';
-import { DEFAULT_FEES, DEFAULT_FEE_DENOMINATOR, Fees } from './fees';
-import { depositInstruction } from './instructions';
+import { instructions, TOKEN_PROGRAM_ID } from "src";
+import { DEFAULT_FEES, DEFAULT_FEE_DENOMINATOR, Fees } from "./fees";
+import { depositInstruction } from "./instructions";
 import * as layout from "./layout";
-import { loadAccount } from './util/account';
-import { sendAndConfirmTransaction } from './util/send-and-confirm-transaction';
+import { loadAccount } from "./util/account";
+import { sendAndConfirmTransaction } from "./util/send-and-confirm-transaction";
 
 export class Farm {
   /**
@@ -23,14 +23,21 @@ export class Farm {
    */
   farmProgramId: PublicKey;
   /**
-    * Program Identifier for the Token program
-    */
+   * Program Identifier for the Token program
+   */
   tokenProgramId: PublicKey;
+  /**
+   * The public key identifying farm's global information
+   */
+  farmBase: PublicKey;
   /**
    * The public key identifying this farm
    */
   farm: PublicKey;
-
+  /**
+   * The public key identifying farming information for test user
+   */
+  userFarming: PublicKey;
   /**
    * The public key for the deltafi token mint
    */
@@ -47,9 +54,9 @@ export class Farm {
   adminAccount: PublicKey;
 
   /**
-   * Admin Fee Account for LP
+   * Admin Fee Account for Deltafi
    */
-  adminFeeAccountPool: PublicKey;
+  adminFeeAccountDeltafi: PublicKey;
 
   /**
    * Public key for the LP token account
@@ -81,7 +88,8 @@ export class Farm {
    */
   constructor(
     connection: Connection,
-    farm: Farm,
+    farmBase: PublicKey,
+    farm: PublicKey,
     farmProgramId: PublicKey,
     tokenProgramId: PublicKey,
     deltafiTokenMint: PublicKey,
@@ -90,16 +98,19 @@ export class Farm {
     adminFeeAccountPool: PublicKey,
     tokenAccountPool: PublicKey,
     mintPool: PublicKey,
-    fees: Fees = DEFAULT_FEES,
+    fees: Fees = DEFAULT_FEES
   ) {
     this.connection = connection;
+    this.farmBase = farmBase;
     this.farm = farm;
+    // empty user
+    this.userFarming = new PublicKey("");
     this.farmProgramId = farmProgramId;
     this.tokenProgramId = tokenProgramId;
     this.deltafiTokenMint = deltafiTokenMint;
     this.authority = authority;
     this.adminAccount = adminAccount;
-    this.adminFeeAccountPool = adminFeeAccountPool;
+    this.adminFeeAccountDeltafi = adminFeeAccountPool;
     this.tokenAccountPool = tokenAccountPool;
     this.mintPool = mintPool;
     this.fees = fees;
@@ -137,7 +148,7 @@ export class Farm {
   static async loadFarm(
     connection: Connection,
     address: PublicKey,
-    programId: PublicKey,
+    programId: PublicKey
   ): Promise<Farm> {
     const data = await loadAccount(connection, address, programId);
     const farmData = layout.FarmLayout.decode(data);
@@ -150,6 +161,7 @@ export class Farm {
       programId
     );
 
+    const farmBaseAccount = new PublicKey(farmData.farmBase);
     const adminAccount = new PublicKey(farmData.adminAccount);
     const adminFeeAccountPool = new PublicKey(farmData.adminFeeAccountPool);
     const tokenAccountPool = new PublicKey(farmData.tokenAccountPool);
@@ -164,11 +176,12 @@ export class Farm {
       tradeFeeNumerator: farmData.tradeFeeNumerator as number,
       tradeFeeDenominator: farmData.tradeFeeDenominator as number,
       withdrawFeeNumerator: farmData.withdrawFeeNumerator as number,
-      withdrawFeeDenominator: farmData.withdrawFeeDenominator as number,      
+      withdrawFeeDenominator: farmData.withdrawFeeDenominator as number,
     };
 
     return new Farm(
       connection,
+      farmBaseAccount,
       address,
       programId,
       tokenProgramId,
@@ -178,7 +191,7 @@ export class Farm {
       adminFeeAccountPool,
       tokenAccountPool,
       mintPool,
-      fees,
+      fees
     );
   }
 
@@ -203,6 +216,7 @@ export class Farm {
     connection: Connection,
     payer: Account,
     farmAccount: Account,
+    farmBaseAccount: Account,
     authority: PublicKey,
     adminAccount: PublicKey,
     adminFeeAccountPool: PublicKey,
@@ -217,13 +231,11 @@ export class Farm {
     fees: Fees = DEFAULT_FEES
   ): Promise<Farm> {
     // allocate memory for the account
-    const balanceNeeded = await Farm.getMinBalanceRentForExemptFarm(
-      connection
-    );
+    const balanceNeeded = await Farm.getMinBalanceRentForExemptFarm(connection);
     const transaction = new Transaction().add(
       SystemProgram.createAccount({
-        fromPubKey: payer.publicKey,
-        newAccountPubKey: farmAccount.publicKey,
+        fromPubkey: payer.publicKey,
+        newAccountPubkey: farmAccount.publicKey,
         lamports: balanceNeeded,
         space: layout.FarmLayout.span,
         programId: farmProgramId,
@@ -232,6 +244,7 @@ export class Farm {
 
     const instruction = instructions.createInitFarmInstruction(
       farmAccount,
+      farmBaseAccount,
       authority,
       adminAccount,
       adminFeeAccountPool,
@@ -242,7 +255,7 @@ export class Farm {
       farmProgramId,
       tokenProgramId,
       nonce,
-      fees,
+      fees
     );
 
     await sendAndConfirmTransaction(
@@ -250,11 +263,12 @@ export class Farm {
       connection,
       transaction,
       payer,
-      farmAccount,
+      farmAccount
     );
 
     return new Farm(
       connection,
+      farmBaseAccount.publicKey,
       farmAccount.publicKey,
       farmProgramId,
       tokenProgramId,
@@ -264,7 +278,19 @@ export class Farm {
       adminFeeAccountPool,
       tokenAccountPool,
       mintPool,
-      fees,
+      fees
+    );
+  }
+
+  enableUser(userFarmmingAccount: PublicKey, owner: PublicKey): Transaction {
+    return new Transaction().add(
+      instructions.farmEnableUserInstruction(
+        this.farm,
+        this.authority,
+        userFarmmingAccount,
+        owner,
+        this.farmProgramId
+      )
     );
   }
 
@@ -275,24 +301,28 @@ export class Farm {
    * @param tokenAmountPool
    * @param minimumDeltafiTokenAmount
    */
-    deposit(
+  deposit(
     userAccountPool: PublicKey,
+    userFarming: PublicKey,
     deltafiTokenAccount: PublicKey,
+    nonce: number,
     tokenAmountPool: number,
     minimumDeltafiTokenAmount: number
   ): Transaction {
     return new Transaction().add(
       instructions.farmDepositInstruction(
+        this.farmBase,
         this.farm,
         this.authority,
+        this.adminFeeAccountDeltafi,
         userAccountPool,
+        this.userFarming,
         this.tokenAccountPool,
         this.deltafiTokenMint,
         deltafiTokenAccount,
         this.farmProgramId,
         this.tokenProgramId,
-        tokenAmountPool,
-        minimumDeltafiTokenAmount,
+        tokenAmountPool
       )
     );
   }
@@ -306,23 +336,25 @@ export class Farm {
    */
   withdraw(
     userAccountPool: PublicKey,
-    poolAccount: PublicKey,
+    userAccountDeltafi: PublicKey,
     poolTokenAmount: number,
     minimumTokenPool: number,
+    minimumTokenDeltafi: number
   ): Transaction {
     return new Transaction().add(
       instructions.farmWithdrawInstruction(
+        this.farmBase,
         this.farm,
         this.authority,
-        this.deltafiTokenMint,
-        poolAccount,
-        this.tokenAccountPool,
+        this.adminFeeAccountDeltafi,
         userAccountPool,
-        this.adminFeeAccountPool,
+        this.userFarming,
+        this.tokenAccountPool,
+        this.deltafiTokenMint,
+        userAccountDeltafi,
         this.farmProgramId,
         this.tokenProgramId,
-        poolTokenAmount,
-        minimumTokenPool,
+        poolTokenAmount
       )
     );
   }
@@ -334,22 +366,24 @@ export class Farm {
    * @param poolTokenAmount
    * @param minimumTokenPool
    */
-   emergencyWithdraw(
+  emergencyWithdraw(
     userAccountPool: PublicKey,
-    poolAccount: PublicKey,
+    userAccountDeltafi: PublicKey
   ): Transaction {
     return new Transaction().add(
       instructions.farmEmergencyWithdrawInstruction(
+        this.farmBase,
         this.farm,
         this.authority,
-        this.deltafiTokenMint,
-        poolAccount,
-        this.tokenAccountPool,
+        this.adminFeeAccountDeltafi,
         userAccountPool,
-        this.adminFeeAccountPool,
+        this.userFarming,
+        this.tokenAccountPool,
+        this.deltafiTokenMint,
+        userAccountDeltafi,
         this.farmProgramId,
-        this.tokenProgramId,
-        0,
+        this.tokenProgramId
       )
     );
-  }}
+  }
+}

@@ -893,6 +893,15 @@ pub enum FarmingInstruction {
     ///   Deposit some tokens into the pool.  The output is a "pool" token representing ownership
     ///   into the pool. Inputs are converted to the current ratio.
     ///
+    ///   1. `[]` Farm
+    ///   2. `[]` $authority,
+    ///   3. `[writable]` user farming account,
+    ///   6. `[]` owner.
+    ///   8. `[]` Token program id
+    EnableUser(),
+    ///   Deposit some tokens into the pool.  The output is a "pool" token representing ownership
+    ///   into the pool. Inputs are converted to the current ratio.
+    ///
     ///   0. `[]` Token-swap
     ///   1. `[]` $authority
     ///   2. `[writable]` token_a $authority can transfer amount,
@@ -956,6 +965,9 @@ impl FarmingInstruction {
     pub fn unpack(input: &[u8]) -> Result<Self, ProgramError> {
         let (&tag, rest) = input.split_first().ok_or(SwapError::InvalidInstruction)?;
         Ok(match tag {
+            30 => {
+                Self::EnableUser()
+            }
             31 => {
                 let (pool_token_amount, rest) = unpack_u64(rest)?;
                 let (min_mint_amount, _rest) = unpack_u64(rest)?;
@@ -990,7 +1002,7 @@ impl FarmingInstruction {
                 pool_token_amount,
                 min_mint_amount,
             }) => {
-                buf.push(2);
+                buf.push(31);
                 buf.extend_from_slice(&pool_token_amount.to_le_bytes());
                 buf.extend_from_slice(&min_mint_amount.to_le_bytes());
             }
@@ -998,13 +1010,37 @@ impl FarmingInstruction {
                 pool_token_amount,
                 min_pool_token_amount
             }) => {
-                buf.push(3);
+                buf.push(32);
                 buf.extend_from_slice(&pool_token_amount.to_le_bytes());
                 buf.extend_from_slice(&min_pool_token_amount.to_le_bytes());
             }
         }
         buf
     }
+}
+
+/// Creates a 'farm_enable_user' instruction.
+pub fn farm_enable_user(
+    program_id: &Pubkey,
+    farm_pubkey: &Pubkey,
+    authority_pubkey: &Pubkey,
+    user_farming_pubkey: &Pubkey,
+    owner: &Pubkey,
+) -> Result<Instruction, ProgramError> {
+    let data = FarmingInstruction::EmergencyWithdraw().pack();
+
+    let accounts = vec![
+        AccountMeta::new(*farm_pubkey, false),
+        AccountMeta::new(*authority_pubkey, false),
+        AccountMeta::new(*user_farming_pubkey, false),
+        AccountMeta::new(*owner, false),
+    ];
+
+    Ok(Instruction {
+        program_id: *program_id,
+        accounts,
+        data,
+    })
 }
 
 /// Creates a 'farm_deposit' instruction.

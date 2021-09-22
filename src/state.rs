@@ -275,7 +275,7 @@ impl Pack for FarmInfo {
             nonce,
             future_admin_deadline,
             future_admin_key,
-            admin_key,            
+            admin_key,
             pool_mint,
             token_deltafi_mint,
             fees,
