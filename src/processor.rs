@@ -1633,8 +1633,8 @@ mod tests {
         let user_key = pubkey_rand();
         let depositor_key = pubkey_rand();
         let amp_factor = MIN_AMP;
-        let token_a_amount = 1000;
-        let token_b_amount = 9000;
+        let token_a_amount = 100;
+        let token_b_amount = 10000;
         let mut accounts = SwapAccountInfo::new(
             &user_key,
             amp_factor,
@@ -2075,6 +2075,7 @@ mod tests {
                 pool_key,
                 mut pool_account,
             ) = accounts.setup_token_accounts(&user_key, &depositor_key, deposit_a, deposit_b, 0);
+
             accounts
                 .deposit(
                     &depositor_key,
@@ -2107,6 +2108,13 @@ mod tests {
                 pool_mint.supply,
                 pool_account.amount + swap_pool_account.amount
             );
+            assert_eq!(swap_token_a.amount, 110);
+
+            assert_eq!(swap_token_b.amount, 11000);
+
+            assert_eq!(pool_mint.supply, 110);
+
+            assert_eq!(swap_pool_account.amount, 100);
         }
 
         // Pool is paused
@@ -2910,7 +2918,7 @@ mod tests {
                     &token_b_key,
                     &mut token_b_account,
                     initial_a * 2,
-                    minimum_b_amount,
+                    minimum_b_amount * 2,
                 )
             );
         }
