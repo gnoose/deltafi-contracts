@@ -15,8 +15,8 @@ use crate::{
     curve::{StableSwap, MAX_AMP, MIN_AMP, MIN_RAMP_DURATION, ZERO_TS},
     error::SwapError,
     fees::Fees,
-    instruction::{AdminInstruction, RampAData},
-    state::SwapInfo,
+    instruction::{AdminInstruction, RampAData, FarmData},
+    state::{SwapInfo, FarmBaseInfo, FarmInfo},
     utils,
 };
 
@@ -62,11 +62,28 @@ pub fn process_admin_instruction(
             msg!("Instruction: SetNewFees");
             set_new_fees(program_id, &new_fees, accounts)
         }
+        AdminInstruction::InitializeFarm(FarmData {
+            alloc_point,
+            reward_unit,
+        }) => {
+            msg!("Instruction: Initialize Farm");
+            initialize_farm(program_id, alloc_point, reward_unit, accounts)
+        }
+        AdminInstruction::SetFarm(FarmData {
+            alloc_point,
+            reward_unit,
+        }) => {
+            msg!("Instruction:: SetFarm");
+            set_farm(program_id, alloc_point, reward_unit, accounts)
+        }
     }
 }
 
 /// Access control for admin only instructions
-fn is_admin(expected_admin_key: &Pubkey, admin_account_info: &AccountInfo) -> ProgramResult {
+fn is_admin(
+    expected_admin_key: &Pubkey, 
+    admin_account_info: &AccountInfo
+) -> ProgramResult {
     if expected_admin_key != admin_account_info.key {
         return Err(SwapError::Unauthorized.into());
     }
@@ -146,7 +163,10 @@ fn ramp_a(
 }
 
 /// Stop ramp a
-fn stop_ramp_a(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
+fn stop_ramp_a(
+    program_id: &Pubkey, 
+    accounts: &[AccountInfo]
+) -> ProgramResult {
     let account_info_iter = &mut accounts.iter();
     let swap_info = next_account_info(account_info_iter)?;
     let authority_info = next_account_info(account_info_iter)?;
@@ -183,7 +203,10 @@ fn stop_ramp_a(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
 }
 
 /// Pause swap
-fn pause(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
+fn pause(
+    program_id: &Pubkey, 
+    accounts: &[AccountInfo]
+) -> ProgramResult {
     let account_info_iter = &mut accounts.iter();
     let swap_info = next_account_info(account_info_iter)?;
     let authority_info = next_account_info(account_info_iter)?;
@@ -201,7 +224,10 @@ fn pause(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
 }
 
 /// Unpause swap
-fn unpause(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
+fn unpause(
+    program_id: &Pubkey, 
+    accounts: &[AccountInfo]
+) -> ProgramResult {
     let account_info_iter = &mut accounts.iter();
     let swap_info = next_account_info(account_info_iter)?;
     let authority_info = next_account_info(account_info_iter)?;
@@ -219,7 +245,10 @@ fn unpause(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
 }
 
 /// Set fee account
-fn set_fee_account(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
+fn set_fee_account(
+    program_id: &Pubkey, 
+    accounts: &[AccountInfo]
+) -> ProgramResult {
     let account_info_iter = &mut accounts.iter();
     let swap_info = next_account_info(account_info_iter)?;
     let authority_info = next_account_info(account_info_iter)?;
@@ -245,7 +274,10 @@ fn set_fee_account(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResu
 }
 
 /// Apply new admin (finalize admin transfer)
-fn apply_new_admin(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
+fn apply_new_admin(
+    program_id: &Pubkey, 
+    accounts: &[AccountInfo]
+) -> ProgramResult {
     let account_info_iter = &mut accounts.iter();
     let swap_info = next_account_info(account_info_iter)?;
     let authority_info = next_account_info(account_info_iter)?;
@@ -273,7 +305,10 @@ fn apply_new_admin(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResu
 }
 
 /// Commit new admin (initiate admin transfer)
-fn commit_new_admin(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
+fn commit_new_admin(
+    program_id: &Pubkey, 
+    accounts: &[AccountInfo]
+) -> ProgramResult {
     let account_info_iter = &mut accounts.iter();
     let swap_info = next_account_info(account_info_iter)?;
     let authority_info = next_account_info(account_info_iter)?;
@@ -303,7 +338,11 @@ fn commit_new_admin(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramRes
 }
 
 /// Set new fees
-fn set_new_fees(program_id: &Pubkey, new_fees: &Fees, accounts: &[AccountInfo]) -> ProgramResult {
+fn set_new_fees(
+    program_id: &Pubkey, 
+    new_fees: &Fees, 
+    accounts: &[AccountInfo]
+) -> ProgramResult {
     let account_info_iter = &mut accounts.iter();
     let swap_info = next_account_info(account_info_iter)?;
     let authority_info = next_account_info(account_info_iter)?;
@@ -317,6 +356,72 @@ fn set_new_fees(program_id: &Pubkey, new_fees: &Fees, accounts: &[AccountInfo]) 
 
     token_swap.fees = *new_fees;
     SwapInfo::pack(token_swap, &mut swap_info.data.borrow_mut())?;
+    Ok(())
+}
+
+/// Processes an [Farm's Initialize](enum.Instruction.html).
+/// I should to consider whether something to initialize for farm is, and
+/// maybe it depends on farm structure.
+pub fn initialize_farm(
+    program_id: &Pubkey,
+    alloc_point: u64,
+    reward_unit: u64,
+    accounts: &[AccountInfo],
+) -> ProgramResult {
+    let account_info_iter = &mut accounts.iter();
+    let farm_base_info = next_account_info(account_info_iter)?;
+    let farm_info = next_account_info(account_info_iter)?;
+    let authority_info = next_account_info(account_info_iter)?;
+    let admin_info = next_account_info(account_info_iter)?;
+    let clock_sysvar_info = next_account_info(account_info_iter)?;
+    let pool_mint_info = next_account_info(account_info_iter)?;
+
+    let mut farm = FarmInfo::unpack(&farm_info.data.borrow())?;
+    let mut farm_base = FarmBaseInfo::unpack(&farm_base_info.data.borrow())?;
+    is_admin(&farm.admin_key, admin_info)?;
+    if *authority_info.key != utils::authority_id(program_id, farm_info.key, farm.nonce)? {
+        return Err(SwapError::InvalidProgramAddress.into());
+    }
+    let clock = Clock::from_account_info(clock_sysvar_info)?;
+    
+    farm_base.total_alloc_point = farm_base.total_alloc_point + alloc_point;
+    farm_base.reward_unit = reward_unit;
+    farm.alloc_point = alloc_point;
+    farm.acc_deltafi_per_share = 0;
+    farm.last_reward_timestamp = clock.unix_timestamp;
+    farm.pool_mint = *pool_mint_info.key;
+
+    // !!initialize other properties
+    // ...
+    
+    FarmBaseInfo::pack(farm_base, &mut farm_base_info.data.borrow_mut())?;
+    FarmInfo::pack(farm, &mut farm_info.data.borrow_mut())?;
+    Ok(())
+}
+
+pub fn set_farm(
+    program_id: &Pubkey,
+    alloc_point: u64,
+    reward_unit: u64,
+    accounts: &[AccountInfo]
+) -> ProgramResult {
+    let account_info_iter = &mut accounts.iter();
+    let farm_base_info = next_account_info(account_info_iter)?;
+    let farm_info = next_account_info(account_info_iter)?;
+    let authority_info = next_account_info(account_info_iter)?;
+    let admin_info = next_account_info(account_info_iter)?;
+
+    let mut farm = FarmInfo::unpack(&farm_info.data.borrow())?;
+    let mut farm_base = FarmBaseInfo::unpack(&farm_base_info.data.borrow())?;
+    is_admin(&farm.admin_key, admin_info)?;
+    if *authority_info.key != utils::authority_id(program_id, farm_info.key, farm.nonce)? {
+        return Err(SwapError::InvalidProgramAddress.into());
+    }
+    
+    farm_base.total_alloc_point = farm_base.total_alloc_point + alloc_point;
+    farm.alloc_point = alloc_point;
+    FarmBaseInfo::pack(farm_base, &mut farm_base_info.data.borrow_mut())?;
+    FarmInfo::pack(farm, &mut farm_info.data.borrow_mut())?;
     Ok(())
 }
 
@@ -968,6 +1073,112 @@ mod tests {
 
             let swap_info = SwapInfo::unpack(&accounts.swap_account.data).unwrap();
             assert_eq!(swap_info.fees, new_fees);
+        }
+    }
+
+    #[test]
+    fn test_initialize_farm() {
+        let user_key = pubkey_rand();
+        let token_pool_amount = 1000;
+        let alloc_point = 200;
+        let reward_unit = 10;
+        let mut accounts = FarmAccountInfo::new(
+            &user_key,
+            token_pool_amount,
+            alloc_point,
+            reward_unit,
+            DEFAULT_TEST_FEES,
+        );
+
+        accounts.initialize_farm(ZERO_TS).unwrap();
+
+        // wrong nonce for authority_key
+        {
+            let old_authority = accounts.authority_key;
+            let (bad_authority_key, _nonce) = Pubkey::find_program_address(
+                &[&accounts.swap_key.to_bytes()[..]],
+                &TOKEN_PROGRAM_ID,
+            );
+            accounts.authority_key = bad_authority_key;
+            assert_eq!(
+                Err(SwapError::InvalidProgramAddress.into()),
+                accounts.apply_new_admin(ZERO_TS)
+            );
+            accounts.authority_key = old_authority;
+        }
+
+        // unauthorized account
+        {
+            let old_admin_key = accounts.admin_key;
+            let fake_admin_key = pubkey_rand();
+            accounts.admin_key = fake_admin_key;
+            assert_eq!(
+                Err(SwapError::Unauthorized.into()),
+                accounts.apply_new_admin(ZERO_TS)
+            );
+            accounts.admin_key = old_admin_key;
+        }
+
+        // initialize
+        {
+
+        }
+    }
+
+    #[test]
+    fn test_set_farm() {
+        let user_key = pubkey_rand();
+        let token_pool_amount = 1000;
+        let alloc_point = 200;
+        let reward_unit = 10;
+        let mut accounts = FarmAccountInfo::new(
+            &user_key,
+            token_pool_amount,
+            alloc_point,
+            reward_unit,
+            DEFAULT_TEST_FEES,
+        );
+
+        // farm not initialized
+        {
+            assert_eq!(
+                Err(ProgramError::UninitializedAccount),
+                accounts.apply_new_admin(ZERO_TS)
+            );
+        }
+
+        accounts.initialize_farm(ZERO_TS).unwrap();
+
+        // wrong nonce for authority_key
+        {
+            let old_authority = accounts.authority_key;
+            let (bad_authority_key, _nonce) = Pubkey::find_program_address(
+                &[&accounts.swap_key.to_bytes()[..]],
+                &TOKEN_PROGRAM_ID,
+            );
+            accounts.authority_key = bad_authority_key;
+            assert_eq!(
+                Err(SwapError::InvalidProgramAddress.into()),
+                accounts.apply_new_admin(ZERO_TS)
+            );
+            accounts.authority_key = old_authority;
+        }
+
+        // unauthorized account
+        {
+            let old_admin_key = accounts.admin_key;
+            let fake_admin_key = pubkey_rand();
+            accounts.admin_key = fake_admin_key;
+            assert_eq!(
+                Err(SwapError::Unauthorized.into()),
+                accounts.apply_new_admin(ZERO_TS)
+            );
+            accounts.admin_key = old_admin_key;
+        }
+
+        // initialize
+        {
+
         }
     }
 }

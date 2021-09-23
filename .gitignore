@@ -18,3 +18,5 @@ tmp*
 
 # Idea directory
 .idea
+
+**/node_modules/
