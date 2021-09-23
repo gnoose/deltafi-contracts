@@ -2,8 +2,8 @@
 
 #![allow(clippy::too_many_arguments)]
 
-use crate::error::SwapError;
-use crate::fees::Fees;
+use std::{convert::TryInto, mem::size_of};
+
 use solana_program::{
     instruction::{AccountMeta, Instruction},
     program_error::ProgramError,
@@ -11,8 +11,8 @@ use solana_program::{
     pubkey::Pubkey,
     sysvar::clock,
 };
-use std::convert::TryInto;
-use std::mem::size_of;
+
+use crate::{error::SwapError, fees::Fees};
 
 /// SWAP INSTRUNCTION DATA
 /// Initialize instruction data
@@ -1237,8 +1237,7 @@ mod tests {
             stop_ramp_ts,
         });
         let packed = check.pack();
-        let mut expect = vec![];
-        expect.push(100 as u8);
+        let mut expect: Vec<u8> = vec![100];
         expect.extend_from_slice(&target_amp.to_le_bytes());
         expect.extend_from_slice(&stop_ramp_ts.to_le_bytes());
         assert_eq!(packed, expect);
@@ -1247,48 +1246,42 @@ mod tests {
 
         let check = AdminInstruction::StopRampA;
         let packed = check.pack();
-        let mut expect = vec![];
-        expect.push(101 as u8);
+        let expect: Vec<u8> = vec![101];
         assert_eq!(packed, expect);
         let unpacked = AdminInstruction::unpack(&expect).unwrap();
         assert_eq!(unpacked, Some(check));
 
         let check = AdminInstruction::Pause;
         let packed = check.pack();
-        let mut expect = vec![];
-        expect.push(102 as u8);
+        let expect: Vec<u8> = vec![102];
         assert_eq!(packed, expect);
         let unpacked = AdminInstruction::unpack(&expect).unwrap();
         assert_eq!(unpacked, Some(check));
 
         let check = AdminInstruction::Unpause;
         let packed = check.pack();
-        let mut expect = vec![];
-        expect.push(103 as u8);
+        let expect: Vec<u8> = vec![103];
         assert_eq!(packed, expect);
         let unpacked = AdminInstruction::unpack(&expect).unwrap();
         assert_eq!(unpacked, Some(check));
 
         let check = AdminInstruction::SetFeeAccount;
         let packed = check.pack();
-        let mut expect = vec![];
-        expect.push(104 as u8);
+        let expect: Vec<u8> = vec![104];
         assert_eq!(packed, expect);
         let unpacked = AdminInstruction::unpack(&expect).unwrap();
         assert_eq!(unpacked, Some(check));
 
         let check = AdminInstruction::ApplyNewAdmin;
         let packed = check.pack();
-        let mut expect = vec![];
-        expect.push(105 as u8);
+        let expect: Vec<u8> = vec![105];
         assert_eq!(packed, expect);
         let unpacked = AdminInstruction::unpack(&expect).unwrap();
         assert_eq!(unpacked, Some(check));
 
         let check = AdminInstruction::CommitNewAdmin;
         let packed = check.pack();
-        let mut expect = vec![];
-        expect.push(106 as u8);
+        let expect: Vec<u8> = vec![106];
         assert_eq!(packed, expect);
         let unpacked = AdminInstruction::unpack(&expect).unwrap();
         assert_eq!(unpacked, Some(check));
@@ -1305,8 +1298,7 @@ mod tests {
         };
         let check = AdminInstruction::SetNewFees(new_fees);
         let packed = check.pack();
-        let mut expect = vec![];
-        expect.push(107 as u8);
+        let mut expect: Vec<u8> = vec![107];
         let mut new_fees_slice = [0u8; Fees::LEN];
         new_fees.pack_into_slice(&mut new_fees_slice[..]);
         expect.extend_from_slice(&new_fees_slice);
@@ -1361,9 +1353,7 @@ mod tests {
             fees,
         });
         let packed = check.pack();
-        let mut expect = vec![];
-        expect.push(0 as u8);
-        expect.push(nonce);
+        let mut expect: Vec<u8> = vec![0, nonce];
         expect.extend_from_slice(&amp_factor.to_le_bytes());
         let mut fees_slice = [0u8; Fees::LEN];
         fees.pack_into_slice(&mut fees_slice[..]);

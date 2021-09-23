@@ -1,9 +1,9 @@
 //! Utility methods
 
-use crate::error::SwapError;
-use solana_program::program_pack::Pack;
-use solana_program::pubkey::Pubkey;
+use solana_program::{program_pack::Pack, pubkey::Pubkey};
 use spl_token::state::Account;
+
+use crate::error::SwapError;
 
 /// Calculates the authority id by generating a program address.
 pub fn authority_id(program_id: &Pubkey, my_info: &Pubkey, nonce: u8) -> Result<Pubkey, SwapError> {
@@ -18,21 +18,19 @@ pub fn unpack_token_account(data: &[u8]) -> Result<Account, SwapError> {
 
 #[cfg(test)]
 pub mod test_utils {
-    use crate::{
-        curve::ZERO_TS, fees::Fees, instruction::*, processor::Processor, state::{SwapInfo, FarmInfo, FarmBaseInfo, FarmingUserInfo},
-    };
     use solana_program::{
-        account_info::AccountInfo, entrypoint::ProgramResult, instruction::Instruction,
-        program_error::ProgramError,
-    };
-    use solana_program::{
-        clock::Clock, msg, program_pack::Pack, program_stubs, pubkey::Pubkey, rent::Rent,
-        sysvar::id,
+        account_info::AccountInfo, clock::Clock, entrypoint::ProgramResult,
+        instruction::Instruction, msg, program_error::ProgramError, program_pack::Pack,
+        program_stubs, pubkey::Pubkey, rent::Rent, sysvar::id,
     };
     use solana_sdk::account::{create_account, create_is_signer_account_infos, Account};
     use spl_token::{
         instruction::{approve, initialize_account, initialize_mint, mint_to},
         state::{Account as SplAccount, Mint as SplMint},
+    };
+  
+    use crate::{
+        curve::ZERO_TS, fees::Fees, instruction::*, processor::Processor, state::{SwapInfo, FarmInfo, FarmBaseInfo, FarmingUserInfo},
     };
 
     /// Test program id for the swap program.
@@ -56,8 +54,10 @@ pub mod test_utils {
     pub const DEFAULT_TOKEN_DECIMALS: u8 = 6;
 
     pub fn clock_account(ts: i64) -> Account {
-        let mut clock = Clock::default();
-        clock.unix_timestamp = ts;
+        let clock = Clock {
+            unix_timestamp: ts,
+            ..Default::default()
+        };
         Account::new_data(1, &clock, &id()).unwrap()
     }
 
@@ -317,6 +317,7 @@ pub mod test_utils {
             panic!("Could not find matching swap token account");
         }
 
+        #[allow(clippy::too_many_arguments)]
         pub fn swap(
             &mut self,
             user_key: &Pubkey,
@@ -390,6 +391,7 @@ pub mod test_utils {
             Ok(())
         }
 
+        #[allow(clippy::too_many_arguments)]
         pub fn deposit(
             &mut self,
             depositor_key: &Pubkey,
@@ -472,6 +474,7 @@ pub mod test_utils {
             )
         }
 
+        #[allow(clippy::too_many_arguments)]
         pub fn withdraw(
             &mut self,
             user_key: &Pubkey,
@@ -542,6 +545,7 @@ pub mod test_utils {
             Ok(())
         }
 
+        #[allow(clippy::too_many_arguments)]
         pub fn withdraw_one(
             &mut self,
             user_key: &Pubkey,
