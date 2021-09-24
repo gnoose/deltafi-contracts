@@ -19,17 +19,17 @@ use spl_token::state::Mint;
 use crate::{
     admin::process_admin_instruction,
     bn::{FixedU256, U256},
-    curve::{StableSwap, MAX_AMP, MIN_AMP, ZERO_TS},
+    curve::{StableSwap, Farm, MAX_AMP, MIN_AMP, ZERO_TS},
     error::SwapError,
     fees::Fees,
     instruction::{
         AdminInstruction, DepositData, InitializeData, SwapData, SwapInstruction, WithdrawData,
-        WithdrawOneData,
+        WithdrawOneData, FarmingInstruction, FarmingDepositData, FarmingWithdrawData
     },
     math2::{get_buy_shares, get_deposit_adjustment_amount},
     oracle::Oracle,
     pool_converter::PoolTokenConverter,
-    state::SwapInfo,
+    state::{SwapInfo, FarmBaseInfo, FarmInfo, FarmingUserInfo},
     utils,
     v2curve::{adjusted_target, sell_base_token, sell_quote_token, PMMState},
 };
@@ -124,6 +124,81 @@ impl Processor {
             &[source, destination, authority, token_program],
             signers,
         )
+    }
+
+    pub fn update_pool<'a>(
+        farm: FarmInfo,
+        farm_key: &Pubkey,
+        reward_unit: u64,
+        user_farming: FarmingUserInfo,
+        current_ts: i64,
+        supply: u64,
+        total_alloc_point: u64,
+        token_program_info: AccountInfo<'a>,
+        admin_fee_info: AccountInfo<'a>,
+        deltafi_mint_info: AccountInfo<'a>,
+        user_deltafi_info: AccountInfo<'a>,
+        authority_info: AccountInfo<'a>,
+    ) -> ProgramResult {
+        if current_ts <= farm.last_reward_timestamp {
+            ()
+        }
+
+        if supply == 0 {
+            farm.last_reward_timestamp = current_ts;
+            ()
+        }
+        let base: u128 = 10;
+        let invariant = Farm::new(
+            current_ts,
+            base.pow(36),
+        );
+
+        let reward: u64 = U256::to_u64(
+            invariant
+            .compute_pending_reward(
+                U256::from(farm.acc_deltafi_per_share),
+                U256::from(user_farming.amount),
+                U256::from(user_farming.reward_debt)
+            )
+            .ok_or(SwapError::CalculationFailure)?,
+        )?;
+
+        Self::token_mint_to(
+            farm_key,
+            token_program_info.clone(),
+            deltafi_mint_info.clone(),
+            admin_fee_info.clone(),
+            authority_info.clone(),
+            farm.nonce,
+            reward / 10,
+        )?;
+
+        Self::token_mint_to(
+            farm_key,
+            token_program_info.clone(),
+            deltafi_mint_info.clone(),
+            user_deltafi_info.clone(),
+            authority_info.clone(),
+            farm.nonce,
+            reward,
+        )?;
+
+        farm.acc_deltafi_per_share = U256::to_u64(
+            invariant
+            .compute_acc_deltafi_per_share(
+                U256::from(farm.acc_deltafi_per_share),
+                U256::from(farm.alloc_point),
+                U256::from(total_alloc_point),
+                U256::from(0), // supply,
+                U256::from(current_ts - farm.last_reward_timestamp),
+                U256::from(reward_unit),
+            )
+            .ok_or(SwapError::CalculationFailure)?,
+        )?;
+        farm.last_reward_timestamp = current_ts;
+
+        Ok(())
     }
 
     /// Processes an [Initialize](enum.Instruction.html).
@@ -695,7 +770,7 @@ impl Processor {
 
     /// Processes an [Deposit](enum.Instruction.html).
     pub fn process_deposit(
-        program_id: &Pubkey,
+    program_id: &Pubkey,
         token_a_amount: u64,
         token_b_amount: u64,
         min_mint_amount: u64,
@@ -1108,11 +1183,381 @@ impl Processor {
         Ok(())
     }
 
+    pub fn process_farming_enable_user(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+    ) -> ProgramResult {
+        let account_info_iter = &mut accounts.iter();
+        let farm_info = next_account_info(account_info_iter)?;
+        let authority_info = next_account_info(account_info_iter)?;
+        let user_farming_info = next_account_info(account_info_iter)?;
+        let owner = next_account_info(account_info_iter)?;
+
+        let farm = FarmInfo::unpack(&farm_info.data.borrow())?;
+        if farm.is_paused {
+            return Err(SwapError::IsPaused.into());
+        }
+        if *authority_info.key != utils::authority_id(program_id, farm_info.key, farm.nonce)?
+        {
+            return Err(SwapError::InvalidProgramAddress.into());
+        }
+        let user_farming = FarmingUserInfo::unpack(&user_farming_info.data.borrow())?;
+        user_farming.is_initialized = true;
+        user_farming.amount = 0;
+        user_farming.reward_debt = 0;
+        user_farming.timestamp = 0;
+        user_farming.pending_deltafi = 0;
+        FarmingUserInfo::pack(user_farming, &mut user_farming_info.data.borrow())?;
+        Ok(())
+    }
+
+    /// Processes an [Farm's Deposit](enum.Instruction.html).
+    pub fn process_farming_deposit(
+        program_id: &Pubkey,
+        pool_token_amount: u64,
+        accounts: &[AccountInfo],
+    ) -> ProgramResult {
+        let account_info_iter = &mut accounts.iter();
+        let farm_base_info = next_account_info(account_info_iter)?;
+        let farm_info = next_account_info(account_info_iter)?;
+        let authority_info = next_account_info(account_info_iter)?;
+        let admin_fee_account = next_account_info(account_info_iter)?;
+        let source_info = next_account_info(account_info_iter)?;
+        let user_farming_info = next_account_info(account_info_iter)?;
+        let pool_token_info = next_account_info(account_info_iter)?;
+        let deltafi_mint_info = next_account_info(account_info_iter)?;
+        let dest_info = next_account_info(account_info_iter)?;
+        let token_program_info = next_account_info(account_info_iter)?;
+        let clock_sysvar_info = next_account_info(account_info_iter)?;
+
+        let farm = FarmInfo::unpack(&farm_info.data.borrow())?;
+        if farm.is_paused {
+            return Err(SwapError::IsPaused.into());
+        }
+        if *authority_info.key != utils::authority_id(program_id, farm_info.key, farm.nonce)?
+        {
+            return Err(SwapError::InvalidProgramAddress.into());
+        }
+        if *source_info.key != farm.pool_mint {
+            return Err(SwapError::IncorrectSwapAccount.into());
+        }
+        if *pool_token_info.key != farm.pool_mint {
+            return Err(SwapError::IncorrectMint.into());
+        }
+
+        let farm_base = FarmBaseInfo::unpack(&farm_base_info.data.borrow())?;
+        let clock = Clock::from_account_info(clock_sysvar_info)?;
+        // let token_lp = utils::unpack_token_account(&pool_token_info.data.borrow())?;
+        let user_farming = FarmingUserInfo::unpack(&user_farming_info.data.borrow())?;
+        // !!This can be resolved after complete deltafi token.
+        // ... 
+        // let pool_mint = Self::unpack_deltafi(&deltafi_mint_info.data.borrow())?;
+        let base: u128 = 10;
+        let invariant = Farm::new(
+            clock.unix_timestamp,
+            base.pow(36),
+        );
+        // calc reward and mint deltafi token
+        Self::update_pool(
+            farm,
+            farm_info.key,
+            farm_base.reward_unit,
+            user_farming,
+            clock.unix_timestamp,
+            0, // pool_mint.supply,
+            farm_base.total_alloc_point,
+            token_program_info.clone(), 
+            admin_fee_account.clone(),
+            deltafi_mint_info.clone(),
+            dest_info.clone(),
+            authority_info.clone(),
+        );
+        // save farm's updated value
+        FarmInfo::pack(farm, &mut farm_info.data.borrow())?;
+
+        if user_farming.amount > 0 {
+            let pending = U256::to_u64(
+                invariant
+                .compute_pending_reward(
+                    U256::from(farm.acc_deltafi_per_share),
+                    U256::from(user_farming.amount),
+                    U256::from(user_farming.reward_debt),
+                )
+                .ok_or(SwapError::CalculationFailure)?,
+            )?;
+            if pending > 0 {
+                Self::token_transfer(
+                    farm_info.key,
+                    token_program_info.clone(),
+                    deltafi_mint_info.clone(),
+                    dest_info.clone(),
+                    authority_info.clone(),
+                    farm.nonce,
+                    pending,
+                )?;    
+            }
+        }
+
+        Self::token_transfer(
+            farm_info.key,
+            token_program_info.clone(),
+            source_info.clone(),
+            pool_token_info.clone(),
+            authority_info.clone(),
+            farm.nonce,
+            pool_token_amount,
+        )?;
+        
+        user_farming.timestamp = clock.unix_timestamp;
+        user_farming.amount = user_farming.amount + pool_token_amount;
+        user_farming.reward_debt = U256::to_u64(
+            invariant
+            .compute_reward_debt(
+                farm.acc_deltafi_per_share.into(), 
+                user_farming.amount.into(),
+            )
+            .ok_or(SwapError::CalculationFailure)?
+        )?;
+        Ok(())
+    }
+
+    /// Processes an [Farm's Withdraw](enum.Instruction.html).
+    pub fn process_farming_withdraw(
+        program_id: &Pubkey,
+        pool_token_amount: u64,
+        accounts: &[AccountInfo],
+    ) -> ProgramResult {
+        let account_info_iter = &mut accounts.iter();
+        let farm_base_info = next_account_info(account_info_iter)?;
+        let farm_info = next_account_info(account_info_iter)?;
+        let authority_info = next_account_info(account_info_iter)?;
+        let admin_fee_account = next_account_info(account_info_iter)?;
+        let source_info = next_account_info(account_info_iter)?;
+        let user_farming_info = next_account_info(account_info_iter)?;
+        let pool_token_info = next_account_info(account_info_iter)?;
+        let deltafi_mint_info = next_account_info(account_info_iter)?;
+        let dest_info = next_account_info(account_info_iter)?;
+        let token_program_info = next_account_info(account_info_iter)?;
+        let clock_sysvar_info = next_account_info(account_info_iter)?;
+
+        let farm = FarmInfo::unpack(&farm_info.data.borrow())?;        
+        if farm.is_paused {
+            return Err(SwapError::IsPaused.into());
+        }
+        if *authority_info.key != utils::authority_id(program_id, farm_info.key, farm.nonce)?
+        {
+            return Err(SwapError::InvalidProgramAddress.into());
+        }
+        if *source_info.key != farm.pool_mint {
+            return Err(SwapError::IncorrectSwapAccount.into());
+        }
+        if *pool_token_info.key != farm.pool_mint {
+            return Err(SwapError::IncorrectMint.into());
+        }
+        let farm_base = FarmBaseInfo::unpack(&farm_base_info.data.borrow())?;        
+        let clock = Clock::from_account_info(clock_sysvar_info)?;
+        // let token_lp = utils::unpack_token_account(&pool_token_info.data.borrow())?;
+        let user_farming = FarmingUserInfo::unpack(&user_farming_info.data.borrow())?;
+        if user_farming.amount < pool_token_amount {
+            return Err(SwapError::InvalidInput.into());
+        }
+
+        // !!This can be resolved after complete deltafi token.
+        // ... 
+        // let pool_mint = Self::unpack_deltafi(&deltafi_mint_info.data.borrow())?;
+        
+        let base: u128 = 10;
+        let invariant = Farm::new(
+            clock.unix_timestamp,
+            base.pow(36),
+        );
+        // calc reward and mint deltafi token
+        Self::update_pool(
+            farm,
+            farm_info.key,
+            farm_base.reward_unit,
+            user_farming,
+            clock.unix_timestamp,
+            0, // pool_mint.supply,
+            farm_base.total_alloc_point,
+            token_program_info.clone(), 
+            admin_fee_account.clone(),
+            deltafi_mint_info.clone(),
+            dest_info.clone(),
+            authority_info.clone(),            
+        );
+        // save farm's updated value
+        FarmInfo::pack(farm, &mut farm_info.data.borrow())?;
+
+        let pending = U256::to_u64(
+            invariant
+            .compute_pending_reward(
+                U256::from(farm.acc_deltafi_per_share),
+                U256::from(user_farming.amount),
+                U256::from(user_farming.reward_debt),
+            )
+            .ok_or(SwapError::CalculationFailure)?,
+        )?;
+        if pending > 0 {
+            Self::token_transfer(
+                farm_info.key,
+                token_program_info.clone(),
+                deltafi_mint_info.clone(),
+                dest_info.clone(),
+                authority_info.clone(),
+                farm.nonce,
+                pending,
+            )?;    
+        }
+
+        user_farming.amount = user_farming.amount - pool_token_amount;
+        user_farming.reward_debt = U256::to_u64(
+            invariant
+            .compute_reward_debt(
+                farm.acc_deltafi_per_share.into(), 
+                user_farming.amount.into(),
+            )
+            .ok_or(SwapError::CalculationFailure)?,
+        )?;
+        
+        Self::token_transfer(
+            farm_info.key,
+            token_program_info.clone(),
+            pool_token_info.clone(),
+            source_info.clone(),
+            authority_info.clone(),
+            farm.nonce,
+            pool_token_amount,
+        )?;
+        FarmingUserInfo::pack(user_farming, &mut user_farming_info.data.borrow())?;
+
+        Ok(())      
+    }
+
+    /// Processes an [Farm's EmergencyWithdraw](enum.Instruction.html).
+    pub fn process_farming_emergency_withdraw(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+    ) -> ProgramResult {
+        let account_info_iter = &mut accounts.iter();
+        let farm_info = next_account_info(account_info_iter)?;
+        let authority_info = next_account_info(account_info_iter)?;
+        let source_info = next_account_info(account_info_iter)?;
+        let user_farming_info = next_account_info(account_info_iter)?;
+        let pool_token_info = next_account_info(account_info_iter)?;
+        let deltafi_mint_info = next_account_info(account_info_iter)?;
+        let dest_info = next_account_info(account_info_iter)?;
+        let token_program_info = next_account_info(account_info_iter)?;
+        let clock_sysvar_info = next_account_info(account_info_iter)?;
+
+        let farm = FarmInfo::unpack(&farm_info.data.borrow())?;        
+        if farm.is_paused {
+            return Err(SwapError::IsPaused.into());
+        }
+        if *authority_info.key != utils::authority_id(program_id, farm_info.key, farm.nonce)?
+        {
+            return Err(SwapError::InvalidProgramAddress.into());
+        }
+        if *source_info.key != farm.pool_mint {
+            return Err(SwapError::IncorrectSwapAccount.into());
+        }
+        if *pool_token_info.key != farm.pool_mint {
+            return Err(SwapError::IncorrectMint.into());
+        }
+
+        let clock = Clock::from_account_info(clock_sysvar_info)?;
+        // let token_lp = utils::unpack_token_account(&pool_token_info.data.borrow())?;
+        let user_farming = FarmingUserInfo::unpack(&user_farming_info.data.borrow())?;
+        
+        Self::token_transfer(
+            farm_info.key,
+            token_program_info.clone(),
+            pool_token_info.clone(),
+            source_info.clone(),
+            authority_info.clone(),
+            farm.nonce,
+            user_farming.amount,
+        )?;
+        user_farming.amount = 0;
+        user_farming.reward_debt = 0;
+
+        Ok(())      
+    }
+
+    /// Processes an [Farm's PrintPendingDeltafi]
+    pub fn process_farming_pending_deltafi(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+    ) -> ProgramResult {
+        let account_info_iter = &mut accounts.iter();
+        let farm_base_info = next_account_info(account_info_iter)?;
+        let farm_info = next_account_info(account_info_iter)?;
+        let user_farming_info = next_account_info(account_info_iter)?;
+        let pool_token_info = next_account_info(account_info_iter)?;
+        let clock_sysvar_info = next_account_info(account_info_iter)?;
+
+        let farm = FarmInfo::unpack(&farm_info.data.borrow())?;
+        if farm.is_paused {
+            return Err(SwapError::IsPaused.into());
+        }
+
+        let farm_base = FarmBaseInfo::unpack(&farm_base_info.data.borrow())?;
+        let clock = Clock::from_account_info(clock_sysvar_info)?;
+        let user_farming = FarmingUserInfo::unpack(&user_farming_info.data.borrow())?;
+        // !!This can be resolved after complete deltafi token.
+        // ... 
+        // let pool_mint = Self::unpack_deltafi(&deltafi_mint_info.data.borrow())?;
+        
+        let base: u128 = 10;
+        let invariant = Farm::new(
+            clock.unix_timestamp,
+            base.pow(36),
+        );
+
+        farm.acc_deltafi_per_share = U256::to_u64(
+            invariant
+            .compute_acc_deltafi_per_share(
+                U256::from(farm.acc_deltafi_per_share),
+                U256::from(farm.alloc_point),
+                U256::from(farm_base.total_alloc_point),
+                U256::from(0), // U256::from(pool_mint.amount),
+                U256::from(clock.unix_timestamp - farm.last_reward_timestamp),
+                U256::from(farm_base.reward_unit),
+            )
+            .ok_or(SwapError::CalculationFailure)?,
+        )?;
+        farm.last_reward_timestamp = clock.unix_timestamp;
+        FarmInfo::pack(farm, &mut farm_info.data.borrow())?;
+
+        user_farming.pending_deltafi = U256::to_u64(
+            invariant
+            .compute_pending_reward(
+                U256::from(farm.acc_deltafi_per_share),
+                U256::from(user_farming.amount),
+                U256::from(user_farming.reward_debt),
+            )
+            .ok_or(SwapError::CalculationFailure)?,
+        )?;
+
+        // update pending deltafi amount for output.
+        FarmingUserInfo::pack(user_farming, &mut user_farming_info.data.borrow())?;
+        
+        Ok(())
+    }
+
     /// Processes an [Instruction](enum.Instruction.html).
     pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], input: &[u8]) -> ProgramResult {
         let instruction = AdminInstruction::unpack(input)?;
         match instruction {
-            None => Self::process_swap_instruction(program_id, accounts, input),
+            None => {
+                let result = Self::process_swap_instruction(program_id, accounts, input);
+                match result {
+                    Ok(r) => Ok(()),
+                    Err(e) => {
+                        Self::process_farming_instruction(program_id, accounts, input)
+                    }
+                }
+            }
             Some(admin_instruction) => {
                 process_admin_instruction(&admin_instruction, program_id, accounts)
             }
@@ -1190,6 +1635,63 @@ impl Processor {
                     accounts,
                 )
             }
+            _ => {
+                Err(SwapError::NoSwapInstruction.into())
+            }
+        }
+    }
+
+    fn process_farming_instruction(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        input: &[u8],
+    ) -> ProgramResult {
+        let instruction = FarmingInstruction::unpack(input)?;
+        match instruction {
+            FarmingInstruction::EnableUser() => {
+                msg!("Instruction: Enable User");
+                Self::process_farming_enable_user(
+                    program_id,
+                    accounts,
+                )
+            }
+            FarmingInstruction::Deposit(FarmingDepositData {
+                pool_token_amount,
+                min_mint_amount,
+            }) => {
+                msg!("Instruction: Farm Deposit");
+                Self::process_farming_deposit(
+                    program_id,
+                    pool_token_amount,
+                    accounts,
+                )
+            }
+            FarmingInstruction::Withdraw(FarmingWithdrawData {
+                pool_token_amount,
+                min_pool_token_amount,
+            }) => {
+                msg!("Instruction: Farm Withdraw");
+                Self::process_farming_withdraw(
+                    program_id,
+                    pool_token_amount,
+                    accounts,
+                )
+            }
+            FarmingInstruction::EmergencyWithdraw() => {
+                msg!("Instruction: Farm Withdraw");
+                Self::process_farming_emergency_withdraw(
+                    program_id,
+                    accounts,
+                )
+            }
+            FarmingInstruction::PrintPendingDeltafi() => {
+                msg!("Instruction: Farm Print Pending Deltafi");
+                Self::process_farming_pending_deltafi(
+                    program_id,
+                    accounts,
+                )
+            }
+            _ => Err(SwapError::InvalidInstruction.into())         
         }
     }
 }
@@ -1265,7 +1767,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        instruction::{deposit, swap, withdraw, withdraw_one},
+        instruction::{deposit, swap, withdraw, withdraw_one, farm_deposit, farm_withdraw, farm_emergency_withdraw},
         utils::test_utils::*,
     };
 
@@ -4139,5 +4641,1069 @@ mod tests {
                 )
             );
         }
+    }
+
+    #[test]
+    fn test_farming_deposit() {
+        let user_key = pubkey_rand();
+        let depositor_key = pubkey_rand();
+        let token_pool_amount = 1000;
+        let alloc_point = 200;
+        let reward_unit = 10;
+        // let deltafi_amount = 3000;
+        let deposit_pool = token_pool_amount / 10;
+        let min_mint_amount = 0;
+
+        let mut accounts = FarmAccountInfo::new(
+            &user_key,
+            token_pool_amount,
+            alloc_point,
+            reward_unit,
+            DEFAULT_TEST_FEES,
+        );
+
+        // farm not initialized
+        {
+            let (
+                pool_key,
+                mut pool_account,
+                deltafi_key,
+                mut deltafi_account,
+                depositor_farming_key,
+                mut depositor_farming_account,
+            ) = accounts.setup_token_accounts(&user_key, &depositor_key, token_pool_amount, 0);
+            assert_eq!(
+                Err(ProgramError::UninitializedAccount),
+                accounts.deposit(
+                    &depositor_key,
+                    &depositor_farming_key,
+                    &mut depositor_farming_account,
+                    &pool_key,
+                    &mut pool_account,
+                    deposit_pool,
+                    0,
+                )
+            );
+        }
+
+        accounts.initialize_farm(ZERO_TS).unwrap();
+
+        // wrong nonce for authority_key
+        {
+            let (
+                pool_key,
+                mut pool_account,
+                deltafi_key,
+                mut deltafi_account,
+                depositor_farming_key,
+                mut depositor_farming_account,
+            ) = accounts.setup_token_accounts(&user_key, &depositor_key, token_pool_amount, 0);
+            let old_authority = accounts.authority_key;
+            let (bad_authority_key, _nonce) = Pubkey::find_program_address(
+                &[&accounts.farm_key.to_bytes()[..]],
+                &TOKEN_PROGRAM_ID,
+            );
+            accounts.authority_key = bad_authority_key;
+            assert_eq!(
+                Err(SwapError::InvalidProgramAddress.into()),
+                accounts.deposit(
+                    &depositor_key,
+                    &depositor_farming_key,
+                    &mut depositor_farming_account,
+                    &pool_key,
+                    &mut pool_account,
+                    deposit_pool,
+                    min_mint_amount,
+                )
+            );
+        }
+
+        // not enough pool token
+        {
+            let (
+                pool_key,
+                mut pool_account,
+                deltafi_key,
+                mut deltafi_account,
+                depositor_farming_key,
+                mut depositor_farming_account,
+            ) = accounts.setup_token_accounts(&user_key, &depositor_key, deposit_pool / 2, 0);
+            assert_eq!(
+                Err(TokenError::InsufficientFunds.into()),
+                accounts.deposit(
+                    &depositor_key,
+                    &depositor_farming_key,
+                    &mut depositor_farming_account,
+                    &pool_key,
+                    &mut pool_account,
+                    deposit_pool,
+                    min_mint_amount,
+                )
+            );
+        }
+
+        // wrong deltafi token account
+        {
+            let (
+                pool_key,
+                mut pool_account,
+                deltafi_key,
+                mut deltafi_account,
+                depositor_farming_key,
+                mut depositor_farming_account,
+            ) = accounts.setup_token_accounts(&user_key, &depositor_key, token_pool_amount, 0);
+            let (
+                wrong_key,
+                mut wrong_account,
+                deltafi_key,
+                mut deltafi_account,
+                depositor_farming_key,
+                mut depositor_farming_account,
+            ) = accounts.setup_token_accounts(&user_key, &depositor_key, token_pool_amount, 0);
+            assert_eq!(
+                Err(TokenError::MintMismatch.into()),
+                accounts.deposit(
+                    &depositor_key,
+                    &depositor_farming_key,
+                    &mut depositor_farming_account,
+                    &wrong_key,
+                    &mut wrong_account,
+                    deposit_pool,
+                    min_mint_amount,
+                )
+            );
+        }
+
+        //no approval
+        {
+            let (
+                pool_key,
+                mut pool_account,
+                deltafi_key,
+                mut deltafi_account,
+                depositor_farming_key,
+                mut depositor_farming_account,
+            ) = accounts.setup_token_accounts(&user_key, &depositor_key, token_pool_amount, 0);
+            assert_eq!(
+                Err(TokenError::OwnerMismatch.into()),
+                do_process_instruction(
+                    farm_deposit(
+                        &SWAP_PROGRAM_ID,
+                        &TOKEN_PROGRAM_ID,
+                        &accounts.farm_base_key,
+                        &accounts.farm_key,
+                        &accounts.authority_key,
+                        &depositor_key,
+                        &depositor_farming_key,
+                        &accounts.pool_token_key,
+                        &accounts.token_deltafi_mint_key,
+                        &accounts.pool_token_key,
+                        deposit_pool,
+                        min_mint_amount,
+                    )
+                    .unwrap(),
+                    vec![
+                        &mut accounts.farm_base_account,
+                        &mut accounts.farm_account,
+                        &mut Account::default(),
+                        &mut pool_account,
+                        &mut depositor_farming_account,
+                        &mut accounts.pool_token_account,
+                        &mut accounts.token_deltafi_mint_account,
+                        &mut accounts.pool_token_account,
+                        &mut Account::default(),
+                        &mut clock_account(ZERO_TS),
+                    ],
+                )
+            );
+        }
+
+        // wrong token program id
+        {
+            let (
+                pool_key,
+                mut pool_account,
+                deltafi_key,
+                mut deltafi_account,
+                depositor_farming_key,
+                mut depositor_farming_account,
+            ) = accounts.setup_token_accounts(&user_key, &depositor_key, token_pool_amount, 0);
+            let wrong_key = pubkey_rand();
+            assert_eq!(
+                Err(ProgramError::InvalidAccountData),
+                do_process_instruction(
+                    farm_deposit(
+                        &SWAP_PROGRAM_ID,
+                        &wrong_key,
+                        &accounts.farm_base_key,
+                        &accounts.farm_key,
+                        &accounts.authority_key,
+                        &depositor_key,
+                        &depositor_farming_key,
+                        &accounts.pool_token_key,
+                        &accounts.token_deltafi_mint_key,
+                        &accounts.pool_token_key,
+                        deposit_pool,
+                        min_mint_amount,                        
+                    )
+                    .unwrap(),
+                    vec![
+                        &mut accounts.farm_base_account,
+                        &mut accounts.farm_account,
+                        &mut Account::default(),
+                        &mut pool_account,
+                        &mut depositor_farming_account,
+                        &mut accounts.pool_token_account,
+                        &mut accounts.token_deltafi_mint_account,
+                        &mut accounts.pool_token_account,
+                        &mut Account::default(),
+                        &mut clock_account(ZERO_TS),
+                    ],
+                ),
+            );
+        }
+
+        // !!need to check.
+        // wrong farm token accounts
+        {
+            let (
+                pool_key,
+                mut pool_account,
+                deltafi_key,
+                mut deltafi_account,
+                depositor_farming_key,
+                mut depositor_farming_account,
+            ) = accounts.setup_token_accounts(&user_key, &depositor_key, token_pool_amount, 0);
+
+            let old_pool_key = accounts.pool_token_key;
+            let old_pool_account = accounts.pool_token_account;
+
+            accounts.pool_token_key = pool_key.clone();
+            accounts.pool_token_account = pool_account.clone();
+
+            assert_eq!(
+                Err(SwapError::IncorrectSwapAccount.into()),
+                accounts.deposit(
+                    &depositor_key,
+                    &depositor_farming_key,
+                    &mut depositor_farming_account,
+                    &pool_key,
+                    &mut pool_account,
+                    deposit_pool,
+                    min_mint_amount,
+                )
+            );
+            accounts.pool_token_key = old_pool_key;
+            accounts.pool_token_account = old_pool_account;               
+        }
+
+        // wrong mint
+        {
+            let (
+                pool_key,
+                mut pool_account,
+                deltafi_key,
+                mut deltafi_account,
+                depositor_farming_key,
+                mut depositor_farming_account,
+            ) = accounts.setup_token_accounts(&user_key, &depositor_key, token_pool_amount, 0);
+            let (deltafi_mint_key, deltafi_mint_account) = create_mint(
+                &TOKEN_PROGRAM_ID,
+                &accounts.authority_key,
+                DEFAULT_TOKEN_DECIMALS,
+                None,
+            );
+            let old_deltafi_key = accounts.token_deltafi_mint_key;
+            let old_deltafi_account = accounts.token_deltafi_mint_account;
+            accounts.token_deltafi_mint_key = deltafi_key;
+            accounts.token_deltafi_mint_account = deltafi_account;
+
+            assert_eq!(
+                Err(SwapError::IncorrectMint.into()),
+                accounts.deposit(
+                    &depositor_key,
+                    &depositor_farming_key,
+                    &mut depositor_farming_account,
+                    &pool_key,
+                    &mut pool_account,
+                    deposit_pool,
+                    min_mint_amount,
+                ),
+            );
+
+            accounts.token_deltafi_mint_key = old_deltafi_key;
+            accounts.token_deltafi_mint_account = old_deltafi_account;            
+        }
+
+        // !!need to be serious, so this will be related with deltafi pricing model directly.
+        // slippage exceeded
+        {
+            let (
+                pool_key,
+                mut pool_account,
+                deltafi_key,
+                mut deltafi_account,
+                depositor_farming_key,
+                mut depositor_farming_account,
+            ) = accounts.setup_token_accounts(&user_key, &depositor_key, token_pool_amount, 0);
+
+            let high_min_mint_amount = 10000000000000;
+            assert_eq!(
+                Err(SwapError::ExceededSlippage.into()),
+                accounts.deposit(
+                    &depositor_key,
+                    &depositor_farming_key,
+                    &mut depositor_farming_account,
+                    &pool_key,
+                    &mut pool_account,
+                    deposit_pool,
+                    high_min_mint_amount,
+                ),
+            );
+        }
+
+        // correctly deposit
+        {
+            let (
+                pool_key,
+                mut pool_account,
+                deltafi_key,
+                mut deltafi_account,
+                depositor_farming_key,
+                mut depositor_farming_account,
+            ) = accounts.setup_token_accounts(&user_key, &depositor_key, token_pool_amount, 0);
+
+            accounts
+                .deposit(
+                    &depositor_key,
+                    &depositor_farming_key,
+                    &mut depositor_farming_account,
+                    &pool_key,
+                    &mut pool_account,
+                    deposit_pool,
+                    min_mint_amount,
+                )
+                .unwrap();
+
+            // !! need to write check farm state
+            // ...
+        }
+
+        // !! let me think about these two test case.
+        // pool is paused
+        {            
+        }
+
+        // farm is paused
+        {
+        }
+    }
+
+    #[test]
+    fn test_farming_withdraw() {
+        let user_key = pubkey_rand();
+        let withdrawer_key = pubkey_rand();
+        let token_pool_amount = 1000;
+        let alloc_point = 200;
+        let reward_unit = 10;
+        let withdraw_amount = token_pool_amount / 10;
+        let minimum_pool_amount = token_pool_amount / 40;
+
+        let mut accounts = FarmAccountInfo::new(
+            &user_key,
+            token_pool_amount,
+            alloc_point,
+            reward_unit,
+            DEFAULT_TEST_FEES,
+        );
+
+        // farm not initialized
+        {
+            let (
+                pool_key,
+                mut pool_account,
+                deltafi_key,
+                mut deltafi_account,
+                withdrawer_farming_key,
+                mut withdrawer_farming_account,
+            ) = accounts.setup_token_accounts(&user_key, &withdrawer_key, token_pool_amount, 0);
+            assert_eq!(
+                Err(ProgramError::UninitializedAccount),
+                accounts.withdraw(
+                    &withdrawer_key,
+                    &withdrawer_farming_key,
+                    &mut withdrawer_farming_account,
+                    &pool_key,
+                    &mut pool_account,
+                    withdraw_amount,
+                    minimum_pool_amount,
+                )
+            );
+            
+        }
+
+        accounts.initialize_farm(ZERO_TS).unwrap();
+
+        // wrong nonce for authority_key
+        {
+            let (
+                pool_key,
+                mut pool_account,
+                deltafi_key,
+                mut deltafi_account,
+                withdrawer_farming_key,
+                mut withdrawer_farming_account,
+            ) = accounts.setup_token_accounts(&user_key, &withdrawer_key, token_pool_amount, 0);
+            let old_authority = accounts.authority_key;
+            let (bad_authority_key, _nonce) = Pubkey::find_program_address(
+                &[&accounts.farm_key.to_bytes()[..]],
+                &TOKEN_PROGRAM_ID,
+            );
+            accounts.authority_key = bad_authority_key;
+            assert_eq!(
+                Err(SwapError::InvalidProgramAddress.into()),
+                accounts.withdraw(
+                    &withdrawer_key,
+                    &withdrawer_farming_key,
+                    &mut withdrawer_farming_account,
+                    &pool_key,
+                    &mut pool_account,
+                    withdraw_amount,
+                    minimum_pool_amount,                    
+                )
+            );
+            accounts.authority_key = old_authority;
+        }
+
+        // not enough pool token
+        {
+            let (
+                pool_key,
+                mut pool_account,
+                deltafi_key,
+                mut deltafi_account,
+                withdrawer_farming_key,
+                mut withdrawer_farming_account,
+            ) = accounts.setup_token_accounts(&user_key, &withdrawer_key, withdraw_amount / 2, 0);
+            assert_eq!(
+                Err(TokenError::InsufficientFunds.into()),
+                accounts.withdraw(
+                    &withdrawer_key,
+                    &withdrawer_farming_key,
+                    &mut withdrawer_farming_account,
+                    &pool_key,
+                    &mut pool_account,
+                    withdraw_amount,
+                    minimum_pool_amount,
+                )
+            );
+        }
+
+        // no approval
+        {
+            let (
+                pool_key,
+                mut pool_account,
+                deltafi_key,
+                mut deltafi_account,
+                withdrawer_farming_key,
+                mut withdrawer_farming_account,
+            ) = accounts.setup_token_accounts(&user_key, &withdrawer_key, withdraw_amount, 0);
+            assert_eq!(
+                Err(TokenError::OwnerMismatch.into()),
+                do_process_instruction(
+                    farm_withdraw(
+                        &SWAP_PROGRAM_ID,
+                        &TOKEN_PROGRAM_ID,
+                        &accounts.farm_base_key,
+                        &accounts.farm_key,
+                        &accounts.authority_key,
+                        &withdrawer_key,
+                        &withdrawer_farming_key,
+                        &accounts.pool_token_key,
+                        &accounts.token_deltafi_mint_key,
+                        &accounts.pool_token_key,
+                        withdraw_amount,
+                        minimum_pool_amount,
+                    )
+                    .unwrap(),
+                    vec![
+                        &mut accounts.farm_base_account,
+                        &mut accounts.farm_account,
+                        &mut Account::default(),
+                        &mut pool_account,
+                        &mut withdrawer_farming_account,
+                        &mut accounts.pool_token_account,
+                        &mut accounts.token_deltafi_mint_account,
+                        &mut accounts.pool_token_account,
+                        &mut Account::default(),
+                        &mut clock_account(ZERO_TS),
+                    ],
+                )
+            );
+        }
+
+        // wrong token program id
+        {
+            let (
+                pool_key,
+                mut pool_account,
+                deltafi_key,
+                mut deltafi_account,
+                withdrawer_farming_key,
+                mut withdrawer_farming_account,
+            ) = accounts.setup_token_accounts(&user_key, &withdrawer_key, withdraw_amount, 0);
+            let wrong_key = pubkey_rand();
+            assert_eq!(
+                Err(ProgramError::InvalidAccountData),
+                do_process_instruction(
+                    farm_withdraw(
+                        &SWAP_PROGRAM_ID,
+                        &wrong_key,
+                        &accounts.farm_base_key,
+                        &accounts.farm_key,
+                        &accounts.authority_key,
+                        &withdrawer_key,
+                        &withdrawer_farming_key,
+                        &accounts.pool_token_key,
+                        &accounts.token_deltafi_mint_key,
+                        &accounts.pool_token_key,
+                        withdraw_amount,
+                        minimum_pool_amount,
+                    )
+                    .unwrap(),
+                    vec![
+                        &mut accounts.farm_base_account,
+                        &mut accounts.farm_account,
+                        &mut Account::default(),
+                        &mut pool_account,
+                        &mut withdrawer_farming_account,
+                        &mut accounts.pool_token_account,
+                        &mut accounts.token_deltafi_mint_account,
+                        &mut accounts.pool_token_account,
+                        &mut Account::default(),
+                        &mut clock_account(ZERO_TS),
+                    ],
+                )
+            );
+        }
+
+        // !!need to check.
+        // wrong farm token accounts
+        {
+            let (
+                pool_key,
+                mut pool_account,
+                deltafi_key,
+                mut deltafi_account,
+                withdrawer_farming_key,
+                mut withdrawer_farming_account,
+            ) = accounts.setup_token_accounts(&user_key, &withdrawer_key, withdraw_amount, 0);
+            let old_pool_key = accounts.pool_token_key;
+            let old_pool_account = accounts.pool_token_account;
+
+            accounts.pool_token_key = pool_key.clone();
+            accounts.pool_token_account = pool_account.clone();
+
+            assert_eq!(
+                Err(SwapError::IncorrectSwapAccount.into()),
+                accounts.withdraw(
+                    &withdrawer_key,
+                    &withdrawer_farming_key,
+                    &mut withdrawer_farming_account,
+                    &pool_key,
+                    &mut pool_account,
+                    withdraw_amount,
+                    minimum_pool_amount,
+                )
+            );
+
+            accounts.pool_token_key = old_pool_key;
+            accounts.pool_token_account = old_pool_account;
+        }
+
+        // wrong mint
+        {
+            let (
+                pool_key,
+                mut pool_account,
+                deltafi_key,
+                mut deltafi_account,
+                withdrawer_farming_key,
+                mut withdrawer_farming_account,
+            ) = accounts.setup_token_accounts(&user_key, &withdrawer_key, withdraw_amount, 0);
+            let (deltafi_mint_key, deltafi_mint_account) = create_mint(
+                &TOKEN_PROGRAM_ID,
+                &accounts.authority_key,
+                DEFAULT_TOKEN_DECIMALS,
+                None,
+            );
+            let old_deltafi_key = accounts.token_deltafi_mint_key;
+            let old_deltafi_account = accounts.token_deltafi_mint_account;
+            accounts.token_deltafi_mint_key = deltafi_key;
+            accounts.token_deltafi_mint_account = deltafi_account;
+
+            assert_eq!(
+                Err(SwapError::IncorrectSwapAccount.into()),
+                accounts.withdraw(
+                    &withdrawer_key,
+                    &withdrawer_farming_key,
+                    &mut withdrawer_farming_account,
+                    &pool_key,
+                    &mut pool_account,
+                    withdraw_amount,
+                    minimum_pool_amount,
+                )
+            );
+            
+            accounts.token_deltafi_mint_key = old_deltafi_key;
+            accounts.token_deltafi_mint_account = old_deltafi_account;
+        }
+
+        // correctly withdrawal
+        {
+            let (
+                pool_key,
+                mut pool_account,
+                deltafi_key,
+                mut deltafi_account,
+                withdrawer_farming_key,
+                mut withdrawer_farming_account,
+            ) = accounts.setup_token_accounts(&user_key, &withdrawer_key, withdraw_amount, 0);
+
+            accounts
+                .withdraw(
+                    &withdrawer_key,
+                    &withdrawer_farming_key,
+                    &mut withdrawer_farming_account,
+                    &pool_key,
+                    &mut pool_account,
+                    withdraw_amount,
+                    minimum_pool_amount,
+                )
+                .unwrap();
+
+            // !! need to write check farm state
+            // ...
+        }
+
+        // !! let me think about these two test case.
+        // pool is paused
+        {            
+        }
+
+        // farm is paused
+        {
+        }    
+    }
+
+    #[test]
+    fn test_farming_mergency_withdraw() {
+        let user_key = pubkey_rand();
+        let withdrawer_key = pubkey_rand();
+        let token_pool_amount = 1000;
+        let alloc_point = 200;
+        let reward_unit = 10;
+        let withdraw_amount = token_pool_amount / 10;
+        let minimum_pool_amount = token_pool_amount / 40;
+
+        let mut accounts = FarmAccountInfo::new(
+            &user_key,
+            token_pool_amount,
+            alloc_point,
+            reward_unit,
+            DEFAULT_TEST_FEES,
+        );
+
+        // farm not initialized
+        {
+            let (
+                pool_key,
+                mut pool_account,
+                deltafi_key,
+                mut deltafi_account,
+                withdrawer_farming_key,
+                mut withdrawer_farming_account,
+            ) = accounts.setup_token_accounts(&user_key, &withdrawer_key, token_pool_amount, 0);
+            assert_eq!(
+                Err(ProgramError::UninitializedAccount),
+                accounts.emergency_withdraw(
+                    &withdrawer_key,
+                    &withdrawer_farming_key,
+                    &mut withdrawer_farming_account,
+                    &pool_key,
+                    &mut pool_account,
+                    withdraw_amount,
+                    minimum_pool_amount,
+                )
+            );
+            
+        }
+
+        accounts.initialize_farm(ZERO_TS).unwrap();
+
+        // wrong nonce for authority_key
+        {
+            let (
+                pool_key,
+                mut pool_account,
+                deltafi_key,
+                mut deltafi_account,
+                withdrawer_farming_key,
+                mut withdrawer_farming_account,
+            ) = accounts.setup_token_accounts(&user_key, &withdrawer_key, token_pool_amount, 0);
+            let old_authority = accounts.authority_key;
+            let (bad_authority_key, _nonce) = Pubkey::find_program_address(
+                &[&accounts.farm_key.to_bytes()[..]],
+                &TOKEN_PROGRAM_ID,
+            );
+            accounts.authority_key = bad_authority_key;
+            assert_eq!(
+                Err(SwapError::InvalidProgramAddress.into()),
+                accounts.emergency_withdraw(
+                    &withdrawer_key,
+                    &withdrawer_farming_key,
+                    &mut withdrawer_farming_account,
+                    &pool_key,
+                    &mut pool_account,
+                    withdraw_amount,
+                    minimum_pool_amount,                    
+                )
+            );
+            accounts.authority_key = old_authority;
+        }
+
+        // not enough pool token
+        {
+            let (
+                pool_key,
+                mut pool_account,
+                deltafi_key,
+                mut deltafi_account,
+                withdrawer_farming_key,
+                mut withdrawer_farming_account,
+            ) = accounts.setup_token_accounts(&user_key, &withdrawer_key, withdraw_amount / 2, 0);
+            assert_eq!(
+                Err(TokenError::InsufficientFunds.into()),
+                accounts.emergency_withdraw(
+                    &withdrawer_key,
+                    &withdrawer_farming_key,
+                    &mut withdrawer_farming_account,
+                    &pool_key,
+                    &mut pool_account,
+                    withdraw_amount,
+                    minimum_pool_amount,
+                )
+            );
+        }
+
+        // no approval
+        {
+            let (
+                pool_key,
+                mut pool_account,
+                deltafi_key,
+                mut deltafi_account,
+                withdrawer_farming_key,
+                mut withdrawer_farming_account,
+            ) = accounts.setup_token_accounts(&user_key, &withdrawer_key, withdraw_amount, 0);
+            assert_eq!(
+                Err(TokenError::OwnerMismatch.into()),
+                do_process_instruction(
+                    farm_emergency_withdraw(
+                        &SWAP_PROGRAM_ID,
+                        &TOKEN_PROGRAM_ID,
+                        &accounts.farm_base_key,
+                        &accounts.farm_key,
+                        &accounts.authority_key,
+                        &withdrawer_key,
+                        &withdrawer_farming_key,
+                        &accounts.pool_token_key,
+                        &accounts.token_deltafi_mint_key,
+                        &accounts.pool_token_key,
+                    )
+                    .unwrap(),
+                    vec![
+                        &mut accounts.farm_base_account,
+                        &mut accounts.farm_account,
+                        &mut Account::default(),
+                        &mut pool_account,
+                        &mut withdrawer_farming_account,
+                        &mut accounts.pool_token_account,
+                        &mut accounts.token_deltafi_mint_account,
+                        &mut accounts.pool_token_account,
+                        &mut Account::default(),
+                        &mut clock_account(ZERO_TS),
+                    ],
+                )
+            );
+        }
+
+        // wrong token program id
+        {
+            let (
+                pool_key,
+                mut pool_account,
+                deltafi_key,
+                mut deltafi_account,
+                withdrawer_farming_key,
+                mut withdrawer_farming_account,
+            ) = accounts.setup_token_accounts(&user_key, &withdrawer_key, withdraw_amount, 0);
+            let wrong_key = pubkey_rand();
+            assert_eq!(
+                Err(ProgramError::InvalidAccountData),
+                do_process_instruction(
+                    farm_emergency_withdraw(
+                        &SWAP_PROGRAM_ID,
+                        &wrong_key,
+                        &accounts.farm_base_key,
+                        &accounts.farm_key,
+                        &accounts.authority_key,
+                        &withdrawer_key,
+                        &withdrawer_farming_key,
+                        &accounts.pool_token_key,
+                        &accounts.token_deltafi_mint_key,
+                        &accounts.pool_token_key,
+                    )
+                    .unwrap(),
+                    vec![
+                        &mut accounts.farm_base_account,
+                        &mut accounts.farm_account,
+                        &mut Account::default(),
+                        &mut pool_account,
+                        &mut withdrawer_farming_account,
+                        &mut accounts.pool_token_account,
+                        &mut accounts.token_deltafi_mint_account,
+                        &mut accounts.pool_token_account,
+                        &mut Account::default(),
+                        &mut clock_account(ZERO_TS),
+                    ],
+                )
+            );
+        }
+
+        // !!need to check.
+        // wrong farm token accounts
+        {
+            let (
+                pool_key,
+                mut pool_account,
+                deltafi_key,
+                mut deltafi_account,
+                withdrawer_farming_key,
+                mut withdrawer_farming_account,
+            ) = accounts.setup_token_accounts(&user_key, &withdrawer_key, withdraw_amount, 0);
+            let old_pool_key = accounts.pool_token_key;
+            let old_pool_account = accounts.pool_token_account;
+
+            accounts.pool_token_key = pool_key.clone();
+            accounts.pool_token_account = pool_account.clone();
+
+            assert_eq!(
+                Err(SwapError::IncorrectSwapAccount.into()),
+                accounts.emergency_withdraw(
+                    &withdrawer_key,
+                    &withdrawer_farming_key,
+                    &mut withdrawer_farming_account,
+                    &pool_key,
+                    &mut pool_account,
+                    withdraw_amount,
+                    minimum_pool_amount,
+                )
+            );
+
+            accounts.pool_token_key = old_pool_key;
+            accounts.pool_token_account = old_pool_account;
+        }
+
+        // wrong mint
+        {
+            let (
+                pool_key,
+                mut pool_account,
+                deltafi_key,
+                mut deltafi_account,
+                withdrawer_farming_key,
+                mut withdrawer_farming_account,
+            ) = accounts.setup_token_accounts(&user_key, &withdrawer_key, withdraw_amount, 0);
+            let (deltafi_mint_key, deltafi_mint_account) = create_mint(
+                &TOKEN_PROGRAM_ID,
+                &accounts.authority_key,
+                DEFAULT_TOKEN_DECIMALS,
+                None,
+            );
+            let old_deltafi_key = accounts.token_deltafi_mint_key;
+            let old_deltafi_account = accounts.token_deltafi_mint_account;
+            accounts.token_deltafi_mint_key = deltafi_key;
+            accounts.token_deltafi_mint_account = deltafi_account;
+
+            assert_eq!(
+                Err(SwapError::IncorrectSwapAccount.into()),
+                accounts.emergency_withdraw(
+                    &withdrawer_key,
+                    &withdrawer_farming_key,
+                    &mut withdrawer_farming_account,
+                    &pool_key,
+                    &mut pool_account,
+                    withdraw_amount,
+                    minimum_pool_amount,
+                )
+            );
+            
+            accounts.token_deltafi_mint_key = old_deltafi_key;
+            accounts.token_deltafi_mint_account = old_deltafi_account;
+        }
+
+        // correctly withdrawal
+        {
+            let (
+                pool_key,
+                mut pool_account,
+                deltafi_key,
+                mut deltafi_account,
+                withdrawer_farming_key,
+                mut withdrawer_farming_account,
+            ) = accounts.setup_token_accounts(&user_key, &withdrawer_key, withdraw_amount, 0);
+
+            accounts
+                .emergency_withdraw(
+                    &withdrawer_key,
+                    &withdrawer_farming_key,
+                    &mut withdrawer_farming_account,
+                    &pool_key,
+                    &mut pool_account,
+                    withdraw_amount,
+                    minimum_pool_amount,
+                )
+                .unwrap();
+
+            // !! need to write check farm state and this part will be the main difference from withdraw test function
+            // ...
+        }
+
+        // !! let me think about these two test case.
+        // pool is paused
+        {            
+        }
+
+        // farm is paused
+        {
+        }         
+    }
+
+    #[test]
+    fn test_farming_pending_deltafi() {
+        let user_key = pubkey_rand();
+        let viewer_key = pubkey_rand();
+        let token_pool_amount = 1000;
+        let alloc_point = 200;
+        let reward_unit = 10;
+        let amount = token_pool_amount / 10;
+        let minimum_pool_amount = token_pool_amount / 40;
+
+        let mut accounts = FarmAccountInfo::new(
+            &user_key,
+            token_pool_amount,
+            alloc_point,
+            reward_unit,
+            DEFAULT_TEST_FEES,
+        );
+
+        // farm not initialized
+        {
+            let (
+                pool_key,
+                mut pool_account,
+                deltafi_key,
+                mut deltafi_account,
+                viewer_farming_key,
+                mut viewer_farming_account,
+            ) = accounts.setup_token_accounts(&user_key, &viewer_key, token_pool_amount, 0);
+            assert_eq!(
+                Err(ProgramError::UninitializedAccount),
+                accounts.print_pending_deltafi(
+                    &viewer_key,
+                    &viewer_farming_key,
+                    &mut viewer_farming_account,
+                    &pool_key,
+                    &mut pool_account,
+                    amount,
+                    minimum_pool_amount,
+                )
+            );
+            
+        }
+
+        accounts.initialize_farm(ZERO_TS).unwrap();
+
+        // !!need to check.
+        // wrong farm token accounts
+        {
+            let (
+                pool_key,
+                mut pool_account,
+                deltafi_key,
+                mut deltafi_account,
+                viewer_farming_key,
+                mut viewer_farming_account,
+            ) = accounts.setup_token_accounts(&user_key, &viewer_key, token_pool_amount, 0);
+            let old_pool_key = accounts.pool_token_key;
+            let old_pool_account = accounts.pool_token_account;
+
+            accounts.pool_token_key = pool_key.clone();
+            accounts.pool_token_account = pool_account.clone();
+
+            assert_eq!(
+                Err(SwapError::IncorrectSwapAccount.into()),
+                accounts.print_pending_deltafi(
+                    &viewer_key,
+                    &viewer_farming_key,
+                    &mut viewer_farming_account,
+                    &pool_key,
+                    &mut pool_account,
+                    amount,
+                    minimum_pool_amount,
+                )
+            );
+
+            accounts.pool_token_key = old_pool_key;
+            accounts.pool_token_account = old_pool_account;
+        }
+
+        // correctly seeing
+        {
+            let (
+                pool_key,
+                mut pool_account,
+                deltafi_key,
+                mut deltafi_account,
+                viewer_farming_key,
+                mut viewer_farming_account,
+            ) = accounts.setup_token_accounts(&user_key, &viewer_key, token_pool_amount, 0);
+
+            accounts
+                .print_pending_deltafi(
+                    &viewer_key,
+                    &viewer_farming_key,
+                    &mut viewer_farming_account,
+                    &pool_key,
+                    &mut pool_account,
+                    amount,
+                    minimum_pool_amount,
+                )
+                .unwrap();
+
+            // !! need to write check farm state and this part will be the main difference from withdraw test function
+            // ...
+        }
+
+        // !! let me think about these two test case.
+        // pool is paused
+        {            
+        }
+
+        // farm is paused
+        {
+        }           
     }
 }
