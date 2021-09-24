@@ -483,6 +483,8 @@ mod tests {
             DEFAULT_TOKEN_A_AMOUNT,
             DEFAULT_TOKEN_B_AMOUNT,
             DEFAULT_TEST_FEES,
+            default_i(),
+            default_i(),
         );
 
         // swap not initialized
@@ -594,6 +596,8 @@ mod tests {
             DEFAULT_TOKEN_A_AMOUNT,
             DEFAULT_TOKEN_B_AMOUNT,
             DEFAULT_TEST_FEES,
+            default_i(),
+            default_i(),
         );
 
         // swap not initialized
@@ -655,6 +659,8 @@ mod tests {
             DEFAULT_TOKEN_A_AMOUNT,
             DEFAULT_TOKEN_B_AMOUNT,
             DEFAULT_TEST_FEES,
+            default_i(),
+            default_i(),
         );
 
         // swap not initialized
@@ -706,6 +712,8 @@ mod tests {
             DEFAULT_TOKEN_A_AMOUNT,
             DEFAULT_TOKEN_B_AMOUNT,
             DEFAULT_TEST_FEES,
+            default_i(),
+            default_i(),
         );
 
         // swap not initialized
@@ -764,6 +772,8 @@ mod tests {
             DEFAULT_TOKEN_A_AMOUNT,
             DEFAULT_TOKEN_B_AMOUNT,
             DEFAULT_TEST_FEES,
+            default_k(),
+            default_i(),
         );
         let (
             admin_fee_key_a,
@@ -852,6 +862,8 @@ mod tests {
             DEFAULT_TOKEN_A_AMOUNT,
             DEFAULT_TOKEN_B_AMOUNT,
             DEFAULT_TEST_FEES,
+            default_k(),
+            default_i(),
         );
 
         // swap not initialized
@@ -937,6 +949,8 @@ mod tests {
             DEFAULT_TOKEN_A_AMOUNT,
             DEFAULT_TOKEN_B_AMOUNT,
             DEFAULT_TEST_FEES,
+            default_k(),
+            default_i(),
         );
 
         // swap not initialized
@@ -1017,6 +1031,8 @@ mod tests {
             DEFAULT_TOKEN_A_AMOUNT,
             DEFAULT_TOKEN_B_AMOUNT,
             DEFAULT_TEST_FEES,
+            default_k(),
+            default_i(),
         );
 
         let new_fees: Fees = Fees {

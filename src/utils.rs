@@ -30,7 +30,8 @@ pub mod test_utils {
     };
   
     use crate::{
-        curve::ZERO_TS, fees::Fees, instruction::*, processor::Processor, state::{SwapInfo, FarmInfo, FarmBaseInfo, FarmingUserInfo},
+        bn::FixedU256, curve::ZERO_TS, fees::Fees, instruction::*, processor::Processor,
+        curve::ZERO_TS, state::{SwapInfo, FarmInfo, FarmBaseInfo, FarmingUserInfo},
     };
 
     /// Test program id for the swap program.
@@ -49,6 +50,20 @@ pub mod test_utils {
         withdraw_fee_numerator: 6,
         withdraw_fee_denominator: 100,
     };
+
+    /// Slope Value for testing
+    pub fn default_k() -> FixedU256 {
+        FixedU256::one()
+            .checked_mul_floor(FixedU256::new(5.into()))
+            .unwrap()
+            .checked_div_floor(FixedU256::new(10.into()))
+            .unwrap()
+    }
+
+    /// Mid Price for testing
+    pub fn default_i() -> FixedU256 {
+        FixedU256::new_from_int(100.into(), 18).unwrap()
+    }
 
     /// Default token decimals
     pub const DEFAULT_TOKEN_DECIMALS: u8 = 6;
@@ -91,6 +106,12 @@ pub mod test_utils {
         pub admin_fee_b_key: Pubkey,
         pub admin_fee_b_account: Account,
         pub fees: Fees,
+        pub k: FixedU256,
+        pub i: FixedU256,
+        pub base_target: FixedU256,
+        pub quote_target: FixedU256,
+        pub base_reserve: FixedU256,
+        pub quote_reserve: FixedU256,
     }
 
     impl SwapAccountInfo {
@@ -100,6 +121,8 @@ pub mod test_utils {
             token_a_amount: u64,
             token_b_amount: u64,
             fees: Fees,
+            k: FixedU256,
+            i: FixedU256,
         ) -> Self {
             let swap_key = pubkey_rand();
             let swap_account = Account::new(0, SwapInfo::get_packed_len(), &SWAP_PROGRAM_ID);
@@ -158,6 +181,10 @@ pub mod test_utils {
             );
 
             let admin_account = Account::default();
+            let base_target = FixedU256::zero();
+            let quote_target = FixedU256::zero();
+            let base_reserve = FixedU256::zero();
+            let quote_reserve = FixedU256::zero();
 
             SwapAccountInfo {
                 nonce,
@@ -185,6 +212,12 @@ pub mod test_utils {
                 admin_fee_b_key,
                 admin_fee_b_account,
                 fees,
+                k,
+                i,
+                base_target,
+                quote_target,
+                base_reserve,
+                quote_reserve,
             }
         }
 
@@ -207,6 +240,8 @@ pub mod test_utils {
                     self.nonce,
                     self.initial_amp_factor,
                     self.fees,
+                    self.k,
+                    self.i,
                 )
                 .unwrap(),
                 vec![
@@ -329,6 +364,7 @@ pub mod test_utils {
             mut user_destination_account: &mut Account,
             amount_in: u64,
             minimum_amount_out: u64,
+            swap_direction: u64,
         ) -> ProgramResult {
             // approve moving from user source account
             do_process_instruction(
@@ -369,6 +405,7 @@ pub mod test_utils {
                     &admin_destination_key,
                     amount_in,
                     minimum_amount_out,
+                    swap_direction,
                 )
                 .unwrap(),
                 vec![
