@@ -364,6 +364,7 @@ pub mod test_utils {
             mut user_destination_account: &mut Account,
             amount_in: u64,
             minimum_amount_out: u64,
+            swap_direction: u64,
         ) -> ProgramResult {
             // approve moving from user source account
             do_process_instruction(
@@ -404,6 +405,7 @@ pub mod test_utils {
                     &admin_destination_key,
                     amount_in,
                     minimum_amount_out,
+                    swap_direction,
                 )
                 .unwrap(),
                 vec![

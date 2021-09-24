@@ -31,7 +31,7 @@ use crate::{
     pool_converter::PoolTokenConverter,
     state::SwapInfo,
     utils,
-    v2curve::{adjusted_target, sell_base_token, PMMState},
+    v2curve::{adjusted_target, sell_base_token, sell_quote_token, PMMState},
 };
 
 /// Program state handler. (and general curve params)
@@ -297,6 +297,27 @@ impl Processor {
         program_id: &Pubkey,
         amount_in: u64,
         minimum_amount_out: u64,
+        swap_direction: u64,
+        accounts: &[AccountInfo],
+    ) -> ProgramResult {
+        match swap_direction {
+            0 => {
+                return Self::sell_base(program_id, amount_in, minimum_amount_out, accounts);
+            }
+            1 => {
+                return Self::sell_base(program_id, amount_in, minimum_amount_out, accounts);
+            }
+            _ => {
+                return Ok(());
+            }
+        }
+    }
+
+    /// processor for sell base
+    pub fn sell_base(
+        program_id: &Pubkey,
+        amount_in: u64,
+        minimum_amount_out: u64,
         accounts: &[AccountInfo],
     ) -> ProgramResult {
         let account_info_iter = &mut accounts.iter();
@@ -477,6 +498,198 @@ impl Processor {
             quote_reserve: new_quote_reserve,
         };
         SwapInfo::pack(obj, &mut swap_info.data.borrow_mut())?;
+
+        Ok(())
+    }
+
+    /// processor for sell quote
+    pub fn sell_quote(
+        program_id: &Pubkey,
+        amount_in: u64,
+        minimum_amount_out: u64,
+        accounts: &[AccountInfo],
+    ) -> ProgramResult {
+        let account_info_iter = &mut accounts.iter();
+        let swap_info = next_account_info(account_info_iter)?;
+        let authority_info = next_account_info(account_info_iter)?;
+        let source_info = next_account_info(account_info_iter)?;
+        let swap_source_info = next_account_info(account_info_iter)?;
+        let swap_destination_info = next_account_info(account_info_iter)?;
+        let destination_info = next_account_info(account_info_iter)?;
+        let admin_destination_info = next_account_info(account_info_iter)?;
+        let token_program_info = next_account_info(account_info_iter)?;
+        let _clock_sysvar_info = next_account_info(account_info_iter)?;
+
+        let token_swap = SwapInfo::unpack(&swap_info.data.borrow())?;
+        if token_swap.is_paused {
+            return Err(SwapError::IsPaused.into());
+        }
+        if *authority_info.key != utils::authority_id(program_id, swap_info.key, token_swap.nonce)?
+        {
+            return Err(SwapError::InvalidProgramAddress.into());
+        }
+        if !(*swap_source_info.key == token_swap.token_a
+            || *swap_source_info.key == token_swap.token_b)
+        {
+            return Err(SwapError::IncorrectSwapAccount.into());
+        }
+        if !(*swap_destination_info.key == token_swap.token_a
+            || *swap_destination_info.key == token_swap.token_b)
+        {
+            return Err(SwapError::IncorrectSwapAccount.into());
+        }
+        if *swap_destination_info.key == token_swap.token_a
+            && *admin_destination_info.key != token_swap.admin_fee_key_a
+        {
+            return Err(SwapError::InvalidAdmin.into());
+        }
+        if *swap_destination_info.key == token_swap.token_b
+            && *admin_destination_info.key != token_swap.admin_fee_key_b
+        {
+            return Err(SwapError::InvalidAdmin.into());
+        }
+        if *swap_source_info.key == *swap_destination_info.key {
+            return Err(SwapError::InvalidInput.into());
+        }
+
+        let current_timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let token_a = utils::unpack_token_account(&swap_source_info.data.borrow())?;
+        let token_b = utils::unpack_token_account(&destination_info.data.borrow())?;
+
+        // oracle update
+
+        let (price0_cumulative, price1_cumulative, block_timestamp) =
+            token_swap.oracle.current_cumulative_price(
+                U256::from(token_a.amount),
+                U256::from(token_b.amount),
+                current_timestamp,
+            );
+        let mut swap = token_swap;
+
+        swap.oracle
+            .update(price0_cumulative, price1_cumulative, block_timestamp);
+
+        // calculate swap amount with pmm
+
+        let base_balance = FixedU256::new_from_int(U256::from(token_a.amount), 18)?;
+        let quote_balance = FixedU256::new_from_int(U256::from(token_b.amount), 18)?;
+        let pay_quote_amount = FixedU256::new_from_int(U256::from(amount_in), 18)?;
+
+        if quote_balance.into_u256_ceil() < pay_quote_amount.into_u256_ceil() {
+            return Err(ProgramError::InsufficientFunds);
+        }
+
+        let base_reserve = token_swap.base_reserve;
+        let quote_reserve = token_swap.quote_reserve;
+        let base_target = token_swap.base_target;
+        let quote_target = token_swap.quote_target;
+
+        let mut state = PMMState::new(
+            token_swap.i,
+            token_swap.k,
+            base_reserve,
+            quote_reserve,
+            base_target,
+            quote_target,
+            token_swap.r,
+        );
+        adjusted_target(&mut state)?;
+
+        let (receive_base_amount, new_r) = sell_quote_token(state, pay_quote_amount)?;
+
+        let fees = &token_swap.fees;
+        let dy_fee;
+        match fees.trade_fee(receive_base_amount.into_u256_ceil()) {
+            Some(v) => {
+                dy_fee = FixedU256::new_from_int(v, 18)?;
+            }
+            None => {
+                return Err(ProgramError::InvalidArgument);
+            }
+        }
+        let admin_fee;
+        match fees.admin_trade_fee(dy_fee.into_u256_ceil()) {
+            Some(v) => {
+                admin_fee = FixedU256::new_from_int(v, 18)?;
+            }
+            None => {
+                return Err(ProgramError::InvalidArgument);
+            }
+        }
+        let dy_swap_amount = receive_base_amount.checked_sub(dy_fee)?;
+        let new_base_target = base_target;
+        let new_quote_target = state.q_0;
+
+        if U256::to_u64(dy_swap_amount.into_u256_ceil())? < minimum_amount_out {
+            return Err(SwapError::ExceededSlippage.into());
+        }
+
+        Self::token_transfer(
+            swap_info.key,
+            token_program_info.clone(),
+            destination_info.clone(),
+            swap_destination_info.clone(),
+            authority_info.clone(),
+            token_swap.nonce,
+            amount_in,
+        )?;
+
+        Self::token_transfer(
+            swap_info.key,
+            token_program_info.clone(),
+            swap_source_info.clone(),
+            source_info.clone(),
+            authority_info.clone(),
+            token_swap.nonce,
+            U256::to_u64(dy_swap_amount.into_u256_ceil())?,
+        )?;
+
+        Self::token_transfer(
+            swap_info.key,
+            token_program_info.clone(),
+            swap_source_info.clone(),
+            admin_destination_info.clone(),
+            authority_info.clone(),
+            token_swap.nonce,
+            U256::to_u64(admin_fee.into_u256_ceil())?,
+        )?;
+
+        let new_base_reserve = base_balance.checked_sub(dy_swap_amount)?;
+        let new_quote_reserve = quote_balance.checked_add(pay_quote_amount)?;
+
+        let obj = SwapInfo {
+            is_initialized: token_swap.is_initialized,
+            is_paused: token_swap.is_paused,
+            nonce: token_swap.nonce,
+            initial_amp_factor: token_swap.initial_amp_factor,
+            target_amp_factor: token_swap.target_amp_factor,
+            start_ramp_ts: token_swap.start_ramp_ts,
+            stop_ramp_ts: token_swap.stop_ramp_ts,
+            future_admin_deadline: token_swap.future_admin_deadline,
+            future_admin_key: token_swap.future_admin_key,
+            admin_key: token_swap.admin_key,
+            token_a: token_swap.token_a,
+            token_b: token_swap.token_b,
+            pool_mint: token_swap.pool_mint,
+            token_a_mint: token_swap.token_a_mint,
+            token_b_mint: token_swap.token_b_mint,
+            admin_fee_key_a: token_swap.admin_fee_key_a,
+            admin_fee_key_b: token_swap.admin_fee_key_b,
+            fees: token_swap.fees,
+            oracle: token_swap.oracle,
+            k: token_swap.k,
+            i: token_swap.i,
+            r: new_r,
+            base_target: new_base_target,
+            quote_target: new_quote_target,
+            base_reserve: new_base_reserve,
+            quote_reserve: new_quote_reserve,
+        };
+        SwapInfo::pack(obj, &mut swap_info.data.borrow_mut())?;
+
         Ok(())
     }
 
@@ -926,9 +1139,16 @@ impl Processor {
             SwapInstruction::Swap(SwapData {
                 amount_in,
                 minimum_amount_out,
+                swap_direction,
             }) => {
                 msg!("Instruction: Swap");
-                Self::process_swap(program_id, amount_in, minimum_amount_out, accounts)
+                Self::process_swap(
+                    program_id,
+                    amount_in,
+                    minimum_amount_out,
+                    swap_direction,
+                    accounts,
+                )
             }
             SwapInstruction::Deposit(DepositData {
                 token_a_amount,
@@ -2789,6 +3009,7 @@ mod tests {
         let initial_a = token_a_amount;
         let initial_b = token_b_amount;
         let minimum_b_amount = initial_b / 20;
+        let swap_direction = 0;
 
         let swap_token_a_key = accounts.token_a_key;
         let swap_token_b_key = accounts.token_b_key;
@@ -2815,6 +3036,7 @@ mod tests {
                     &mut token_b_account,
                     initial_a,
                     minimum_b_amount,
+                    swap_direction,
                 )
             );
         }
@@ -2849,6 +3071,7 @@ mod tests {
                     &mut token_b_account,
                     initial_a,
                     minimum_b_amount,
+                    swap_direction,
                 )
             );
             accounts.authority_key = old_authority;
@@ -2880,6 +3103,7 @@ mod tests {
                         &accounts.admin_fee_b_key,
                         initial_a,
                         minimum_b_amount,
+                        swap_direction,
                     )
                     .unwrap(),
                     vec![
@@ -2919,6 +3143,7 @@ mod tests {
                     &mut token_b_account,
                     initial_a * 2,
                     minimum_b_amount * 2,
+                    swap_direction,
                 )
             );
         }
@@ -2948,6 +3173,7 @@ mod tests {
                         &accounts.admin_fee_b_key,
                         initial_a,
                         minimum_b_amount,
+                        swap_direction,
                     )
                     .unwrap(),
                     vec![
@@ -2990,6 +3216,7 @@ mod tests {
                         &wrong_admin_key,
                         initial_a,
                         minimum_b_amount,
+                        swap_direction,
                     )
                     .unwrap(),
                     vec![
@@ -3029,6 +3256,7 @@ mod tests {
                     &mut token_a_account,
                     initial_a,
                     minimum_b_amount,
+                    swap_direction,
                 )
             );
         }
@@ -3055,6 +3283,7 @@ mod tests {
                     &mut token_a_account,
                     initial_a,
                     minimum_b_amount,
+                    swap_direction,
                 )
             );
         }
@@ -3084,6 +3313,7 @@ mod tests {
                         &accounts.admin_fee_b_key,
                         initial_a,
                         minimum_b_amount,
+                        swap_direction,
                     )
                     .unwrap(),
                     vec![
@@ -3123,6 +3353,7 @@ mod tests {
                     &mut token_b_account,
                     initial_a,
                     minimum_b_amount * 10,
+                    swap_direction,
                 )
             );
         }
@@ -3205,6 +3436,7 @@ mod tests {
                     &mut token_b_account,
                     a_to_b_amount,
                     minimum_b_amount,
+                    swap_direction,
                 )
                 .unwrap();
 
@@ -3294,6 +3526,7 @@ mod tests {
                     &mut token_b_account,
                     initial_a,
                     minimum_b_amount,
+                    swap_direction,
                 )
             );
         }
