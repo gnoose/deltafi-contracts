@@ -38,6 +38,8 @@ pub struct SwapData {
     pub amount_in: u64,
     /// Minimum amount of DESTINATION token to output, prevents excessive slippage
     pub minimum_amount_out: u64,
+    /// Swap direction 0 -> Sell Base Token, 1 -> Sell Quote Token
+    pub swap_direction: u64,
 }
 
 /// Deposit instruction data
@@ -453,9 +455,11 @@ impl SwapInstruction {
             1 => {
                 let (amount_in, rest) = unpack_u64(rest)?;
                 let (minimum_amount_out, _rest) = unpack_u64(rest)?;
+                let (swap_direction, _rest) = unpack_u64(_rest)?;
                 Self::Swap(SwapData {
                     amount_in,
                     minimum_amount_out,
+                    swap_direction,
                 })
             }
             2 => {
@@ -517,10 +521,12 @@ impl SwapInstruction {
             Self::Swap(SwapData {
                 amount_in,
                 minimum_amount_out,
+                swap_direction,
             }) => {
                 buf.push(1);
                 buf.extend_from_slice(&amount_in.to_le_bytes());
                 buf.extend_from_slice(&minimum_amount_out.to_le_bytes());
+                buf.extend_from_slice(&swap_direction.to_le_bytes());
             }
             Self::Deposit(DepositData {
                 token_a_amount,
@@ -709,10 +715,12 @@ pub fn swap(
     admin_fee_destination_pubkey: &Pubkey,
     amount_in: u64,
     minimum_amount_out: u64,
+    swap_direction: u64,
 ) -> Result<Instruction, ProgramError> {
     let data = SwapInstruction::Swap(SwapData {
         amount_in,
         minimum_amount_out,
+        swap_direction,
     })
     .pack();
 
@@ -942,14 +950,17 @@ mod tests {
 
         let amount_in: u64 = 2;
         let minimum_amount_out: u64 = 10;
+        let swap_direction: u64 = 0;
         let check = SwapInstruction::Swap(SwapData {
             amount_in,
             minimum_amount_out,
+            swap_direction,
         });
         let packed = check.pack();
         let mut expect = vec![1];
         expect.extend_from_slice(&amount_in.to_le_bytes());
         expect.extend_from_slice(&minimum_amount_out.to_le_bytes());
+        expect.extend_from_slice(&swap_direction.to_le_bytes());
         assert_eq!(packed, expect);
         let unpacked = SwapInstruction::unpack(&expect).unwrap();
         assert_eq!(unpacked, check);
