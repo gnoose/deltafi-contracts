@@ -91,6 +91,7 @@ pub struct RampAData {
 pub struct FarmData {
     /// alloc point for farm
     pub alloc_point: u64,
+    ///
     pub reward_unit: u64,
 }
 
@@ -515,7 +516,6 @@ impl SwapInstruction {
             1 => {
                 let (amount_in, rest) = unpack_u64(rest)?;
                 let (minimum_amount_out, _rest) = unpack_u64(rest)?;
-                let (swap_direction, _rest) = unpack_u64(_rest)?;
                 Self::Swap(SwapData {
                     amount_in,
                     minimum_amount_out,
@@ -1008,7 +1008,6 @@ mod tests {
 
         let amount_in: u64 = 2;
         let minimum_amount_out: u64 = 10;
-        let swap_direction: u64 = 0;
         let check = SwapInstruction::Swap(SwapData {
             amount_in,
             minimum_amount_out,

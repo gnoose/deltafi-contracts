@@ -145,6 +145,8 @@ impl Processor {
         let token_b_mint_info = next_account_info(account_info_iter)?;
         let token_b_info = next_account_info(account_info_iter)?;
         let pool_mint_info = next_account_info(account_info_iter)?;
+        let deltafi_token_info = next_account_info(account_info_iter)?;
+        let deltafi_mint_info = next_account_info(account_info_iter)?;
         let destination_info = next_account_info(account_info_iter)?; // Destination account to mint LP tokens to
         let token_program_info = next_account_info(account_info_iter)?;
 
@@ -162,6 +164,7 @@ impl Processor {
         let destination = utils::unpack_token_account(&destination_info.data.borrow())?;
         let token_a = utils::unpack_token_account(&token_a_info.data.borrow())?;
         let token_b = utils::unpack_token_account(&token_b_info.data.borrow())?;
+        let deltafi_token = utils::unpack_token_account(&deltafi_token_info.data.borrow())?;
         if *authority_info.key != token_a.owner {
             return Err(SwapError::InvalidOwner.into());
         }
@@ -170,6 +173,9 @@ impl Processor {
         }
         if *authority_info.key == destination.owner {
             return Err(SwapError::InvalidOutputOwner.into());
+        }
+        if *authority_info.key == deltafi_token.owner {
+            return Err(SwapError::InvalidOwner.into());
         }
         if token_a.mint == token_b.mint {
             return Err(SwapError::RepeatedMint.into());
@@ -186,16 +192,25 @@ impl Processor {
         if token_b.delegate.is_some() {
             return Err(SwapError::InvalidDelegate.into());
         }
+        if deltafi_token.delegate.is_some() {
+            return Err(SwapError::InvalidDelegate.into());
+        }
         if token_a.mint != *token_a_mint_info.key {
             return Err(SwapError::IncorrectMint.into());
         }
         if token_b.mint != *token_b_mint_info.key {
             return Err(SwapError::IncorrectMint.into());
         }
+        if deltafi_token.mint != *deltafi_mint_info.key {
+            return Err(SwapError::IncorrectMint.into());
+        }
         if token_a.close_authority.is_some() {
             return Err(SwapError::InvalidCloseAuthority.into());
         }
         if token_b.close_authority.is_some() {
+            return Err(SwapError::InvalidCloseAuthority.into());
+        }
+        if deltafi_token.close_authority.is_some() {
             return Err(SwapError::InvalidCloseAuthority.into());
         }
         let pool_mint = Self::unpack_mint(&pool_mint_info.data.borrow())?;
@@ -216,6 +231,18 @@ impl Processor {
             return Err(SwapError::MismatchedDecimals.into());
         }
         if pool_mint.decimals != token_a_mint.decimals {
+            return Err(SwapError::MismatchedDecimals.into());
+        }
+        let deltafi_mint = Self::unpack_mint(&deltafi_mint_info.data.borrow())?;
+        if deltafi_mint.mint_authority.is_some()
+            && *authority_info.key != deltafi_mint.mint_authority.unwrap()
+        {
+            return Err(SwapError::InvalidOwner.into());
+        }
+        if deltafi_mint.freeze_authority.is_some() {
+            return Err(SwapError::InvalidFreezeAuthority.into());
+        }
+        if deltafi_mint.decimals != token_a_mint.decimals {
             return Err(SwapError::MismatchedDecimals.into());
         }
         let admin_fee_key_a = utils::unpack_token_account(&admin_fee_a_info.data.borrow())?;
@@ -256,9 +283,11 @@ impl Processor {
             admin_key: *admin_key_info.key,
             token_a: *token_a_info.key,
             token_b: *token_b_info.key,
+            deltafi_token: *deltafi_token_info.key,
             pool_mint: *pool_mint_info.key,
             token_a_mint: token_a.mint,
             token_b_mint: token_b.mint,
+            deltafi_mint: deltafi_token.mint,
             admin_fee_key_a: *admin_fee_a_info.key,
             admin_fee_key_b: *admin_fee_b_info.key,
             fees,
@@ -284,6 +313,8 @@ impl Processor {
         let swap_destination_info = next_account_info(account_info_iter)?;
         let destination_info = next_account_info(account_info_iter)?;
         let admin_destination_info = next_account_info(account_info_iter)?;
+        let reward_mint_info = next_account_info(account_info_iter)?;
+        let reward_destination_info = next_account_info(account_info_iter)?;
         let token_program_info = next_account_info(account_info_iter)?;
         let clock_sysvar_info = next_account_info(account_info_iter)?;
 
@@ -317,6 +348,12 @@ impl Processor {
         }
         if *swap_source_info.key == *swap_destination_info.key {
             return Err(SwapError::InvalidInput.into());
+        }
+        if *reward_destination_info.key != token_swap.deltafi_token {
+            return Err(SwapError::IncorrectSwapAccount.into());
+        }
+        if *reward_mint_info.key != token_swap.deltafi_mint {
+            return Err(SwapError::IncorrectMint.into());
         }
 
         let clock = Clock::from_account_info(clock_sysvar_info)?;

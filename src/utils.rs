@@ -30,8 +30,8 @@ pub mod test_utils {
     };
 
     use crate::{
-        curve::ZERO_TS, fees::Fees, instruction::*, processor::Processor, rewards::Rewards,
-        state::SwapInfo,
+        bn::FixedU256, curve::ZERO_TS, fees::Fees, instruction::*, processor::Processor,
+        rewards::Rewards, state::SwapInfo,
     };
 
     /// Test program id for the swap program.
@@ -59,6 +59,20 @@ pub mod test_utils {
 
     /// Default token decimals
     pub const DEFAULT_TOKEN_DECIMALS: u8 = 6;
+
+    /// Slope Value for testing
+    pub fn default_k() -> FixedU256 {
+        FixedU256::one()
+            .checked_mul_floor(FixedU256::new(5.into()))
+            .unwrap()
+            .checked_div_floor(FixedU256::new(10.into()))
+            .unwrap()
+    }
+
+    /// Mid Price for testing
+    pub fn default_i() -> FixedU256 {
+        FixedU256::new_from_int(100.into(), 18).unwrap()
+    }
 
     pub fn clock_account(ts: i64) -> Account {
         let clock = Clock {
