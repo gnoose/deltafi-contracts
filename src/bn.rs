@@ -396,10 +396,9 @@ impl FixedU256 {
     pub fn into_u64_ceil(self) -> Result<u64, SwapError> {
         U256::to_u64(
             self.inner
-            .checked_ceil_div(self.base_point)
-            .unwrap_or_default()
+                .checked_ceil_div(self.base_point)
+                .unwrap_or_default(),
         )
-
     }
 }
 

@@ -55,6 +55,7 @@ pub fn get_deposit_adjustment_amount(
 }
 
 /// buy shares [round down] - mint amount for lp - sp
+#[allow(clippy::too_many_arguments)]
 pub fn get_buy_shares(
     base_balance: FixedU256,
     quote_balance: FixedU256,
@@ -132,7 +133,7 @@ pub fn general_integrate(
 
     let penalty = k.checked_mul_floor(v0v0v1v2)?; // k(V0^2/V1/V2)
 
-    Ok(fair_amount.checked_mul_floor(FixedU256::one().checked_sub(k)?.checked_add(penalty)?)?)
+    fair_amount.checked_mul_floor(FixedU256::one().checked_sub(k)?.checked_add(penalty)?)
 }
 
 /// Follow the integration function above
@@ -147,7 +148,7 @@ pub fn solve_quadratic_function_for_target(
     }
 
     if k.into_u256_ceil().is_zero() {
-        return Ok(v1.checked_add(i.checked_mul_floor(delta)?)?);
+        return v1.checked_add(i.checked_mul_floor(delta)?);
     }
 
     let sqrt;
@@ -176,7 +177,7 @@ pub fn solve_quadratic_function_for_target(
         .checked_div_floor(k.checked_mul_floor(FixedU256::new(2.into()))?)?
         .checked_add(FixedU256::one())?;
 
-    Ok(v1.checked_mul_floor(premium)?)
+    v1.checked_mul_floor(premium)
 }
 
 /// Follow the integration expression above
@@ -199,7 +200,7 @@ pub fn solve_quadratic_function_for_trade(
         if i.checked_mul_floor(delta)?.into_u256_ceil() > v1.into_u256_ceil() {
             return Ok(v1);
         } else {
-            return Ok(i.checked_mul_floor(delta)?);
+            return i.checked_mul_floor(delta);
         }
     }
 
@@ -224,9 +225,9 @@ pub fn solve_quadratic_function_for_trade(
                 .checked_mul_floor(i)?
                 .checked_div_floor(v0)?;
         }
-        return Ok(v1
+        return v1
             .checked_mul_floor(temp)?
-            .checked_div_floor(temp.checked_add(FixedU256::one())?)?);
+            .checked_div_floor(temp.checked_add(FixedU256::one())?);
     }
 
     let part_2 = k
@@ -280,8 +281,10 @@ pub fn solve_quadratic_function_for_trade(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::utils::test_utils::{default_i, default_k};
-    use crate::utils::DEFAULT_TOKEN_DECIMALS;
+    use crate::utils::{
+        test_utils::{default_i, default_k},
+        DEFAULT_TOKEN_DECIMALS,
+    };
 
     #[test]
     fn basic() {

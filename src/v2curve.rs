@@ -1,5 +1,5 @@
 //! pricing for proactive market maker
-use std::mem::size_of;
+use std::{cmp::Ordering, mem::size_of};
 
 use solana_program::{entrypoint::ProgramResult, program_error::ProgramError};
 
@@ -82,6 +82,7 @@ pub struct PMMState {
 
 impl PMMState {
     /// initialize PMMState
+    #[allow(clippy::many_single_char_names)]
     pub fn new(
         i: FixedU256,
         k: FixedU256,
@@ -119,22 +120,32 @@ pub fn sell_base_token(
         let back_to_one_pay_base = state.b_0.checked_sub(state.b)?;
         let back_to_one_receive_quote = state.q.checked_sub(state.q_0)?;
 
-        if pay_base_amount.into_u256_ceil() < back_to_one_pay_base.into_u256_ceil() {
-            receive_quote_amount = r_above_sell_base_token(state, pay_base_amount)?;
-            new_r = RState::AboveOne;
+        match pay_base_amount
+            .into_u256_ceil()
+            .cmp(&back_to_one_pay_base.into_u256_ceil())
+        {
+            Ordering::Less => {
+                receive_quote_amount = r_above_sell_base_token(state, pay_base_amount)?;
+                new_r = RState::AboveOne;
 
-            if receive_quote_amount.into_u256_ceil() > back_to_one_receive_quote.into_u256_ceil() {
-                receive_quote_amount = back_to_one_receive_quote;
+                if receive_quote_amount.into_u256_ceil()
+                    > back_to_one_receive_quote.into_u256_ceil()
+                {
+                    receive_quote_amount = back_to_one_receive_quote;
+                }
             }
-        } else if pay_base_amount.into_u256_ceil() == back_to_one_pay_base.into_u256_ceil() {
-            receive_quote_amount = back_to_one_receive_quote;
-            new_r = RState::One;
-        } else {
-            receive_quote_amount = back_to_one_receive_quote.checked_add(r_one_sell_base_token(
-                state,
-                pay_base_amount.checked_sub(back_to_one_pay_base)?,
-            )?)?;
-            new_r = RState::BelowOne;
+            Ordering::Equal => {
+                receive_quote_amount = back_to_one_receive_quote;
+                new_r = RState::One;
+            }
+            Ordering::Greater => {
+                receive_quote_amount =
+                    back_to_one_receive_quote.checked_add(r_one_sell_base_token(
+                        state,
+                        pay_base_amount.checked_sub(back_to_one_pay_base)?,
+                    )?)?;
+                new_r = RState::BelowOne;
+            }
         }
     } else {
         receive_quote_amount = r_below_sell_base_token(state, pay_base_amount)?;
@@ -161,22 +172,31 @@ pub fn sell_quote_token(
         let back_to_one_pay_quote = state.q_0.checked_sub(state.q)?;
         let back_to_one_receive_base = state.b.checked_sub(state.b_0)?;
 
-        if pay_quote_amount.into_u256_ceil() < back_to_one_pay_quote.into_u256_ceil() {
-            receive_base_amount = r_below_sell_quote_token(state, pay_quote_amount)?;
-            new_r = RState::BelowOne;
+        match pay_quote_amount
+            .into_u256_ceil()
+            .cmp(&back_to_one_pay_quote.into_u256_ceil())
+        {
+            Ordering::Less => {
+                receive_base_amount = r_below_sell_quote_token(state, pay_quote_amount)?;
+                new_r = RState::BelowOne;
 
-            if receive_base_amount.into_u256_ceil() > back_to_one_receive_base.into_u256_ceil() {
-                receive_base_amount = back_to_one_receive_base;
+                if receive_base_amount.into_u256_ceil() > back_to_one_receive_base.into_u256_ceil()
+                {
+                    receive_base_amount = back_to_one_receive_base;
+                }
             }
-        } else if pay_quote_amount.into_u256_ceil() == back_to_one_pay_quote.into_u256_ceil() {
-            receive_base_amount = back_to_one_receive_base;
-            new_r = RState::One;
-        } else {
-            receive_base_amount = back_to_one_receive_base.checked_add(r_one_sell_quote_token(
-                state,
-                pay_quote_amount.checked_sub(back_to_one_pay_quote)?,
-            )?)?;
-            new_r = RState::AboveOne;
+            Ordering::Equal => {
+                receive_base_amount = back_to_one_receive_base;
+                new_r = RState::One;
+            }
+            Ordering::Greater => {
+                receive_base_amount =
+                    back_to_one_receive_base.checked_add(r_one_sell_quote_token(
+                        state,
+                        pay_quote_amount.checked_sub(back_to_one_pay_quote)?,
+                    )?)?;
+                new_r = RState::AboveOne;
+            }
         }
     }
 
