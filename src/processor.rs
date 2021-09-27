@@ -306,6 +306,8 @@ impl Processor {
         let swap_source_info = next_account_info(account_info_iter)?;
         let swap_destination_info = next_account_info(account_info_iter)?;
         let destination_info = next_account_info(account_info_iter)?;
+        let reward_token_info = next_account_info(account_info_iter)?;
+        let reward_mint_info = next_account_info(account_info_iter)?;
         let admin_destination_info = next_account_info(account_info_iter)?;
         let token_program_info = next_account_info(account_info_iter)?;
         let clock_sysvar_info = next_account_info(account_info_iter)?;
@@ -340,6 +342,12 @@ impl Processor {
         }
         if *swap_source_info.key == *swap_destination_info.key {
             return Err(SwapError::InvalidInput.into());
+        }
+        if *reward_mint_info.key != token_swap.deltafi_mint {
+            return Err(SwapError::IncorrectMint.into());
+        }
+        if *reward_token_info.key != token_swap.deltafi_token {
+            return Err(SwapError::IncorrectRewardAccount.into());
         }
 
         let clock = Clock::from_account_info(clock_sysvar_info)?;
@@ -877,6 +885,9 @@ impl PrintProgramError for SwapError {
             SwapError::IncorrectSwapAccount => {
                 msg!("Error: Address of the provided swap token account is incorrect")
             }
+            SwapError::IncorrectRewardAccount => {
+                msg!("Error: Address of the reward token account is incorrect")
+            }
             SwapError::IncorrectMint => {
                 msg!("Error: Address of the provided token mint is incorrect")
             }
@@ -915,11 +926,11 @@ mod tests {
     };
 
     use super::*;
+    use crate::utils::DEFAULT_TOKEN_DECIMALS;
     use crate::{
         instruction::{deposit, swap, withdraw, withdraw_one},
         utils::test_utils::*,
     };
-    use crate::utils::DEFAULT_TOKEN_DECIMALS;
 
     /// Initial amount of pool tokens for swap contract, hard-coded to something
     /// "sensible" given a maximum of u64.
@@ -1452,9 +1463,11 @@ mod tests {
             accounts.admin_fee_b_key = old_admin_fee_key_b;
         }
 
-        // mimatched mint decimals
+        // mismatched mint decimals
         {
             let (bad_mint_key, mut bad_mint_account) =
+                create_mint(&TOKEN_PROGRAM_ID, &accounts.authority_key, 2, None);
+            let (bad_deltafi_mint_key, mut bad_deltafi_mint_account) =
                 create_mint(&TOKEN_PROGRAM_ID, &accounts.authority_key, 2, None);
 
             // Pool mint decimal does not match
@@ -1470,6 +1483,19 @@ mod tests {
 
             accounts.pool_mint_key = old_pool_mint_key;
             accounts.pool_mint_account = old_pool_mint_account;
+
+            let old_deltafi_mint_key = accounts.deltafi_mint_key;
+            let old_deltafi_mint_account = accounts.deltafi_mint_account;
+            accounts.deltafi_mint_key = bad_deltafi_mint_key;
+            accounts.deltafi_mint_account = bad_deltafi_mint_account.clone();
+
+            assert_eq!(
+                Err(SwapError::MismatchedDecimals.into()),
+                accounts.initialize_swap()
+            );
+
+            accounts.deltafi_mint_key = old_deltafi_mint_key;
+            accounts.deltafi_mint_account = old_deltafi_mint_account;
 
             // Token a mint decimal does not match token b decimals
             let (bad_token_key, bad_token_account) = mint_token(
@@ -1499,6 +1525,35 @@ mod tests {
             accounts.token_a_account = old_token_a_account;
             accounts.token_a_mint_key = old_token_a_mint_key;
             accounts.token_a_mint_account = old_token_a_mint_account;
+
+            // Deltafi token does not match with token a decimals
+            let (bad_deltafi_token_key, bad_deltafi_token_account) = mint_token(
+                &TOKEN_PROGRAM_ID,
+                &bad_deltafi_mint_key,
+                &mut bad_deltafi_mint_account,
+                &accounts.authority_key,
+                &user_key,
+                10,
+            );
+
+            let old_deltafi_token_key = accounts.deltafi_token_key;
+            let old_deltafi_token_account = accounts.deltafi_token_account;
+            let old_deltafi_mint_key = accounts.deltafi_mint_key;
+            let old_deltafi_mint_account = accounts.deltafi_mint_account;
+            accounts.deltafi_token_key = bad_deltafi_token_key;
+            accounts.deltafi_token_account = bad_deltafi_token_account;
+            accounts.deltafi_mint_key = bad_deltafi_mint_key;
+            accounts.deltafi_mint_account = bad_deltafi_mint_account;
+
+            assert_eq!(
+                Err(SwapError::MismatchedDecimals.into()),
+                accounts.initialize_swap()
+            );
+
+            accounts.deltafi_token_key = old_deltafi_token_key;
+            accounts.deltafi_token_account = old_deltafi_token_account;
+            accounts.deltafi_mint_key = old_deltafi_mint_key;
+            accounts.deltafi_mint_account = old_deltafi_mint_account;
         }
 
         // create swap with same token A and B
@@ -1546,6 +1601,8 @@ mod tests {
         assert_eq!(swap_info.pool_mint, accounts.pool_mint_key);
         assert_eq!(swap_info.token_a_mint, accounts.token_a_mint_key);
         assert_eq!(swap_info.token_b_mint, accounts.token_b_mint_key);
+        assert_eq!(swap_info.deltafi_token, accounts.deltafi_token_key);
+        assert_eq!(swap_info.deltafi_mint, accounts.deltafi_mint_key);
         assert_eq!(swap_info.admin_fee_key_a, accounts.admin_fee_a_key);
         assert_eq!(swap_info.admin_fee_key_b, accounts.admin_fee_b_key);
         assert_eq!(swap_info.fees, DEFAULT_TEST_FEES);
@@ -2796,6 +2853,8 @@ mod tests {
                         &accounts.token_a_key,
                         &accounts.token_b_key,
                         &token_b_key,
+                        &accounts.deltafi_token_key,
+                        &accounts.deltafi_mint_key,
                         &accounts.admin_fee_b_key,
                         initial_a,
                         minimum_b_amount,
@@ -2808,6 +2867,8 @@ mod tests {
                         &mut accounts.token_a_account,
                         &mut accounts.token_b_account,
                         &mut token_b_account,
+                        &mut accounts.deltafi_token_account,
+                        &mut accounts.deltafi_mint_account,
                         &mut accounts.admin_fee_b_account,
                         &mut Account::default(),
                         &mut clock_account(ZERO_TS),
@@ -2864,6 +2925,8 @@ mod tests {
                         &token_a_key,
                         &token_b_key,
                         &token_b_key,
+                        &accounts.deltafi_token_key,
+                        &accounts.deltafi_mint_key,
                         &accounts.admin_fee_b_key,
                         initial_a,
                         minimum_b_amount,
@@ -2876,6 +2939,8 @@ mod tests {
                         &mut token_a_account,
                         &mut token_b_account.clone(),
                         &mut token_b_account,
+                        &mut accounts.deltafi_token_account,
+                        &mut accounts.deltafi_mint_account,
                         &mut accounts.admin_fee_b_account,
                         &mut Account::default(),
                         &mut clock_account(ZERO_TS),
@@ -2906,6 +2971,8 @@ mod tests {
                         &accounts.token_a_key,
                         &accounts.token_b_key,
                         &token_b_key,
+                        &accounts.deltafi_token_key,
+                        &accounts.deltafi_mint_key,
                         &wrong_admin_key,
                         initial_a,
                         minimum_b_amount,
@@ -2918,6 +2985,8 @@ mod tests {
                         &mut accounts.token_a_account,
                         &mut accounts.token_b_account,
                         &mut token_b_account,
+                        &mut accounts.deltafi_token_account,
+                        &mut accounts.deltafi_mint_account,
                         &mut wrong_admin_account,
                         &mut Account::default(),
                         &mut clock_account(ZERO_TS),
@@ -3000,6 +3069,8 @@ mod tests {
                         &accounts.token_a_key,
                         &accounts.token_b_key,
                         &token_b_key,
+                        &accounts.deltafi_token_key,
+                        &accounts.deltafi_mint_key,
                         &accounts.admin_fee_b_key,
                         initial_a,
                         minimum_b_amount,
@@ -3012,6 +3083,8 @@ mod tests {
                         &mut accounts.token_a_account,
                         &mut accounts.token_b_account,
                         &mut accounts.admin_fee_b_account,
+                        &mut accounts.deltafi_token_account,
+                        &mut accounts.deltafi_mint_account,
                         &mut token_b_account,
                         &mut Account::default(),
                         &mut clock_account(ZERO_TS),
