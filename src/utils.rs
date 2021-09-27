@@ -5,6 +5,18 @@ use spl_token::state::Account;
 
 use crate::error::SwapError;
 
+/// swap directions - sell base
+pub const SWAP_DIRECTION_SELL_BASE: u64 = 0;
+
+/// swap directions - sell quote
+pub const SWAP_DIRECTION_SELL_QUOTE: u64 = 1;
+
+/// Default token decimals
+pub const DEFAULT_TOKEN_DECIMALS: u8 = 6;
+
+/// Default base point with default token decimals
+pub const DEFAULT_BASE_POINT: u64 = 1000000;
+
 /// Calculates the authority id by generating a program address.
 pub fn authority_id(program_id: &Pubkey, my_info: &Pubkey, nonce: u8) -> Result<Pubkey, SwapError> {
     Pubkey::create_program_address(&[&my_info.to_bytes()[..32], &[nonce]], program_id)
@@ -29,6 +41,7 @@ pub mod test_utils {
         state::{Account as SplAccount, Mint as SplMint},
     };
 
+    use super::*;
     use crate::{
         bn::FixedU256, curve::ZERO_TS, fees::Fees, instruction::*, processor::Processor,
         state::SwapInfo,
@@ -62,11 +75,8 @@ pub mod test_utils {
 
     /// Mid Price for testing
     pub fn default_i() -> FixedU256 {
-        FixedU256::new_from_int(100.into(), 18).unwrap()
+        FixedU256::new_from_int(100.into(), DEFAULT_TOKEN_DECIMALS).unwrap()
     }
-
-    /// Default token decimals
-    pub const DEFAULT_TOKEN_DECIMALS: u8 = 6;
 
     pub fn clock_account(ts: i64) -> Account {
         let clock = Clock {
@@ -240,8 +250,8 @@ pub mod test_utils {
                     self.nonce,
                     self.initial_amp_factor,
                     self.fees,
-                    self.k,
-                    self.i,
+                    self.k.inner_u64()?,
+                    self.i.inner_u64()?,
                 )
                 .unwrap(),
                 vec![
@@ -367,25 +377,57 @@ pub mod test_utils {
             swap_direction: u64,
         ) -> ProgramResult {
             // approve moving from user source account
-            do_process_instruction(
-                approve(
-                    &TOKEN_PROGRAM_ID,
-                    &user_source_key,
-                    &self.authority_key,
-                    &user_key,
-                    &[],
-                    amount_in,
-                )
-                .unwrap(),
-                vec![
-                    &mut user_source_account,
-                    &mut Account::default(),
-                    &mut Account::default(),
-                ],
-            )
-            .unwrap();
+            let admin_destination_key;
 
-            let admin_destination_key = self.get_admin_fee_key(swap_destination_key);
+            match swap_direction {
+                SWAP_DIRECTION_SELL_BASE => {
+                    msg!("swap: swap direction sell base");
+                    do_process_instruction(
+                        approve(
+                            &TOKEN_PROGRAM_ID,
+                            &user_source_key,
+                            &self.authority_key,
+                            &user_key,
+                            &[],
+                            amount_in,
+                        )
+                        .unwrap(),
+                        vec![
+                            &mut user_source_account,
+                            &mut Account::default(),
+                            &mut Account::default(),
+                        ],
+                    )
+                    .unwrap();
+
+                    admin_destination_key = self.get_admin_fee_key(swap_destination_key);
+                }
+                SWAP_DIRECTION_SELL_QUOTE => {
+                    msg!("swap: swap direction sell quote");
+                    do_process_instruction(
+                        approve(
+                            &TOKEN_PROGRAM_ID,
+                            &user_destination_key,
+                            &self.authority_key,
+                            &user_key,
+                            &[],
+                            amount_in,
+                        )
+                        .unwrap(),
+                        vec![
+                            &mut user_destination_account,
+                            &mut Account::default(),
+                            &mut Account::default(),
+                        ],
+                    )
+                    .unwrap();
+
+                    admin_destination_key = self.get_admin_fee_key(swap_source_key);
+                }
+                _ => {
+                    admin_destination_key = self.get_admin_fee_key(swap_destination_key);
+                }
+            }
             let mut admin_destination_account =
                 self.get_admin_fee_account(&admin_destination_key).clone();
             let mut swap_source_account = self.get_token_account(swap_source_key).clone();

@@ -12,7 +12,7 @@ use solana_program::{
     sysvar::clock,
 };
 
-use crate::{bn::FixedU256, error::SwapError, fees::Fees};
+use crate::{error::SwapError, fees::Fees};
 
 /// Initialize instruction data
 #[repr(C)]
@@ -24,10 +24,10 @@ pub struct InitializeData {
     pub amp_factor: u64,
     /// Fees
     pub fees: Fees,
-    /// Slope variable
-    pub k: FixedU256,
-    /// mid price
-    pub i: FixedU256,
+    /// Slope variable - real value * 10**6
+    pub k: u64,
+    /// mid price 0 ~ 10**6
+    pub i: u64,
 }
 
 /// Swap instruction data
@@ -441,9 +441,8 @@ impl SwapInstruction {
                 let (amp_factor, rest) = unpack_u64(rest)?;
                 let (fee_byte, rest) = rest.split_at(Fees::LEN);
                 let fees = Fees::unpack_unchecked(fee_byte)?;
-                let (k_byte, rest) = rest.split_at(FixedU256::LEN);
-                let k = FixedU256::unpack_from_slice(k_byte)?;
-                let i = FixedU256::unpack_from_slice(rest)?;
+                let (k, rest) = unpack_u64(rest)?;
+                let (i, _rest) = unpack_u64(rest)?;
                 Self::Initialize(InitializeData {
                     nonce,
                     amp_factor,
@@ -454,8 +453,8 @@ impl SwapInstruction {
             }
             1 => {
                 let (amount_in, rest) = unpack_u64(rest)?;
-                let (minimum_amount_out, _rest) = unpack_u64(rest)?;
-                let (swap_direction, _rest) = unpack_u64(_rest)?;
+                let (minimum_amount_out, rest) = unpack_u64(rest)?;
+                let (swap_direction, _rest) = unpack_u64(rest)?;
                 Self::Swap(SwapData {
                     amount_in,
                     minimum_amount_out,
@@ -511,12 +510,8 @@ impl SwapInstruction {
                 let mut fees_slice = [0u8; Fees::LEN];
                 Pack::pack_into_slice(&fees, &mut fees_slice[..]);
                 buf.extend_from_slice(&fees_slice);
-                let mut packed_k = [0u8; FixedU256::LEN];
-                k.pack_into_slice(&mut packed_k);
-                buf.extend_from_slice(&packed_k);
-                let mut packed_i = [0u8; FixedU256::LEN];
-                i.pack_into_slice(&mut packed_i);
-                buf.extend_from_slice(&packed_i);
+                buf.extend_from_slice(&k.to_le_bytes());
+                buf.extend_from_slice(&i.to_le_bytes());
             }
             Self::Swap(SwapData {
                 amount_in,
@@ -579,8 +574,8 @@ pub fn initialize(
     nonce: u8,
     amp_factor: u64,
     fees: Fees,
-    k: FixedU256,
-    i: FixedU256,
+    k: u64,
+    i: u64,
 ) -> Result<Instruction, ProgramError> {
     let data = SwapInstruction::Initialize(InitializeData {
         nonce,
@@ -826,7 +821,10 @@ pub fn unpack<T>(input: &[u8]) -> Result<&T, ProgramError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::utils::test_utils::{default_i, default_k};
+    use crate::utils::{
+        test_utils::{default_i, default_k},
+        SWAP_DIRECTION_SELL_BASE,
+    };
 
     #[test]
     fn test_admin_instruction_packing() {
@@ -921,8 +919,8 @@ mod tests {
             withdraw_fee_numerator: 7,
             withdraw_fee_denominator: 8,
         };
-        let k = default_k();
-        let i = default_i();
+        let k = default_k().inner_u64().unwrap();
+        let i = default_i().inner_u64().unwrap();
 
         let check = SwapInstruction::Initialize(InitializeData {
             nonce,
@@ -937,12 +935,8 @@ mod tests {
         let mut fees_slice = [0u8; Fees::LEN];
         fees.pack_into_slice(&mut fees_slice[..]);
         expect.extend_from_slice(&fees_slice);
-        let mut packed_k = [0u8; FixedU256::LEN];
-        k.pack_into_slice(&mut packed_k);
-        expect.extend_from_slice(&packed_k);
-        let mut packed_i = [0u8; FixedU256::LEN];
-        i.pack_into_slice(&mut packed_i);
-        expect.extend_from_slice(&packed_i);
+        expect.extend_from_slice(&k.to_le_bytes());
+        expect.extend_from_slice(&i.to_le_bytes());
 
         assert_eq!(packed, expect);
         let unpacked = SwapInstruction::unpack(&expect).unwrap();
@@ -950,7 +944,7 @@ mod tests {
 
         let amount_in: u64 = 2;
         let minimum_amount_out: u64 = 10;
-        let swap_direction: u64 = 0;
+        let swap_direction: u64 = SWAP_DIRECTION_SELL_BASE;
         let check = SwapInstruction::Swap(SwapData {
             amount_in,
             minimum_amount_out,

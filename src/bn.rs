@@ -13,7 +13,7 @@ use solana_program::{
 };
 use uint::construct_uint;
 
-use crate::error::SwapError;
+use crate::{error::SwapError, utils::DEFAULT_TOKEN_DECIMALS};
 
 construct_uint! {
     /// 256-bit unsigned integer.
@@ -125,9 +125,19 @@ impl FixedU256 {
         self.inner
     }
 
+    /// Getter function for inner to u64
+    pub fn inner_u64(&self) -> Result<u64, SwapError> {
+        U256::to_u64(self.inner)
+    }
+
     /// Getter function for base_point
     pub fn base_point(&self) -> U256 {
         self.base_point
+    }
+
+    /// Getter function for base_point
+    pub fn base_point_u64(&self) -> Result<u64, SwapError> {
+        U256::to_u64(self.base_point)
     }
 
     /// Return a new [`FixedU256`] from an integer without fixed-point
@@ -157,27 +167,43 @@ impl FixedU256 {
     // }
 
     /// Returns a new [`FixedU256`] from a value already in a fixed-point representation.
-    pub fn new_from_fixed(value: U256, precision: u8) -> Self {
-        let base_point = U256::from(10).pow(precision.into());
-        Self {
-            inner: value,
-            base_point,
+    pub fn new_from_u64(value: u64) -> Result<Self, ProgramError> {
+        let base_point = U256::from(10).pow(DEFAULT_TOKEN_DECIMALS.into());
+        match U256::from(value).checked_mul(base_point) {
+            Some(v) => Ok(Self {
+                inner: v,
+                base_point,
+            }),
+            None => Err(ProgramError::InvalidArgument),
         }
     }
 
-    /// Return zero = 0, 10**18
+    /// Returns a new [`FixedU256`] from a value already in a fixed-point representation.
+    pub fn new_from_fixed_u64(value: u64) -> Result<Self, ProgramError> {
+        let base_point = U256::from(10).pow(DEFAULT_TOKEN_DECIMALS.into());
+        Ok(Self {
+            inner: U256::from(value),
+            base_point,
+        })
+    }
+
+    /// Returns a new [`FixedU256`] from a value already in a fixed-point representation.
+    pub fn new_from_fixed_u256(value: U256) -> Result<Self, ProgramError> {
+        let base_point = U256::from(10).pow(DEFAULT_TOKEN_DECIMALS.into());
+        Ok(Self {
+            inner: value,
+            base_point,
+        })
+    }
+
+    /// Return zero = 0, 10**6
     pub fn zero() -> Self {
-        Self::new_from_int(U256::zero(), 18).unwrap()
+        Self::new_from_int(U256::zero(), DEFAULT_TOKEN_DECIMALS).unwrap()
     }
 
-    /// Return One = 10**18
+    /// Return One = 10**6
     pub fn one() -> Self {
-        Self::new_from_int(U256::one(), 18).unwrap()
-    }
-
-    /// Return One2 = 10**36
-    pub fn one2() -> Self {
-        Self::new_from_int(U256::from(10).pow(18.into()), 18).unwrap()
+        Self::new_from_int(U256::one(), DEFAULT_TOKEN_DECIMALS).unwrap()
     }
 
     /// Return a new ['FixedU256'] with new base point
@@ -365,6 +391,16 @@ impl FixedU256 {
             .checked_ceil_div(self.base_point)
             .unwrap_or_default()
     }
+
+    /// Returns the non-fixed point representation, rounding up the fractional component - u64.
+    pub fn into_u64_ceil(self) -> Result<u64, SwapError> {
+        U256::to_u64(
+            self.inner
+            .checked_ceil_div(self.base_point)
+            .unwrap_or_default()
+        )
+
+    }
 }
 
 impl Sealed for FixedU256 {}
@@ -394,10 +430,10 @@ mod tests {
 
     #[test]
     fn basic() {
-        let a = FixedU256::new_from_int(2.into(), 0).unwrap();
-        let b = FixedU256::new_from_int(42.into(), 0).unwrap();
-        let c = FixedU256::new_from_int(4.into(), 0).unwrap();
-        let d = FixedU256::new_from_int(2.into(), 18)
+        let a = FixedU256::new(2.into());
+        let b = FixedU256::new(42.into());
+        let c = FixedU256::new(4.into());
+        let d = FixedU256::new_from_int(2.into(), DEFAULT_TOKEN_DECIMALS)
             .unwrap()
             .checked_div_floor(FixedU256::new(10.into()))
             .unwrap();
