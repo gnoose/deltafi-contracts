@@ -28,7 +28,7 @@ pub mod test_utils {
         instruction::{approve, initialize_account, initialize_mint, mint_to},
         state::{Account as SplAccount, Mint as SplMint},
     };
-
+  
     use crate::{
         curve::ZERO_TS, fees::Fees, instruction::*, processor::Processor, state::{SwapInfo, FarmInfo, FarmBaseInfo, FarmingUserInfo},
     };
@@ -871,6 +871,24 @@ pub mod test_utils {
                 admin_fee_deltafi_account,
                 fees,
             }
+        }
+
+        pub fn apply_new_admin_for_farm(&mut self, current_ts: i64) -> ProgramResult {
+            do_process_instruction(
+                apply_new_admin_for_farm(
+                    &SWAP_PROGRAM_ID,
+                    &self.farm_key,
+                    &self.authority_key,
+                    &self.admin_key,
+                )
+                .unwrap(),
+                vec![
+                    &mut self.farm_account,
+                    &mut Account::default(),
+                    &mut self.admin_account,
+                    &mut clock_account(current_ts),
+                ],
+            )
         }
 
         pub fn initialize_farm(

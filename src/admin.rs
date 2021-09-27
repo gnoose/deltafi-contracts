@@ -76,6 +76,10 @@ pub fn process_admin_instruction(
             msg!("Instruction:: SetFarm");
             set_farm(program_id, alloc_point, reward_unit, accounts)
         }
+        AdminInstruction::ApplyNewAdminForFarm => {
+            msg!("Instruction: ApplyNewAdminForFarm");
+            apply_new_admin_for_farm(program_id, accounts)
+        }
     }
 }
 
@@ -396,6 +400,37 @@ pub fn initialize_farm(
     
     FarmBaseInfo::pack(farm_base, &mut farm_base_info.data.borrow_mut())?;
     FarmInfo::pack(farm, &mut farm_info.data.borrow_mut())?;
+    Ok(())
+}
+
+/// Apply new admin for farm (finalize admin transfer)
+fn apply_new_admin_for_farm(
+    program_id: &Pubkey, 
+    accounts: &[AccountInfo]
+) -> ProgramResult {
+    let account_info_iter = &mut accounts.iter();
+    let farm_info = next_account_info(account_info_iter)?;
+    let authority_info = next_account_info(account_info_iter)?;
+    let admin_info = next_account_info(account_info_iter)?;
+    let clock_sysvar_info = next_account_info(account_info_iter)?;
+
+    let mut farm = SwapInfo::unpack(&farm_info.data.borrow())?;
+    is_admin(&farm.admin_key, admin_info)?;
+    if *authority_info.key != utils::authority_id(program_id, farm_info.key, farm.nonce)? {
+        return Err(SwapError::InvalidProgramAddress.into());
+    }
+    if farm.future_admin_deadline == ZERO_TS {
+        return Err(SwapError::NoActiveTransfer.into());
+    }
+    let clock = Clock::from_account_info(clock_sysvar_info)?;
+    if clock.unix_timestamp > farm.future_admin_deadline {
+        return Err(SwapError::AdminDeadlineExceeded.into());
+    }
+
+    farm.admin_key = farm.future_admin_key;
+    farm.future_admin_key = Pubkey::default();
+    farm.future_admin_deadline = ZERO_TS;
+    SwapInfo::pack(farm, &mut farm_info.data.borrow_mut())?;
     Ok(())
 }
 
@@ -1096,13 +1131,13 @@ mod tests {
         {
             let old_authority = accounts.authority_key;
             let (bad_authority_key, _nonce) = Pubkey::find_program_address(
-                &[&accounts.swap_key.to_bytes()[..]],
+                &[&accounts.farm_key.to_bytes()[..]],
                 &TOKEN_PROGRAM_ID,
             );
             accounts.authority_key = bad_authority_key;
             assert_eq!(
                 Err(SwapError::InvalidProgramAddress.into()),
-                accounts.apply_new_admin(ZERO_TS)
+                accounts.apply_new_admin_for_farm(ZERO_TS)
             );
             accounts.authority_key = old_authority;
         }
@@ -1114,7 +1149,7 @@ mod tests {
             accounts.admin_key = fake_admin_key;
             assert_eq!(
                 Err(SwapError::Unauthorized.into()),
-                accounts.apply_new_admin(ZERO_TS)
+                accounts.apply_new_admin_for_farm(ZERO_TS)
             );
             accounts.admin_key = old_admin_key;
         }
@@ -1143,7 +1178,7 @@ mod tests {
         {
             assert_eq!(
                 Err(ProgramError::UninitializedAccount),
-                accounts.apply_new_admin(ZERO_TS)
+                accounts.apply_new_admin_for_farm(ZERO_TS)
             );
         }
 
@@ -1153,13 +1188,13 @@ mod tests {
         {
             let old_authority = accounts.authority_key;
             let (bad_authority_key, _nonce) = Pubkey::find_program_address(
-                &[&accounts.swap_key.to_bytes()[..]],
+                &[&accounts.farm_key.to_bytes()[..]],
                 &TOKEN_PROGRAM_ID,
             );
             accounts.authority_key = bad_authority_key;
             assert_eq!(
                 Err(SwapError::InvalidProgramAddress.into()),
-                accounts.apply_new_admin(ZERO_TS)
+                accounts.apply_new_admin_for_farm(ZERO_TS)
             );
             accounts.authority_key = old_authority;
         }
@@ -1171,7 +1206,7 @@ mod tests {
             accounts.admin_key = fake_admin_key;
             assert_eq!(
                 Err(SwapError::Unauthorized.into()),
-                accounts.apply_new_admin(ZERO_TS)
+                accounts.apply_new_admin_for_farm(ZERO_TS)
             );
             accounts.admin_key = old_admin_key;
         }

@@ -139,6 +139,8 @@ pub enum AdminInstruction {
     InitializeFarm(FarmData),
     /// Set alloc point to farm.
     SetFarm(FarmData),
+    /// TODO: Docs
+    ApplyNewAdminForFarm,
 }
 
 impl AdminInstruction {
@@ -336,6 +338,29 @@ pub fn apply_new_admin(
 
     let accounts = vec![
         AccountMeta::new(*swap_pubkey, true),
+        AccountMeta::new(*authority_pubkey, false),
+        AccountMeta::new(*admin_pubkey, true),
+        AccountMeta::new(clock::id(), false),
+    ];
+
+    Ok(Instruction {
+        program_id: *program_id,
+        accounts,
+        data,
+    })
+}
+
+/// Creates a 'apply_new_admin_for_farm' instruction
+pub fn apply_new_admin_for_farm(
+    program_id: &Pubkey,
+    farm_pubkey: &Pubkey,
+    authority_pubkey: &Pubkey,
+    admin_pubkey: &Pubkey,
+) -> Result<Instruction, ProgramError> {
+    let data = AdminInstruction::ApplyNewAdminForFarm.pack();
+
+    let accounts = vec![
+        AccountMeta::new(*farm_pubkey, true),
         AccountMeta::new(*authority_pubkey, false),
         AccountMeta::new(*admin_pubkey, true),
         AccountMeta::new(clock::id(), false),
