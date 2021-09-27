@@ -877,6 +877,8 @@ impl PrintProgramError for SwapError {
             SwapError::NoActiveTransfer => msg!("Error: No active admin transfer in progress"),
             SwapError::AdminDeadlineExceeded => msg!("Error: Admin transfer deadline exceeded"),
             SwapError::MismatchedDecimals => msg!("Error: Token mints must have same decimals"),
+
+            _ => (),
         }
     }
 }

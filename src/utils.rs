@@ -28,7 +28,7 @@ pub mod test_utils {
         instruction::{approve, initialize_account, initialize_mint, mint_to},
         state::{Account as SplAccount, Mint as SplMint},
     };
-
+  
     use crate::{
         curve::ZERO_TS, fees::Fees, instruction::*, processor::Processor, rewards::Rewards,
         state::SwapInfo,
@@ -799,6 +799,29 @@ pub mod test_utils {
         }
     }
 
+    pub struct FarmAccountInfo {
+        pub nonce: u8,
+        pub authority_key: Pubkey,
+        pub alloc_point: u64,
+        pub reward_unit: u64,
+        pub farm_base_key: Pubkey,
+        pub farm_base_account: Account,
+        pub farm_key: Pubkey,
+        pub farm_account: Account,
+        pub pool_mint_key: Pubkey,
+        pub pool_mint_account: Account,
+        pub pool_token_key: Pubkey,
+        pub pool_token_account: Account,
+        pub token_deltafi_key: Pubkey,
+        pub token_deltafi_account: Account,
+        pub token_deltafi_mint_key: Pubkey,
+        pub token_deltafi_mint_account: Account,
+        pub admin_key: Pubkey,
+        pub admin_account: Account,
+        pub admin_fee_deltafi_key: Pubkey,
+        pub admin_fee_deltafi_account: Account,
+        pub fees: Fees,
+    }
     struct TestSyscallStubs {}
     impl program_stubs::SyscallStubs for TestSyscallStubs {
         fn sol_invoke_signed(

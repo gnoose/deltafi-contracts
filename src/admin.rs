@@ -71,7 +71,10 @@ pub fn process_admin_instruction(
 }
 
 /// Access control for admin only instructions
-fn is_admin(expected_admin_key: &Pubkey, admin_account_info: &AccountInfo) -> ProgramResult {
+fn is_admin(
+    expected_admin_key: &Pubkey, 
+    admin_account_info: &AccountInfo
+) -> ProgramResult {
     if expected_admin_key != admin_account_info.key {
         return Err(SwapError::Unauthorized.into());
     }
@@ -151,7 +154,10 @@ fn ramp_a(
 }
 
 /// Stop ramp a
-fn stop_ramp_a(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
+fn stop_ramp_a(
+    program_id: &Pubkey, 
+    accounts: &[AccountInfo]
+) -> ProgramResult {
     let account_info_iter = &mut accounts.iter();
     let swap_info = next_account_info(account_info_iter)?;
     let authority_info = next_account_info(account_info_iter)?;
@@ -188,7 +194,10 @@ fn stop_ramp_a(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
 }
 
 /// Pause swap
-fn pause(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
+fn pause(
+    program_id: &Pubkey, 
+    accounts: &[AccountInfo]
+) -> ProgramResult {
     let account_info_iter = &mut accounts.iter();
     let swap_info = next_account_info(account_info_iter)?;
     let authority_info = next_account_info(account_info_iter)?;
@@ -206,7 +215,10 @@ fn pause(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
 }
 
 /// Unpause swap
-fn unpause(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
+fn unpause(
+    program_id: &Pubkey, 
+    accounts: &[AccountInfo]
+) -> ProgramResult {
     let account_info_iter = &mut accounts.iter();
     let swap_info = next_account_info(account_info_iter)?;
     let authority_info = next_account_info(account_info_iter)?;
@@ -224,7 +236,10 @@ fn unpause(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
 }
 
 /// Set fee account
-fn set_fee_account(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
+fn set_fee_account(
+    program_id: &Pubkey, 
+    accounts: &[AccountInfo]
+) -> ProgramResult {
     let account_info_iter = &mut accounts.iter();
     let swap_info = next_account_info(account_info_iter)?;
     let authority_info = next_account_info(account_info_iter)?;
@@ -250,7 +265,10 @@ fn set_fee_account(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResu
 }
 
 /// Apply new admin (finalize admin transfer)
-fn apply_new_admin(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
+fn apply_new_admin(
+    program_id: &Pubkey, 
+    accounts: &[AccountInfo]
+) -> ProgramResult {
     let account_info_iter = &mut accounts.iter();
     let swap_info = next_account_info(account_info_iter)?;
     let authority_info = next_account_info(account_info_iter)?;
@@ -278,7 +296,10 @@ fn apply_new_admin(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResu
 }
 
 /// Commit new admin (initiate admin transfer)
-fn commit_new_admin(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
+fn commit_new_admin(
+    program_id: &Pubkey, 
+    accounts: &[AccountInfo]
+) -> ProgramResult {
     let account_info_iter = &mut accounts.iter();
     let swap_info = next_account_info(account_info_iter)?;
     let authority_info = next_account_info(account_info_iter)?;
@@ -308,7 +329,11 @@ fn commit_new_admin(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramRes
 }
 
 /// Set new fees
-fn set_new_fees(program_id: &Pubkey, new_fees: &Fees, accounts: &[AccountInfo]) -> ProgramResult {
+fn set_new_fees(
+    program_id: &Pubkey, 
+    new_fees: &Fees, 
+    accounts: &[AccountInfo]
+) -> ProgramResult {
     let account_info_iter = &mut accounts.iter();
     let swap_info = next_account_info(account_info_iter)?;
     let authority_info = next_account_info(account_info_iter)?;

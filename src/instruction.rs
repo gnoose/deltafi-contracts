@@ -14,6 +14,7 @@ use solana_program::{
 
 use crate::{error::SwapError, fees::Fees, rewards::Rewards};
 
+/// SWAP INSTRUNCTION DATA
 /// Initialize instruction data
 #[repr(C)]
 #[derive(Debug, PartialEq)]
@@ -74,6 +75,8 @@ pub struct WithdrawOneData {
     pub minimum_token_amount: u64,
 }
 
+
+/// ADMIN INSTRUCTION DATA
 /// RampA instruction data
 #[repr(C)]
 #[derive(Clone, Debug, PartialEq)]
@@ -82,6 +85,36 @@ pub struct RampAData {
     pub target_amp: u64,
     /// Unix timestamp to stop ramp
     pub stop_ramp_ts: i64,
+}
+/// Farm Initialize instruction data
+#[repr(C)]
+#[derive(Clone, Debug, PartialEq)]
+pub struct FarmData {
+    /// alloc point for farm
+    pub alloc_point: u64,
+    pub reward_unit: u64,
+}
+
+/// FARM INSTRUCTION DATA
+
+/// Farm Deposit instruction data
+#[repr(C)]
+#[derive(Clone, Debug, PartialEq)]
+pub struct FarmingWithdrawData {
+    /// Amount of pool tokens to withdraw.
+    pub pool_token_amount: u64,
+    /// Minimum amount of LP token to receive, prevents excessive slippage
+    pub min_pool_token_amount: u64,
+}
+
+/// Farm Deposit instruction data
+#[repr(C)]
+#[derive(Clone, Debug, PartialEq)]
+pub struct FarmingDepositData {
+    /// LP token amount to deposit
+    pub pool_token_amount: u64,
+    /// Minimum detafi tokens to mint, prevents excessive slippage
+    pub min_mint_amount: u64,
 }
 
 /// Admin only instructions.
@@ -483,6 +516,7 @@ impl SwapInstruction {
             1 => {
                 let (amount_in, rest) = unpack_u64(rest)?;
                 let (minimum_amount_out, _rest) = unpack_u64(rest)?;
+                let (swap_direction, _rest) = unpack_u64(_rest)?;
                 Self::Swap(SwapData {
                     amount_in,
                     minimum_amount_out,
@@ -516,7 +550,7 @@ impl SwapInstruction {
                     minimum_token_amount,
                 })
             }
-            _ => return Err(SwapError::InvalidInstruction.into()),
+            _ => return Err(SwapError::NoSwapInstruction.into()),
         })
     }
 
@@ -975,6 +1009,7 @@ mod tests {
 
         let amount_in: u64 = 2;
         let minimum_amount_out: u64 = 10;
+        let swap_direction: u64 = 0;
         let check = SwapInstruction::Swap(SwapData {
             amount_in,
             minimum_amount_out,
