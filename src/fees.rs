@@ -1,11 +1,12 @@
 //! Program fees
 
-use crate::bn::U256;
 use arrayref::{array_mut_ref, array_ref, array_refs, mut_array_refs};
 use solana_program::{
     program_error::ProgramError,
     program_pack::{Pack, Sealed},
 };
+
+use crate::bn::U256;
 
 /// Fees struct
 #[repr(C)]
@@ -218,7 +219,7 @@ mod tests {
         assert_eq!(
             fees.normalized_trade_fee(n_coins, trade_amount.into())
                 .unwrap(),
-            expected_normalized_fee.into()
+            expected_normalized_fee
         );
     }
 }

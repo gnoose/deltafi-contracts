@@ -2,11 +2,12 @@
 
 #![cfg(not(feature = "no-entrypoint"))]
 
-use crate::{error::SwapError, processor::Processor};
 use solana_program::{
     account_info::AccountInfo, entrypoint, entrypoint::ProgramResult,
     program_error::PrintProgramError, pubkey::Pubkey,
 };
+
+use crate::{error::SwapError, processor::Processor};
 
 entrypoint!(process_instruction);
 fn process_instruction<'a>(

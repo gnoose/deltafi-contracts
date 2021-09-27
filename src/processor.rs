@@ -1,5 +1,21 @@
 //! Program state processor
 
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use num_traits::FromPrimitive;
+use solana_program::{
+    account_info::{next_account_info, AccountInfo},
+    decode_error::DecodeError,
+    entrypoint::ProgramResult,
+    msg,
+    program::invoke_signed,
+    program_error::{PrintProgramError, ProgramError},
+    program_pack::Pack,
+    pubkey::Pubkey,
+    sysvar::{clock::Clock, Sysvar},
+};
+use spl_token::state::Mint;
+
 use crate::{
     admin::process_admin_instruction,
     bn::U256,
@@ -10,25 +26,11 @@ use crate::{
         AdminInstruction, DepositData, InitializeData, SwapData, SwapInstruction, WithdrawData,
         WithdrawOneData, FarmingInstruction, FarmingDepositData, FarmingWithdrawData
     },
+    oracle::Oracle,
     pool_converter::PoolTokenConverter,
     state::{SwapInfo, FarmBaseInfo, FarmInfo, FarmingUserInfo},
     utils,
 };
-use num_traits::FromPrimitive;
-use solana_program::{
-    account_info::{next_account_info, AccountInfo},
-    decode_error::DecodeError,
-    entrypoint::ProgramResult,
-    msg,
-    program::invoke_signed,
-    program_error::PrintProgramError,
-    program_error::ProgramError,
-    // program_option::COption,
-    program_pack::Pack,
-    pubkey::Pubkey,
-    sysvar::{clock::Clock, Sysvar},
-};
-use spl_token::state::Mint;
 
 /// Program state handler. (and general curve params)
 pub struct Processor {}
@@ -333,6 +335,7 @@ impl Processor {
             admin_fee_key_a: *admin_fee_a_info.key,
             admin_fee_key_b: *admin_fee_b_info.key,
             fees,
+            oracle: Oracle::new(*token_a_info.key, *token_b_info.key),
         };
         SwapInfo::pack(obj, &mut swap_info.data.borrow_mut())?;
         Ok(())
@@ -412,6 +415,23 @@ impl Processor {
         if amount_swapped < minimum_amount_out {
             return Err(SwapError::ExceededSlippage.into());
         }
+
+        let current_timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let token_a = utils::unpack_token_account(&swap_source_info.data.borrow())?;
+        let token_b = utils::unpack_token_account(&destination_info.data.borrow())?;
+        let (price0_cumulative, price1_cumulative, block_timestamp) =
+            token_swap.oracle.current_cumulative_price(
+                U256::from(token_a.amount),
+                U256::from(token_b.amount),
+                current_timestamp,
+            );
+        let mut swap = token_swap;
+
+        swap.oracle
+            .update(price0_cumulative, price1_cumulative, block_timestamp);
 
         Self::token_transfer(
             swap_info.key,
@@ -1361,15 +1381,16 @@ impl PrintProgramError for SwapError {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::{
-        instruction::{deposit, swap, withdraw, withdraw_one, farm_deposit, farm_withdraw, farm_emergency_withdraw},
-        utils::test_utils::*,
-    };
     use solana_sdk::account::Account;
     use spl_token::{
         error::TokenError,
         instruction::{approve, mint_to, revoke, set_authority, AuthorityType},
+    };
+
+    use super::*;
+    use crate::{
+        instruction::{deposit, swap, withdraw, withdraw_one, farm_deposit, farm_withdraw, farm_emergency_withdraw},
+        utils::test_utils::*,
     };
 
     /// Initial amount of pool tokens for swap contract, hard-coded to something
@@ -1829,7 +1850,7 @@ mod tests {
             // wrong admin_fee_key_b
             let old_admin_fee_account_b = accounts.admin_fee_b_account;
             let old_admin_fee_key_b = accounts.admin_fee_b_key;
-            accounts.admin_fee_b_account = wrong_admin_fee_account.clone();
+            accounts.admin_fee_b_account = wrong_admin_fee_account;
             accounts.admin_fee_b_key = wrong_admin_fee_key;
 
             assert_eq!(
@@ -1877,7 +1898,7 @@ mod tests {
             accounts.token_a_key = bad_token_key;
             accounts.token_a_account = bad_token_account;
             accounts.token_a_mint_key = bad_mint_key;
-            accounts.token_a_mint_account = bad_mint_account.clone();
+            accounts.token_a_mint_account = bad_mint_account;
 
             assert_eq!(
                 Err(SwapError::MismatchedDecimals.into()),
@@ -1920,8 +1941,8 @@ mod tests {
             );
         }
         let swap_info = SwapInfo::unpack(&accounts.swap_account.data).unwrap();
-        assert_eq!(swap_info.is_initialized, true);
-        assert_eq!(swap_info.is_paused, false);
+        assert!(swap_info.is_initialized);
+        assert!(!swap_info.is_paused);
         assert_eq!(swap_info.nonce, accounts.nonce);
         assert_eq!(swap_info.initial_amp_factor, amp_factor);
         assert_eq!(swap_info.target_amp_factor, amp_factor);
@@ -2262,7 +2283,7 @@ mod tests {
             let old_a_key = accounts.token_a_key;
             let old_a_account = accounts.token_a_account;
 
-            accounts.token_a_key = token_a_key.clone();
+            accounts.token_a_key = token_a_key;
             accounts.token_a_account = token_a_account.clone();
 
             // wrong swap token a account
@@ -2288,7 +2309,7 @@ mod tests {
             let old_b_key = accounts.token_b_key;
             let old_b_account = accounts.token_b_account;
 
-            accounts.token_b_key = token_b_key.clone();
+            accounts.token_b_key = token_b_key;
             accounts.token_b_account = token_b_account.clone();
 
             // wrong swap token b account
@@ -2857,7 +2878,7 @@ mod tests {
             let old_a_key = accounts.token_a_key;
             let old_a_account = accounts.token_a_account;
 
-            accounts.token_a_key = token_a_key.clone();
+            accounts.token_a_key = token_a_key;
             accounts.token_a_account = token_a_account.clone();
 
             // wrong swap token a account
@@ -2883,7 +2904,7 @@ mod tests {
             let old_b_key = accounts.token_b_key;
             let old_b_account = accounts.token_b_account;
 
-            accounts.token_b_key = token_b_key.clone();
+            accounts.token_b_key = token_b_key;
             accounts.token_b_account = token_b_account.clone();
 
             // wrong swap token b account
@@ -3095,8 +3116,8 @@ mod tests {
         let initial_b = token_b_amount / 5;
         let minimum_b_amount = initial_b / 2;
 
-        let swap_token_a_key = accounts.token_a_key.clone();
-        let swap_token_b_key = accounts.token_b_key.clone();
+        let swap_token_a_key = accounts.token_a_key;
+        let swap_token_b_key = accounts.token_b_key;
 
         // swap not initialized
         {
@@ -3730,7 +3751,7 @@ mod tests {
 
             let old_token_b_key = accounts.token_b_key;
             let old_token_b_account = accounts.token_b_account;
-            accounts.token_b_key = accounts.token_a_key.clone();
+            accounts.token_b_key = accounts.token_a_key;
             accounts.token_b_account = accounts.token_a_account.clone();
 
             assert_eq!(
@@ -3784,7 +3805,7 @@ mod tests {
 
             let old_token_a_key = accounts.token_a_key;
             let old_token_a_account = accounts.token_a_account;
-            accounts.token_a_key = foreign_token_key.clone();
+            accounts.token_a_key = foreign_token_key;
             accounts.token_a_account = foreign_token_account.clone();
 
             assert_eq!(
@@ -3805,8 +3826,8 @@ mod tests {
 
             let old_token_b_key = accounts.token_b_key;
             let old_token_b_account = accounts.token_b_account;
-            accounts.token_b_key = foreign_token_key.clone();
-            accounts.token_b_account = foreign_token_account.clone();
+            accounts.token_b_key = foreign_token_key;
+            accounts.token_b_account = foreign_token_account;
 
             assert_eq!(
                 Err(SwapError::IncorrectSwapAccount.into()),
