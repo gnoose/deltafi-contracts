@@ -145,9 +145,9 @@ impl Processor {
         let token_b_mint_info = next_account_info(account_info_iter)?;
         let token_b_info = next_account_info(account_info_iter)?;
         let pool_mint_info = next_account_info(account_info_iter)?;
-        let deltafi_token_info = next_account_info(account_info_iter)?;
-        let deltafi_mint_info = next_account_info(account_info_iter)?;
         let destination_info = next_account_info(account_info_iter)?; // Destination account to mint LP tokens to
+        let deltafi_mint_info = next_account_info(account_info_iter)?;
+        let deltafi_token_info = next_account_info(account_info_iter)?;
         let token_program_info = next_account_info(account_info_iter)?;
 
         if !(MIN_AMP..=MAX_AMP).contains(&amp_factor) {

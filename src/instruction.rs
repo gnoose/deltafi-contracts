@@ -629,6 +629,8 @@ pub fn initialize(
     token_b_pubkey: &Pubkey,
     pool_mint_pubkey: &Pubkey,
     destination_pubkey: &Pubkey, // Desintation to mint pool tokens for bootstrapper
+    deltafi_mint_pubkey: &Pubkey,
+    deltafi_token_pubkey: &Pubkey,
     nonce: u8,
     amp_factor: u64,
     fees: Fees,
@@ -654,6 +656,8 @@ pub fn initialize(
         AccountMeta::new(*token_b_pubkey, false),
         AccountMeta::new(*pool_mint_pubkey, false),
         AccountMeta::new(*destination_pubkey, false),
+        AccountMeta::new(*deltafi_mint_pubkey, false),
+        AccountMeta::new(*deltafi_token_pubkey, false),
         AccountMeta::new(*pool_token_program_id, false),
     ];
 
