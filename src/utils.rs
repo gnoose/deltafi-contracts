@@ -5,6 +5,9 @@ use spl_token::state::Account;
 
 use crate::error::SwapError;
 
+/// Default token decimals
+pub const DEFAULT_TOKEN_DECIMALS: u8 = 6;
+
 /// Calculates the authority id by generating a program address.
 pub fn authority_id(program_id: &Pubkey, my_info: &Pubkey, nonce: u8) -> Result<Pubkey, SwapError> {
     Pubkey::create_program_address(&[&my_info.to_bytes()[..32], &[nonce]], program_id)
@@ -29,6 +32,7 @@ pub mod test_utils {
         state::{Account as SplAccount, Mint as SplMint},
     };
 
+    use super::*;
     use crate::{
         bn::FixedU256, curve::ZERO_TS, fees::Fees, instruction::*, processor::Processor,
         rewards::Rewards, state::SwapInfo,
@@ -57,9 +61,6 @@ pub mod test_utils {
         trade_reward_denominator: 2,
     };
 
-    /// Default token decimals
-    pub const DEFAULT_TOKEN_DECIMALS: u8 = 6;
-
     /// Slope Value for testing
     pub fn default_k() -> FixedU256 {
         FixedU256::one()
@@ -71,7 +72,7 @@ pub mod test_utils {
 
     /// Mid Price for testing
     pub fn default_i() -> FixedU256 {
-        FixedU256::new_from_int(100.into(), 18).unwrap()
+        FixedU256::new_from_int(100.into(), DEFAULT_TOKEN_DECIMALS).unwrap()
     }
 
     pub fn clock_account(ts: i64) -> Account {
@@ -417,8 +418,6 @@ pub mod test_utils {
                     &swap_source_key,
                     &swap_destination_key,
                     &user_destination_key,
-                    &self.deltafi_token_key,
-                    &self.deltafi_mint_key,
                     &admin_destination_key,
                     amount_in,
                     minimum_amount_out,
@@ -431,8 +430,6 @@ pub mod test_utils {
                     &mut swap_source_account,
                     &mut swap_destination_account,
                     &mut user_destination_account,
-                    &mut self.deltafi_token_account,
-                    &mut self.deltafi_mint_account,
                     &mut admin_destination_account,
                     &mut Account::default(),
                     &mut clock_account(ZERO_TS),

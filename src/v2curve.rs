@@ -315,7 +315,10 @@ mod tests {
     use crate::{
         bn::{FixedU256, U256},
         math2::solve_quadratic_function_for_target,
-        utils::test_utils::{default_i, default_k},
+        utils::{
+            test_utils::{default_i, default_k},
+            DEFAULT_TOKEN_DECIMALS,
+        },
         v2curve::{
             adjusted_target, get_mid_price, r_above_sell_base_token, r_above_sell_quote_token,
             r_below_sell_base_token, r_below_sell_quote_token, r_one_sell_base_token, PMMState,
@@ -328,14 +331,18 @@ mod tests {
         let k: FixedU256 = default_k();
         let i: FixedU256 = default_i();
         let mut r = RState::One;
-        let base_balance: FixedU256 = FixedU256::new_from_int(100.into(), 18).unwrap();
-        let quote_balance: FixedU256 = FixedU256::new_from_int(10000.into(), 18).unwrap();
+        let base_balance: FixedU256 =
+            FixedU256::new_from_int(100.into(), DEFAULT_TOKEN_DECIMALS).unwrap();
+        let quote_balance: FixedU256 =
+            FixedU256::new_from_int(10000.into(), DEFAULT_TOKEN_DECIMALS).unwrap();
         let base_reserve = base_balance;
         let quote_reserve = quote_balance;
-        let base_target: FixedU256 = FixedU256::new_from_int(100.into(), 18).unwrap();
-        let quote_target: FixedU256 = FixedU256::new_from_int(10000.into(), 18).unwrap();
+        let base_target: FixedU256 =
+            FixedU256::new_from_int(100.into(), DEFAULT_TOKEN_DECIMALS).unwrap();
+        let quote_target: FixedU256 =
+            FixedU256::new_from_int(10000.into(), DEFAULT_TOKEN_DECIMALS).unwrap();
 
-        let amount: FixedU256 = FixedU256::new_from_int(10.into(), 18).unwrap();
+        let amount: FixedU256 = FixedU256::new_from_int(10.into(), DEFAULT_TOKEN_DECIMALS).unwrap();
 
         // ============ R = 0 case =============
         let mut state = PMMState::new(
@@ -388,7 +395,7 @@ mod tests {
 
         assert_eq!(
             r_above_sell_base_token(state, amount).unwrap(),
-            FixedU256::new_from_int(950.into(), 18).unwrap()
+            FixedU256::new_from_int(950.into(), DEFAULT_TOKEN_DECIMALS).unwrap()
         );
 
         assert_eq!(
@@ -415,7 +422,7 @@ mod tests {
 
         assert_eq!(
             r_below_sell_base_token(state, amount).unwrap(),
-            FixedU256::new_from_int(909.into(), 18).unwrap()
+            FixedU256::new_from_int(909.into(), DEFAULT_TOKEN_DECIMALS).unwrap()
         );
 
         assert_eq!(
@@ -452,7 +459,7 @@ mod tests {
         adjusted_target(&mut new_state).unwrap();
         assert_eq!(new_state, state);
 
-        let value = FixedU256::new_from_int(1000.into(), 18)
+        let value = FixedU256::new_from_int(1000.into(), DEFAULT_TOKEN_DECIMALS)
             .unwrap()
             .checked_div_floor(FixedU256::new(10.into()))
             .unwrap();
