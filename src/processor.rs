@@ -307,8 +307,6 @@ impl Processor {
         let swap_destination_info = next_account_info(account_info_iter)?;
         let destination_info = next_account_info(account_info_iter)?;
         let admin_destination_info = next_account_info(account_info_iter)?;
-        let reward_mint_info = next_account_info(account_info_iter)?;
-        let reward_destination_info = next_account_info(account_info_iter)?;
         let token_program_info = next_account_info(account_info_iter)?;
         let clock_sysvar_info = next_account_info(account_info_iter)?;
 
@@ -342,12 +340,6 @@ impl Processor {
         }
         if *swap_source_info.key == *swap_destination_info.key {
             return Err(SwapError::InvalidInput.into());
-        }
-        if *reward_destination_info.key != token_swap.deltafi_token {
-            return Err(SwapError::IncorrectSwapAccount.into());
-        }
-        if *reward_mint_info.key != token_swap.deltafi_mint {
-            return Err(SwapError::IncorrectMint.into());
         }
 
         let clock = Clock::from_account_info(clock_sysvar_info)?;
@@ -1117,7 +1109,7 @@ mod tests {
                 &mut accounts.deltafi_mint_account,
                 &accounts.authority_key,
                 &accounts.authority_key,
-                0
+                0,
             );
             let old_account = accounts.deltafi_token_account;
             accounts.deltafi_token_account = deltafi_token_account;
