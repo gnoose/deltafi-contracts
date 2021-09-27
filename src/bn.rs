@@ -6,9 +6,14 @@
 
 use std::{cmp::Ordering, convert::TryInto};
 
+use arrayref::{array_mut_ref, array_ref, array_refs, mut_array_refs};
+use solana_program::{
+    program_error::ProgramError,
+    program_pack::{Pack, Sealed},
+};
 use uint::construct_uint;
 
-use crate::error::SwapError;
+use crate::{error::SwapError, utils::DEFAULT_TOKEN_DECIMALS};
 
 construct_uint! {
     /// 256-bit unsigned integer.
@@ -27,65 +32,132 @@ impl U256 {
     }
 
     /// div with ceil
-    pub fn checked_ceil_div(self, other: Self) -> Option<Self> {
+    pub fn checked_ceil_div(&self, other: Self) -> Result<Self, ProgramError> {
         if other.is_zero() {
-            return None;
+            return Err(ProgramError::InvalidArgument);
         }
         let (quotient, rem) = self.div_mod(other);
         if rem.is_zero() {
-            Some(quotient)
+            Ok(quotient)
         } else {
-            quotient.checked_add(1.into())
+            Ok(quotient.checked_add(1.into()).unwrap())
+        }
+    }
+
+    /// div with floor
+    pub fn checked_floor_div(&self, other: Self) -> Result<Self, ProgramError> {
+        if other.is_zero() {
+            return Err(ProgramError::InvalidArgument);
+        }
+        let (quotient, _rem) = self.div_mod(other);
+        Ok(quotient)
+    }
+
+    /// mul with ProgramError
+    pub fn checked_bn_mul(&self, other: Self) -> Result<Self, ProgramError> {
+        match self.checked_mul(other) {
+            Some(v) => Ok(v),
+            None => Err(ProgramError::InvalidArgument),
+        }
+    }
+
+    /// add with ProgramError
+    pub fn checked_bn_add(&self, other: Self) -> Result<Self, ProgramError> {
+        match self.checked_add(other) {
+            Some(v) => Ok(v),
+            None => Err(ProgramError::InvalidArgument),
+        }
+    }
+
+    /// sub with ProgramError
+    pub fn checked_bn_sub(&self, other: Self) -> Result<Self, ProgramError> {
+        match self.checked_sub(other) {
+            Some(v) => Ok(v),
+            None => Err(ProgramError::InvalidArgument),
         }
     }
 
     /// calculate sqrt
-    pub fn sqrt(&self) -> Option<U256> {
+    pub fn sqrt(&self) -> Result<U256, ProgramError> {
         let two: U256 = 2.into();
 
-        let mut z = self.checked_add(U256::one())?.checked_div(two)?;
+        let mut z = self
+            .checked_add(U256::one())
+            .unwrap()
+            .checked_floor_div(two)?;
 
         let mut y = *self;
 
         while z < y {
             y = z;
-            z = self.checked_div(z)?.checked_add(z)?.checked_div(two)?;
+            z = self
+                .checked_floor_div(z)?
+                .checked_bn_add(z)?
+                .checked_floor_div(two)?;
         }
 
-        Some(y)
+        Ok(y)
     }
 }
 
 /// FixedU256 struct
 #[derive(Clone, Copy, Debug, PartialEq, Ord, PartialOrd, Eq)]
 pub struct FixedU256 {
+    /// 10**precision * value
     inner: U256,
+
     /// 10**precision
     base_point: U256,
 }
 
 impl Default for FixedU256 {
     fn default() -> Self {
-        Self::new_from_int(U256::zero(), 18).unwrap()
+        Self {
+            inner: U256::zero(),
+            base_point: U256::zero(),
+        }
     }
 }
 
 impl FixedU256 {
+    /// Getter function for inner
+    pub fn inner(&self) -> U256 {
+        self.inner
+    }
+
+    /// Getter function for inner to u64
+    pub fn inner_u64(&self) -> Result<u64, SwapError> {
+        U256::to_u64(self.inner)
+    }
+
+    /// Getter function for base_point
+    pub fn base_point(&self) -> U256 {
+        self.base_point
+    }
+
+    /// Getter function for base_point
+    pub fn base_point_u64(&self) -> Result<u64, SwapError> {
+        U256::to_u64(self.base_point)
+    }
+
     /// Return a new [`FixedU256`] from an integer without fixed-point
-    pub fn new(value: U256) -> Option<Self> {
-        Some(Self {
+    pub fn new(value: U256) -> Self {
+        Self {
             inner: value,
             base_point: U256::one(),
-        })
+        }
     }
 
     /// Returns a new [`FixedU256`] from an integer not in fixed-point representation.
-    pub fn new_from_int(value: U256, precision: u8) -> Option<Self> {
+    pub fn new_from_int(value: U256, precision: u8) -> Result<Self, ProgramError> {
         let base_point = U256::from(10).pow(precision.into());
-        Some(Self {
-            inner: value.checked_mul(base_point)?,
-            base_point,
-        })
+        match value.checked_mul(base_point) {
+            Some(v) => Ok(Self {
+                inner: v,
+                base_point,
+            }),
+            None => Err(ProgramError::InvalidArgument),
+        }
     }
 
     /// Returns a new ['FixedU256'] from a value in float
@@ -95,23 +167,49 @@ impl FixedU256 {
     // }
 
     /// Returns a new [`FixedU256`] from a value already in a fixed-point representation.
-    pub fn new_from_fixed(value: U256, precision: u8) -> Self {
-        let base_point = U256::from(10).pow(precision.into());
-        Self {
-            inner: value,
-            base_point,
+    pub fn new_from_u64(value: u64) -> Result<Self, ProgramError> {
+        let base_point = U256::from(10).pow(DEFAULT_TOKEN_DECIMALS.into());
+        match U256::from(value).checked_mul(base_point) {
+            Some(v) => Ok(Self {
+                inner: v,
+                base_point,
+            }),
+            None => Err(ProgramError::InvalidArgument),
         }
     }
 
-    /// Return One = 10**18
+    /// Returns a new [`FixedU256`] from a value already in a fixed-point representation.
+    pub fn new_from_fixed_u64(value: u64) -> Result<Self, ProgramError> {
+        let base_point = U256::from(10).pow(DEFAULT_TOKEN_DECIMALS.into());
+        Ok(Self {
+            inner: U256::from(value),
+            base_point,
+        })
+    }
+
+    /// Returns a new [`FixedU256`] from a value already in a fixed-point representation.
+    pub fn new_from_fixed_u256(value: U256) -> Result<Self, ProgramError> {
+        let base_point = U256::from(10).pow(DEFAULT_TOKEN_DECIMALS.into());
+        Ok(Self {
+            inner: value,
+            base_point,
+        })
+    }
+
+    /// Return zero = 0, 10**6
+    pub fn zero() -> Self {
+        Self::new_from_int(U256::zero(), DEFAULT_TOKEN_DECIMALS).unwrap()
+    }
+
+    /// Return One = 10**6
     pub fn one() -> Self {
-        Self::new_from_int(U256::one(), 18).unwrap()
+        Self::new_from_int(U256::one(), DEFAULT_TOKEN_DECIMALS).unwrap()
     }
 
     /// Return a new ['FixedU256'] with new base point
-    pub fn take_and_scale(&self, new_base_point: U256) -> Option<FixedU256> {
+    pub fn take_and_scale(&self, new_base_point: U256) -> Result<FixedU256, ProgramError> {
         if self.inner.is_zero() {
-            return Some(Self {
+            return Ok(Self {
                 inner: U256::zero(),
                 base_point: new_base_point,
             });
@@ -121,9 +219,8 @@ impl FixedU256 {
             Ordering::Greater => {
                 let value = self
                     .inner
-                    .checked_mul(new_base_point.checked_div(self.base_point)?)?;
-
-                Some(Self {
+                    .checked_bn_mul(new_base_point.checked_floor_div(self.base_point)?)?;
+                Ok(Self {
                     inner: value,
                     base_point: new_base_point,
                 })
@@ -131,51 +228,46 @@ impl FixedU256 {
             Ordering::Less => {
                 let value = self
                     .inner
-                    .checked_ceil_div(self.base_point.checked_div(new_base_point)?)?;
+                    .checked_ceil_div(self.base_point.checked_floor_div(new_base_point)?)?;
 
-                Some(Self {
+                Ok(Self {
                     inner: value,
                     base_point: new_base_point,
                 })
             }
-            Ordering::Equal => Some(*self),
+            Ordering::Equal => Ok(*self),
         }
     }
 
     /// Returns Square Roof of `self`
-    pub fn sqrt(&self) -> Option<Self> {
+    pub fn sqrt(&self) -> Result<Self, ProgramError> {
         let mut x = self.inner.sqrt()?;
-        x = x.checked_mul(self.base_point.sqrt()?)?;
+        x = x.checked_bn_mul(self.base_point.sqrt()?)?;
 
-        Some(Self {
+        Ok(Self {
             inner: x,
             base_point: self.base_point,
         })
     }
 
     /// Returns 'self - other', rounded up after 'precision' decimal places, use self's precision.
-    pub fn checked_sub(&self, other: Self) -> Option<Self> {
+    pub fn checked_sub(&self, other: Self) -> Result<Self, ProgramError> {
         match self.base_point.cmp(&other.base_point) {
-            Ordering::Equal => {
-                let value = self.inner.checked_sub(other.inner)?;
-                Some(Self {
-                    inner: value,
-                    base_point: self.base_point,
-                })
-            }
+            Ordering::Equal => Ok(Self {
+                inner: self.inner.checked_bn_sub(other.inner)?,
+                base_point: self.base_point,
+            }),
             Ordering::Less => {
                 let new_other = other.take_and_scale(self.base_point)?;
-                let value = self.inner.checked_sub(new_other.inner)?;
-                Some(Self {
-                    inner: value,
+                Ok(Self {
+                    inner: self.inner.checked_bn_sub(new_other.inner)?,
                     base_point: self.base_point,
                 })
             }
             Ordering::Greater => {
                 let new_other = other.take_and_scale(self.base_point)?;
-                let value = self.inner.checked_sub(new_other.inner)?;
-                Some(Self {
-                    inner: value,
+                Ok(Self {
+                    inner: self.inner.checked_bn_sub(new_other.inner)?,
                     base_point: self.base_point,
                 })
             }
@@ -183,28 +275,23 @@ impl FixedU256 {
     }
 
     /// Returns 'self + other', rounded up after 'precision' decimal places, use self's precision.
-    pub fn checked_add(&self, other: Self) -> Option<Self> {
+    pub fn checked_add(&self, other: Self) -> Result<Self, ProgramError> {
         match self.base_point.cmp(&other.base_point) {
-            Ordering::Equal => {
-                let value = self.inner.checked_add(other.inner)?;
-                Some(Self {
-                    inner: value,
-                    base_point: self.base_point,
-                })
-            }
+            Ordering::Equal => Ok(Self {
+                inner: self.inner.checked_bn_add(other.inner)?,
+                base_point: self.base_point,
+            }),
             Ordering::Less => {
                 let new_other = other.take_and_scale(self.base_point)?;
-                let value = self.inner.checked_add(new_other.inner)?;
-                Some(Self {
-                    inner: value,
+                Ok(Self {
+                    inner: self.inner.checked_bn_add(new_other.inner)?,
                     base_point: self.base_point,
                 })
             }
             Ordering::Greater => {
                 let new_other = other.take_and_scale(self.base_point)?;
-                let value = self.inner.checked_add(new_other.inner)?;
-                Some(Self {
-                    inner: value,
+                Ok(Self {
+                    inner: self.inner.checked_bn_add(new_other.inner)?,
                     base_point: self.base_point,
                 })
             }
@@ -212,23 +299,25 @@ impl FixedU256 {
     }
 
     /// Returns `self * other`, rounded up after `precision` decimal places.
-    pub fn checked_mul_ceil(&self, other: Self) -> Option<Self> {
-        Some(Self {
-            inner: self
-                .inner
-                .checked_mul(other.inner)?
-                .checked_ceil_div(other.base_point)?,
+    pub fn checked_mul_ceil(&self, other: Self) -> Result<Self, ProgramError> {
+        let value = self
+            .inner
+            .checked_bn_mul(other.inner)?
+            .checked_ceil_div(other.base_point)?;
+        Ok(Self {
+            inner: value,
             base_point: self.base_point,
         })
     }
 
     /// Returns `self * other`, rounded down after `precision` decimal places.
-    pub fn checked_mul_floor(&self, other: Self) -> Option<Self> {
-        Some(Self {
-            inner: self
-                .inner
-                .checked_mul(other.inner)?
-                .checked_div(other.base_point)?,
+    pub fn checked_mul_floor(&self, other: Self) -> Result<Self, ProgramError> {
+        let value = self
+            .inner
+            .checked_bn_mul(other.inner)?
+            .checked_floor_div(other.base_point)?;
+        Ok(Self {
+            inner: value,
             base_point: self.base_point,
         })
     }
@@ -236,49 +325,59 @@ impl FixedU256 {
     /// Returns `self / other`, rounded up after `precision` decimal places.
     ///
     /// The output precision will be the same as `self`.
-    pub fn checked_div_ceil(&self, other: Self) -> Option<Self> {
+    pub fn checked_div_ceil(&self, other: Self) -> Result<Self, ProgramError> {
         let new_other = other.take_and_scale(self.base_point)?;
+        let value;
         if self.inner >= new_other.inner {
-            Some(Self {
-                inner: self
-                    .inner
-                    .checked_ceil_div(other.inner)?
-                    .checked_mul(other.base_point)?,
-                base_point: self.base_point,
-            })
+            value = self
+                .inner
+                .checked_ceil_div(other.inner)?
+                .checked_bn_mul(other.base_point)?;
         } else {
-            Some(Self {
-                inner: self
-                    .inner
-                    .checked_mul(other.base_point)?
-                    .checked_ceil_div(other.inner)?,
-                base_point: self.base_point,
-            })
+            value = self
+                .inner
+                .checked_bn_mul(other.base_point)?
+                .checked_ceil_div(other.inner)?;
         }
+
+        Ok(Self {
+            inner: value,
+            base_point: self.base_point,
+        })
     }
 
     /// Returns `self / other`, rounded down after `precision` decimal places.
     ///
     /// The output precision will be the same as `self`.
-    pub fn checked_div_floor(&self, other: Self) -> Option<Self> {
+    pub fn checked_div_floor(&self, other: Self) -> Result<Self, ProgramError> {
         let new_other = other.take_and_scale(self.base_point)?;
+        let value;
         if self.inner >= new_other.inner {
-            Some(Self {
-                inner: self
-                    .inner
-                    .checked_div(other.inner)?
-                    .checked_mul(other.base_point)?,
-                base_point: self.base_point,
-            })
+            value = self
+                .inner
+                .checked_floor_div(other.inner)?
+                .checked_bn_mul(other.base_point)?;
         } else {
-            Some(Self {
-                inner: self
-                    .inner
-                    .checked_mul(other.base_point)?
-                    .checked_div(other.inner)?,
-                base_point: self.base_point,
-            })
+            value = self
+                .inner
+                .checked_bn_mul(other.base_point)?
+                .checked_floor_div(other.inner)?;
         }
+
+        Ok(Self {
+            inner: value,
+            base_point: self.base_point,
+        })
+    }
+
+    /// calculate 1/target - floor
+    pub fn reciprocal_floor(target: FixedU256) -> Result<Self, ProgramError> {
+        FixedU256::one().checked_div_floor(target)
+    }
+
+    /// calculate 1/target - ceil
+    pub fn reciprocal_ceil(target: FixedU256) -> Result<Self, ProgramError> {
+        FixedU256::one().checked_div_ceil(target)
     }
 
     /// Returns the non-fixed point representation, discarding the fractional component.
@@ -292,6 +391,37 @@ impl FixedU256 {
             .checked_ceil_div(self.base_point)
             .unwrap_or_default()
     }
+
+    /// Returns the non-fixed point representation, rounding up the fractional component - u64.
+    pub fn into_u64_ceil(self) -> Result<u64, SwapError> {
+        U256::to_u64(
+            self.inner
+            .checked_ceil_div(self.base_point)
+            .unwrap_or_default()
+        )
+
+    }
+}
+
+impl Sealed for FixedU256 {}
+impl Pack for FixedU256 {
+    const LEN: usize = 64;
+    fn unpack_from_slice(input: &[u8]) -> Result<Self, ProgramError> {
+        let input = array_ref![input, 0, 64];
+        #[allow(clippy::ptr_offset_with_cast)]
+        let (inner, base_point) = array_refs![input, 32, 32];
+        Ok(Self {
+            inner: U256::from_little_endian(inner),
+            base_point: U256::from_little_endian(base_point),
+        })
+    }
+
+    fn pack_into_slice(&self, output: &mut [u8]) {
+        let output = array_mut_ref![output, 0, 64];
+        let (inner, base_point) = mut_array_refs![output, 32, 32];
+        self.inner.to_little_endian(inner);
+        self.base_point.to_little_endian(base_point);
+    }
 }
 
 #[cfg(test)]
@@ -300,9 +430,21 @@ mod tests {
 
     #[test]
     fn basic() {
-        let a = FixedU256::new_from_int(2.into(), 0).unwrap();
-        let b = FixedU256::new_from_int(42.into(), 0).unwrap();
-        let c = FixedU256::new_from_int(4.into(), 0).unwrap();
+        let a = FixedU256::new(2.into());
+        let b = FixedU256::new(42.into());
+        let c = FixedU256::new(4.into());
+        let d = FixedU256::new_from_int(2.into(), DEFAULT_TOKEN_DECIMALS)
+            .unwrap()
+            .checked_div_floor(FixedU256::new(10.into()))
+            .unwrap();
+        assert_eq!(
+            FixedU256::reciprocal_floor(FixedU256::new(5.into())).unwrap(),
+            d
+        );
+        assert_eq!(
+            FixedU256::reciprocal_ceil(FixedU256::new(5.into())).unwrap(),
+            d
+        );
         assert_eq!(b.checked_mul_ceil(a).unwrap().into_u256_ceil(), 84.into());
         assert_eq!(c.sqrt().unwrap().into_u256_ceil(), 2.into());
         assert_eq!(b.checked_sub(c).unwrap().into_u256_ceil(), 38.into());
@@ -311,7 +453,7 @@ mod tests {
             FixedU256::one().checked_add(c).unwrap().into_u256_ceil(),
             5.into()
         );
-        assert_eq!(FixedU256::new(4.into()).unwrap().into_u256_ceil(), 4.into());
+        assert_eq!(FixedU256::new(4.into()).into_u256_ceil(), 4.into());
         assert_eq!(
             b.take_and_scale(100.into()).unwrap().into_u256_ceil(),
             42.into()
