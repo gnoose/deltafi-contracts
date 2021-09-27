@@ -281,36 +281,38 @@ pub fn solve_quadratic_function_for_trade(
 mod tests {
     use super::*;
     use crate::utils::test_utils::{default_i, default_k};
+    use crate::utils::DEFAULT_TOKEN_DECIMALS;
 
     #[test]
     fn basic() {
-        let q0: FixedU256 = FixedU256::new_from_int(5000.into(), 18).unwrap();
-        let q1: FixedU256 = FixedU256::new_from_int(5000.into(), 18).unwrap();
+        let q0: FixedU256 = FixedU256::new_from_int(5000.into(), DEFAULT_TOKEN_DECIMALS).unwrap();
+        let q1: FixedU256 = FixedU256::new_from_int(5000.into(), DEFAULT_TOKEN_DECIMALS).unwrap();
         let i: FixedU256 = default_i();
-        let delta_b: FixedU256 = FixedU256::new_from_int(100.into(), 18).unwrap();
+        let delta_b: FixedU256 =
+            FixedU256::new_from_int(100.into(), DEFAULT_TOKEN_DECIMALS).unwrap();
         let k: FixedU256 = default_k();
 
         assert_eq!(
             get_deposit_adjustment_amount(
-                FixedU256::new_from_int(100.into(), 18).unwrap(),
-                FixedU256::new_from_int(10000.into(), 18).unwrap(),
-                FixedU256::new_from_int(0.into(), 18).unwrap(),
-                FixedU256::new_from_int(0.into(), 18).unwrap(),
+                FixedU256::new_from_int(100.into(), DEFAULT_TOKEN_DECIMALS).unwrap(),
+                FixedU256::new_from_int(10000.into(), DEFAULT_TOKEN_DECIMALS).unwrap(),
+                FixedU256::new_from_int(0.into(), DEFAULT_TOKEN_DECIMALS).unwrap(),
+                FixedU256::new_from_int(0.into(), DEFAULT_TOKEN_DECIMALS).unwrap(),
                 i
             )
             .unwrap(),
             (
-                FixedU256::new_from_int(100.into(), 18).unwrap(),
-                FixedU256::new_from_int(10000.into(), 18).unwrap()
+                FixedU256::new_from_int(100.into(), DEFAULT_TOKEN_DECIMALS).unwrap(),
+                FixedU256::new_from_int(10000.into(), DEFAULT_TOKEN_DECIMALS).unwrap()
             )
         );
 
         assert_eq!(
             get_buy_shares(
-                FixedU256::new_from_int(100.into(), 18).unwrap(),
-                FixedU256::new_from_int(10000.into(), 18).unwrap(),
-                FixedU256::new_from_int(0.into(), 18).unwrap(),
-                FixedU256::new_from_int(0.into(), 18).unwrap(),
+                FixedU256::new_from_int(100.into(), DEFAULT_TOKEN_DECIMALS).unwrap(),
+                FixedU256::new_from_int(10000.into(), DEFAULT_TOKEN_DECIMALS).unwrap(),
+                FixedU256::new_from_int(0.into(), DEFAULT_TOKEN_DECIMALS).unwrap(),
+                FixedU256::new_from_int(0.into(), DEFAULT_TOKEN_DECIMALS).unwrap(),
                 FixedU256::zero(),
                 FixedU256::zero(),
                 FixedU256::zero(),
@@ -318,11 +320,11 @@ mod tests {
             )
             .unwrap(),
             (
-                FixedU256::new_from_int(100.into(), 18).unwrap(),
-                FixedU256::new_from_int(100.into(), 18).unwrap(),
-                FixedU256::new_from_int(10000.into(), 18).unwrap(),
-                FixedU256::new_from_int(100.into(), 18).unwrap(),
-                FixedU256::new_from_int(10000.into(), 18).unwrap(),
+                FixedU256::new_from_int(100.into(), DEFAULT_TOKEN_DECIMALS).unwrap(),
+                FixedU256::new_from_int(100.into(), DEFAULT_TOKEN_DECIMALS).unwrap(),
+                FixedU256::new_from_int(10000.into(), DEFAULT_TOKEN_DECIMALS).unwrap(),
+                FixedU256::new_from_int(100.into(), DEFAULT_TOKEN_DECIMALS).unwrap(),
+                FixedU256::new_from_int(10000.into(), DEFAULT_TOKEN_DECIMALS).unwrap(),
             )
         );
 
@@ -335,37 +337,37 @@ mod tests {
 
         assert_eq!(
             get_deposit_adjustment_amount(
-                FixedU256::new_from_int(10.into(), 18).unwrap(),
-                FixedU256::new_from_int(1000.into(), 18).unwrap(),
-                FixedU256::new_from_int(100.into(), 18).unwrap(),
-                FixedU256::new_from_int(10000.into(), 18).unwrap(),
+                FixedU256::new_from_int(10.into(), DEFAULT_TOKEN_DECIMALS).unwrap(),
+                FixedU256::new_from_int(1000.into(), DEFAULT_TOKEN_DECIMALS).unwrap(),
+                FixedU256::new_from_int(100.into(), DEFAULT_TOKEN_DECIMALS).unwrap(),
+                FixedU256::new_from_int(10000.into(), DEFAULT_TOKEN_DECIMALS).unwrap(),
                 i
             )
             .unwrap(),
             (
-                FixedU256::new_from_int(10.into(), 18).unwrap(),
-                FixedU256::new_from_int(1000.into(), 18).unwrap()
+                FixedU256::new_from_int(10.into(), DEFAULT_TOKEN_DECIMALS).unwrap(),
+                FixedU256::new_from_int(1000.into(), DEFAULT_TOKEN_DECIMALS).unwrap()
             )
         );
 
         assert_eq!(
             get_buy_shares(
-                FixedU256::new_from_int(110.into(), 18).unwrap(),
-                FixedU256::new_from_int(11000.into(), 18).unwrap(),
-                FixedU256::new_from_int(100.into(), 18).unwrap(),
-                FixedU256::new_from_int(10000.into(), 18).unwrap(),
-                FixedU256::new_from_int(100.into(), 18).unwrap(),
-                FixedU256::new_from_int(10000.into(), 18).unwrap(),
-                FixedU256::new_from_int(100.into(), 18).unwrap(),
+                FixedU256::new_from_int(110.into(), DEFAULT_TOKEN_DECIMALS).unwrap(),
+                FixedU256::new_from_int(11000.into(), DEFAULT_TOKEN_DECIMALS).unwrap(),
+                FixedU256::new_from_int(100.into(), DEFAULT_TOKEN_DECIMALS).unwrap(),
+                FixedU256::new_from_int(10000.into(), DEFAULT_TOKEN_DECIMALS).unwrap(),
+                FixedU256::new_from_int(100.into(), DEFAULT_TOKEN_DECIMALS).unwrap(),
+                FixedU256::new_from_int(10000.into(), DEFAULT_TOKEN_DECIMALS).unwrap(),
+                FixedU256::new_from_int(100.into(), DEFAULT_TOKEN_DECIMALS).unwrap(),
                 default_i()
             )
             .unwrap(),
             (
-                FixedU256::new_from_int(10.into(), 18).unwrap(),
-                FixedU256::new_from_int(110.into(), 18).unwrap(),
-                FixedU256::new_from_int(11000.into(), 18).unwrap(),
-                FixedU256::new_from_int(110.into(), 18).unwrap(),
-                FixedU256::new_from_int(11000.into(), 18).unwrap(),
+                FixedU256::new_from_int(10.into(), DEFAULT_TOKEN_DECIMALS).unwrap(),
+                FixedU256::new_from_int(110.into(), DEFAULT_TOKEN_DECIMALS).unwrap(),
+                FixedU256::new_from_int(11000.into(), DEFAULT_TOKEN_DECIMALS).unwrap(),
+                FixedU256::new_from_int(110.into(), DEFAULT_TOKEN_DECIMALS).unwrap(),
+                FixedU256::new_from_int(11000.into(), DEFAULT_TOKEN_DECIMALS).unwrap(),
             )
         );
 
