@@ -46,6 +46,8 @@ pub struct SwapInfo {
     pub token_a: Pubkey,
     /// Token B
     pub token_b: Pubkey,
+    /// Deltafi token
+    pub deltafi_token: Pubkey,
 
     /// Pool tokens are issued when A or B tokens are deposited.
     /// Pool tokens can be withdrawn back to the original A or B token.
@@ -54,6 +56,9 @@ pub struct SwapInfo {
     pub token_a_mint: Pubkey,
     /// Mint information for token B
     pub token_b_mint: Pubkey,
+    /// deltafi tokens are rewarded when swapping is successfully processed.
+    /// Mint deltafi token
+    pub deltafi_mint: Pubkey,
 
     /// Public key of the admin token account to receive trading and / or withdrawal fees for token a
     pub admin_fee_key_a: Pubkey,
@@ -79,7 +84,7 @@ impl Pack for SwapInfo {
 
     /// Unpacks a byte buffer into a [SwapInfo](struct.SwapInfo.html).
     fn unpack_from_slice(input: &[u8]) -> Result<Self, ProgramError> {
-        let input = array_ref![input, 0, 615];
+        let input = array_ref![input, 0, 679];
         #[allow(clippy::ptr_offset_with_cast)]
         let (
             is_initialized,
@@ -94,16 +99,18 @@ impl Pack for SwapInfo {
             admin_key,
             token_a,
             token_b,
+            deltafi_token,
             pool_mint,
             token_a_mint,
             token_b_mint,
+            deltafi_mint,
             admin_fee_key_a,
             admin_fee_key_b,
             fees,
             oracle,
             rewards,
         ) = array_refs![
-            input, 1, 1, 1, 8, 8, 8, 8, 8, 32, 32, 32, 32, 32, 32, 32, 32, 32, 64, 204, 16
+            input, 1, 1, 1, 8, 8, 8, 8, 8, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 64, 204, 16
         ];
         Ok(Self {
             is_initialized: match is_initialized {
@@ -126,9 +133,11 @@ impl Pack for SwapInfo {
             admin_key: Pubkey::new_from_array(*admin_key),
             token_a: Pubkey::new_from_array(*token_a),
             token_b: Pubkey::new_from_array(*token_b),
+            deltafi_token: Pubkey::new_from_array(*deltafi_token),
             pool_mint: Pubkey::new_from_array(*pool_mint),
             token_a_mint: Pubkey::new_from_array(*token_a_mint),
             token_b_mint: Pubkey::new_from_array(*token_b_mint),
+            deltafi_mint: Pubkey::new_from_array(*deltafi_mint),
             admin_fee_key_a: Pubkey::new_from_array(*admin_fee_key_a),
             admin_fee_key_b: Pubkey::new_from_array(*admin_fee_key_b),
             fees: Fees::unpack_from_slice(fees)?,
@@ -138,7 +147,7 @@ impl Pack for SwapInfo {
     }
 
     fn pack_into_slice(&self, output: &mut [u8]) {
-        let output = array_mut_ref![output, 0, 615];
+        let output = array_mut_ref![output, 0, 679];
         let (
             is_initialized,
             is_paused,
@@ -152,16 +161,18 @@ impl Pack for SwapInfo {
             admin_key,
             token_a,
             token_b,
+            deltafi_token,
             pool_mint,
             token_a_mint,
             token_b_mint,
+            deltafi_mint,
             admin_fee_key_a,
             admin_fee_key_b,
             fees,
             oracle,
             rewards,
         ) = mut_array_refs![
-            output, 1, 1, 1, 8, 8, 8, 8, 8, 32, 32, 32, 32, 32, 32, 32, 32, 32, 64, 204, 16
+            output, 1, 1, 1, 8, 8, 8, 8, 8, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 64, 204, 16
         ];
         is_initialized[0] = self.is_initialized as u8;
         is_paused[0] = self.is_paused as u8;
@@ -175,9 +186,11 @@ impl Pack for SwapInfo {
         admin_key.copy_from_slice(self.admin_key.as_ref());
         token_a.copy_from_slice(self.token_a.as_ref());
         token_b.copy_from_slice(self.token_b.as_ref());
+        deltafi_token.copy_from_slice(self.deltafi_token.as_ref());
         pool_mint.copy_from_slice(self.pool_mint.as_ref());
         token_a_mint.copy_from_slice(self.token_a_mint.as_ref());
         token_b_mint.copy_from_slice(self.token_b_mint.as_ref());
+        deltafi_mint.copy_from_slice(self.deltafi_mint.as_ref());
         admin_fee_key_a.copy_from_slice(self.admin_fee_key_a.as_ref());
         admin_fee_key_b.copy_from_slice(self.admin_fee_key_b.as_ref());
         self.fees.pack_into_slice(&mut fees[..]);
@@ -207,13 +220,17 @@ mod tests {
         let token_b_mint_raw = [7u8; 32];
         let admin_fee_key_a_raw = [8u8; 32];
         let admin_fee_key_b_raw = [9u8; 32];
+        let deltafi_token_raw = [10u8; 32];
+        let deltafi_mint_raw = [11u8; 32];
         let admin_key = Pubkey::new_from_array(admin_key_raw);
         let future_admin_key = Pubkey::new_from_array(future_admin_key_raw);
         let token_a = Pubkey::new_from_array(token_a_raw);
         let token_b = Pubkey::new_from_array(token_b_raw);
+        let deltafi_token = Pubkey::new_from_array(deltafi_token_raw);
         let pool_mint = Pubkey::new_from_array(pool_mint_raw);
         let token_a_mint = Pubkey::new_from_array(token_a_mint_raw);
         let token_b_mint = Pubkey::new_from_array(token_b_mint_raw);
+        let deltafi_mint = Pubkey::new_from_array(deltafi_mint_raw);
         let admin_fee_key_a = Pubkey::new_from_array(admin_fee_key_a_raw);
         let admin_fee_key_b = Pubkey::new_from_array(admin_fee_key_b_raw);
         let admin_trade_fee_numerator = 1;
@@ -257,9 +274,11 @@ mod tests {
             admin_key,
             token_a,
             token_b,
+            deltafi_token,
             pool_mint,
             token_a_mint,
             token_b_mint,
+            deltafi_mint,
             admin_fee_key_a,
             admin_fee_key_b,
             fees,
@@ -282,9 +301,11 @@ mod tests {
         packed.extend_from_slice(&admin_key_raw);
         packed.extend_from_slice(&token_a_raw);
         packed.extend_from_slice(&token_b_raw);
+        packed.extend_from_slice(&deltafi_token_raw);
         packed.extend_from_slice(&pool_mint_raw);
         packed.extend_from_slice(&token_a_mint_raw);
         packed.extend_from_slice(&token_b_mint_raw);
+        packed.extend_from_slice(&deltafi_mint_raw);
         packed.extend_from_slice(&admin_fee_key_a_raw);
         packed.extend_from_slice(&admin_fee_key_b_raw);
         packed.extend_from_slice(&admin_trade_fee_numerator.to_le_bytes());

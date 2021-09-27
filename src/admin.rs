@@ -325,7 +325,7 @@ fn set_new_fees(program_id: &Pubkey, new_fees: &Fees, accounts: &[AccountInfo]) 
     Ok(())
 }
 
-/// [Draft]
+/// Set new rewards
 fn set_new_rewards(
     program_id: &Pubkey,
     new_rewards: &Rewards,
