@@ -75,7 +75,6 @@ pub struct WithdrawOneData {
     pub minimum_token_amount: u64,
 }
 
-
 /// ADMIN INSTRUCTION DATA
 /// RampA instruction data
 #[repr(C)]

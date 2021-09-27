@@ -28,7 +28,7 @@ pub mod test_utils {
         instruction::{approve, initialize_account, initialize_mint, mint_to},
         state::{Account as SplAccount, Mint as SplMint},
     };
-  
+
     use crate::{
         curve::ZERO_TS, fees::Fees, instruction::*, processor::Processor, rewards::Rewards,
         state::SwapInfo,
