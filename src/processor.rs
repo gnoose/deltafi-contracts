@@ -175,7 +175,7 @@ impl Processor {
             return Err(SwapError::InvalidOutputOwner.into());
         }
         if *authority_info.key == deltafi_token.owner {
-            return Err(SwapError::InvalidOwner.into());
+            return Err(SwapError::InvalidOutputOwner.into());
         }
         if token_a.mint == token_b.mint {
             return Err(SwapError::RepeatedMint.into());
@@ -192,16 +192,10 @@ impl Processor {
         if token_b.delegate.is_some() {
             return Err(SwapError::InvalidDelegate.into());
         }
-        if deltafi_token.delegate.is_some() {
-            return Err(SwapError::InvalidDelegate.into());
-        }
         if token_a.mint != *token_a_mint_info.key {
             return Err(SwapError::IncorrectMint.into());
         }
         if token_b.mint != *token_b_mint_info.key {
-            return Err(SwapError::IncorrectMint.into());
-        }
-        if deltafi_token.mint != *deltafi_mint_info.key {
             return Err(SwapError::IncorrectMint.into());
         }
         if token_a.close_authority.is_some() {
@@ -984,6 +978,7 @@ mod tests {
             DEFAULT_TEST_FEES,
             DEFAULT_TEST_REWARDS,
         );
+
         // wrong nonce for authority_key
         {
             let old_nonce = accounts.nonce;
@@ -1046,6 +1041,17 @@ mod tests {
             accounts.pool_mint_account = old_account;
         }
 
+        // uninitialized deltafi mint
+        {
+            let old_account = accounts.deltafi_mint_account;
+            accounts.deltafi_mint_account = Account::default();
+            assert_eq!(
+                Err(SwapError::ExpectedMint.into()),
+                accounts.initialize_swap(),
+            );
+            accounts.deltafi_mint_account = old_account;
+        }
+
         // token A account owner is not swap authority
         {
             let (_token_a_key, token_a_account) = mint_token(
@@ -1103,6 +1109,25 @@ mod tests {
             accounts.pool_token_account = old_account;
         }
 
+        // deltafi token account owner is swap authority
+        {
+            let (_deltafi_token_key, deltafi_token_account) = mint_token(
+                &TOKEN_PROGRAM_ID,
+                &accounts.deltafi_mint_key,
+                &mut accounts.deltafi_mint_account,
+                &accounts.authority_key,
+                &accounts.authority_key,
+                0
+            );
+            let old_account = accounts.deltafi_token_account;
+            accounts.deltafi_token_account = deltafi_token_account;
+            assert_eq!(
+                Err(SwapError::InvalidOutputOwner.into()),
+                accounts.initialize_swap(),
+            );
+            accounts.deltafi_token_account = old_account;
+        }
+
         // pool mint authority is not swap authority
         {
             let (_pool_mint_key, pool_mint_account) =
@@ -1114,6 +1139,19 @@ mod tests {
                 accounts.initialize_swap()
             );
             accounts.pool_mint_account = old_mint;
+        }
+
+        // deltafi mint authority is not swap authority
+        {
+            let (_deltafi_mint_key, deltafi_mint_account) =
+                create_mint(&TOKEN_PROGRAM_ID, &user_key, DEFAULT_TOKEN_DECIMALS, None);
+            let old_account = accounts.deltafi_mint_account;
+            accounts.deltafi_mint_account = deltafi_mint_account;
+            assert_eq!(
+                Err(SwapError::InvalidOwner.into()),
+                accounts.initialize_swap()
+            );
+            accounts.deltafi_mint_account = old_account;
         }
 
         // pool mint token has freeze authority
@@ -1131,6 +1169,23 @@ mod tests {
                 accounts.initialize_swap()
             );
             accounts.pool_mint_account = old_mint;
+        }
+
+        // deltafi mint token has freeze authority
+        {
+            let (_deltafi_mint_key, deltafi_mint_account) = create_mint(
+                &TOKEN_PROGRAM_ID,
+                &accounts.authority_key,
+                DEFAULT_TOKEN_DECIMALS,
+                Some(&user_key),
+            );
+            let old_account = accounts.deltafi_mint_account;
+            accounts.deltafi_mint_account = deltafi_mint_account;
+            assert_eq!(
+                Err(SwapError::InvalidFreezeAuthority.into()),
+                accounts.initialize_swap()
+            );
+            accounts.deltafi_mint_account = old_account;
         }
 
         // empty token A account
