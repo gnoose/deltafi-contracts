@@ -71,20 +71,20 @@ pub struct SwapInfo {
     /// Rewards
     pub rewards: Rewards,
 
-     /// Slope value - 0 < k < 1
-     pub k: FixedU256,
-     /// Mid price
-     pub i: FixedU256,
-     /// r status
-     pub r: RState,
-     /// base target price
-     pub base_target: FixedU256,
-     /// quote target price
-     pub quote_target: FixedU256,
-     /// base reserve price
-     pub base_reserve: FixedU256,
-     /// quote reserve price
-     pub quote_reserve: FixedU256,
+    /// Slope value - 0 < k < 1
+    pub k: FixedU256,
+    /// Mid price
+    pub i: FixedU256,
+    /// r status
+    pub r: RState,
+    /// base target price
+    pub base_target: FixedU256,
+    /// quote target price
+    pub quote_target: FixedU256,
+    /// base reserve price
+    pub base_reserve: FixedU256,
+    /// quote reserve price
+    pub quote_reserve: FixedU256,
 }
 
 impl Sealed for SwapInfo {}
@@ -132,8 +132,8 @@ impl Pack for SwapInfo {
             base_reserve,
             quote_reserve,
         ) = array_refs![
-            input, 1, 1, 1, 8, 8, 8, 8, 8, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 64, 204, 16, 64, 64, 1,
-            64, 64, 64, 64
+            input, 1, 1, 1, 8, 8, 8, 8, 8, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 64, 204, 16,
+            64, 64, 1, 64, 64, 64, 64
         ];
         Ok(Self {
             is_initialized: match is_initialized {
@@ -209,8 +209,8 @@ impl Pack for SwapInfo {
             base_reserve,
             quote_reserve,
         ) = mut_array_refs![
-            output, 1, 1, 1, 8, 8, 8, 8, 8, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 64, 204, 16, 64, 64, 1,
-            64, 64, 64, 64
+            output, 1, 1, 1, 8, 8, 8, 8, 8, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 64, 204,
+            16, 64, 64, 1, 64, 64, 64, 64
         ];
         is_initialized[0] = self.is_initialized as u8;
         is_paused[0] = self.is_paused as u8;

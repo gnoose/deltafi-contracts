@@ -1,5 +1,7 @@
 //! Program state processor
 
+#![allow(clippy::too_many_arguments)]
+
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use num_traits::FromPrimitive;
