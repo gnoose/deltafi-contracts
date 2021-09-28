@@ -19,4 +19,5 @@ tmp*
 # Idea directory
 .idea
 
+.vscode
 **/node_modules/

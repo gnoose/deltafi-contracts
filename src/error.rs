@@ -52,9 +52,9 @@ pub enum SwapError {
     /// The calculation failed.
     #[error("CalculationFailure")]
     CalculationFailure,
-    /// not sure number passed in is matched swap instruction.
-    #[error("No swap instruction")]
-    NoSwapInstruction,
+    // /// not sure number passed in is matched swap instruction.
+    // #[error("No swap instruction")]
+    // NoSwapInstruction,
     /// Invalid instruction number passed in.
     #[error("Invalid instruction")]
     InvalidInstruction,

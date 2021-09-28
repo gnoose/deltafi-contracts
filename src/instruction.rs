@@ -90,6 +90,7 @@ pub struct RampAData {
 pub struct FarmData {
     /// alloc point for farm
     pub alloc_point: u64,
+    /// reward unit for farm
     pub reward_unit: u64,
 }
 
@@ -168,7 +169,7 @@ impl AdminInstruction {
             }
             108 => {
                 let (alloc_point, rest) = unpack_u64(rest)?;
-                let (reward_unit, rest) = unpack_u64(rest)?;
+                let (reward_unit, _rest) = unpack_u64(rest)?;
                 Some(Self::InitializeFarm(FarmData {
                     alloc_point,
                     reward_unit,
@@ -176,12 +177,13 @@ impl AdminInstruction {
             }
             109 => {
                 let (alloc_point, rest) = unpack_u64(rest)?;
-                let (reward_unit, rest) = unpack_u64(rest)?;
+                let (reward_unit, _rest) = unpack_u64(rest)?;
                 Some(Self::SetFarm(FarmData {
                     alloc_point,
                     reward_unit,
                 }))
             }
+            110 => Some(Self::ApplyNewAdminForFarm),
             _ => None,
         })
     }
@@ -226,6 +228,7 @@ impl AdminInstruction {
                 buf.extend_from_slice(&alloc_point.to_le_bytes());
                 buf.extend_from_slice(&reward_unit.to_le_bytes());
             }
+            Self::ApplyNewAdminForFarm => buf.push(110),
         }
         buf
     }
@@ -584,56 +587,56 @@ pub enum SwapInstruction {
 
 impl SwapInstruction {
     /// Unpacks a byte buffer into a [SwapInstruction](enum.SwapInstruction.html).
-    pub fn unpack(input: &[u8]) -> Result<Self, ProgramError> {
+    pub fn unpack(input: &[u8]) -> Result<Option<Self>, ProgramError> {
         let (&tag, rest) = input.split_first().ok_or(SwapError::InvalidInstruction)?;
         Ok(match tag {
             0 => {
                 let (&nonce, rest) = rest.split_first().ok_or(SwapError::InvalidInstruction)?;
                 let (amp_factor, rest) = unpack_u64(rest)?;
                 let fees = Fees::unpack_unchecked(rest)?;
-                Self::Initialize(InitializeData {
+                Some(Self::Initialize(InitializeData {
                     nonce,
                     amp_factor,
                     fees,
-                })
+                }))
             }
             1 => {
                 let (amount_in, rest) = unpack_u64(rest)?;
                 let (minimum_amount_out, _rest) = unpack_u64(rest)?;
-                Self::Swap(SwapData {
+                Some(Self::Swap(SwapData {
                     amount_in,
                     minimum_amount_out,
-                })
+                }))
             }
             2 => {
                 let (token_a_amount, rest) = unpack_u64(rest)?;
                 let (token_b_amount, rest) = unpack_u64(rest)?;
                 let (min_mint_amount, _rest) = unpack_u64(rest)?;
-                Self::Deposit(DepositData {
+                Some(Self::Deposit(DepositData {
                     token_a_amount,
                     token_b_amount,
                     min_mint_amount,
-                })
+                }))
             }
             3 => {
                 let (pool_token_amount, rest) = unpack_u64(rest)?;
                 let (minimum_token_a_amount, rest) = unpack_u64(rest)?;
                 let (minimum_token_b_amount, _rest) = unpack_u64(rest)?;
-                Self::Withdraw(WithdrawData {
+                Some(Self::Withdraw(WithdrawData {
                     pool_token_amount,
                     minimum_token_a_amount,
                     minimum_token_b_amount,
-                })
+                }))
             }
             4 => {
                 let (pool_token_amount, rest) = unpack_u64(rest)?;
                 let (minimum_token_amount, _rest) = unpack_u64(rest)?;
-                Self::WithdrawOne(WithdrawOneData {
+                Some(Self::WithdrawOne(WithdrawOneData {
                     pool_token_amount,
                     minimum_token_amount,
-                })
+                }))
             }
-            _ => return Err(SwapError::NoSwapInstruction.into()),
+            _ => None,
         })
     }
 
@@ -1003,7 +1006,7 @@ impl FarmingInstruction {
             }
             32 => {
                 let (pool_token_amount, rest) = unpack_u64(rest)?;
-                let (min_pool_token_amount, rest) = unpack_u64(rest)?;
+                let (min_pool_token_amount, _rest) = unpack_u64(rest)?;
                 Self::Withdraw(FarmingWithdrawData {
                     pool_token_amount,
                     min_pool_token_amount,
@@ -1023,6 +1026,9 @@ impl FarmingInstruction {
     pub fn pack(&self) -> Vec<u8> {
         let mut buf = Vec::with_capacity(size_of::<Self>());
         match *self {
+            Self::EnableUser() => {
+                buf.push(30);
+            }
             Self::Deposit(FarmingDepositData {
                 pool_token_amount,
                 min_mint_amount,
@@ -1038,6 +1044,12 @@ impl FarmingInstruction {
                 buf.push(32);
                 buf.extend_from_slice(&pool_token_amount.to_le_bytes());
                 buf.extend_from_slice(&min_pool_token_amount.to_le_bytes());
+            }
+            Self::EmergencyWithdraw() => {
+                buf.push(33);
+            }
+            Self::PrintPendingDeltafi() => {
+                buf.push(34);
             }
         }
         buf

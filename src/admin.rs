@@ -388,7 +388,7 @@ pub fn initialize_farm(
     }
     let clock = Clock::from_account_info(clock_sysvar_info)?;
     
-    farm_base.total_alloc_point = farm_base.total_alloc_point + alloc_point;
+    farm_base.total_alloc_point += alloc_point;
     farm_base.reward_unit = reward_unit;
     farm.alloc_point = alloc_point;
     farm.acc_deltafi_per_share = 0;
@@ -434,10 +434,11 @@ fn apply_new_admin_for_farm(
     Ok(())
 }
 
+/// set farm with already initialized one.
 pub fn set_farm(
     program_id: &Pubkey,
     alloc_point: u64,
-    reward_unit: u64,
+    _reward_unit: u64,
     accounts: &[AccountInfo]
 ) -> ProgramResult {
     let account_info_iter = &mut accounts.iter();
@@ -453,7 +454,7 @@ pub fn set_farm(
         return Err(SwapError::InvalidProgramAddress.into());
     }
     
-    farm_base.total_alloc_point = farm_base.total_alloc_point + alloc_point;
+    farm_base.total_alloc_point += alloc_point;
     farm.alloc_point = alloc_point;
     FarmBaseInfo::pack(farm_base, &mut farm_base_info.data.borrow_mut())?;
     FarmInfo::pack(farm, &mut farm_info.data.borrow_mut())?;

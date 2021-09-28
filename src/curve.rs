@@ -297,9 +297,10 @@ impl StableSwap {
     }
 }
 
+/// curve for farming.
 pub struct Farm {
     /// Current unix timestamp
-    current_ts: i64,
+    _current_ts: i64,
     /// Withdraw reward rate when depositing, can be set 1e36
     rate: u128,
 }
@@ -311,11 +312,12 @@ impl Farm {
         rate: u128,
     ) -> Self {
         Self {
-            current_ts,
+            _current_ts: current_ts,
             rate,
         }
     }
 
+    /// Compute peding reward
     pub fn compute_pending_reward(
         &self,
         acc_deltafi_per_share: U256,
@@ -328,6 +330,7 @@ impl Farm {
         .checked_sub(reward_debt)
     }
 
+    /// Compute reward debt
     pub fn compute_reward_debt(
         &self,
         acc_deltafi_per_share: U256,
@@ -337,6 +340,7 @@ impl Farm {
         .checked_div(self.rate.into())
     }
 
+    /// Compute account deltafi reward rate
     pub fn compute_acc_deltafi_per_share(
         &self,
         acc_deltafi_per_share: U256,

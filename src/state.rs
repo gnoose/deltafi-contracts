@@ -9,7 +9,7 @@ use solana_program::{
 
 use crate::{fees::Fees, oracle::Oracle};
 
-/// Program states.
+/// Swap states.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct SwapInfo {
@@ -178,10 +178,13 @@ impl Pack for SwapInfo {
     }
 }
 
+/// Farm's base information
 pub struct FarmBaseInfo {
+    /// whether initialized
     pub is_initialized: bool,
     /// Total allocation points
     pub total_alloc_point: u64,
+    /// reward unit
     pub reward_unit: u64,
 }
 
@@ -194,11 +197,11 @@ impl IsInitialized for FarmBaseInfo {
 
 impl Pack for FarmBaseInfo {
     /// !! must calc out right size after deciding all field.
-    const LEN: usize = 395;
+    const LEN: usize = 17;
 
     /// Unpacks a byte buffer into a [FarmInfo](struct.FarmInfo.html).
     fn unpack_from_slice(input: &[u8]) -> Result<Self, ProgramError> {
-        let input = array_ref![input, 0, 395];
+        let input = array_ref![input, 0, 17];
         #[allow(clippy::ptr_offset_with_cast)]
         let (
             is_initialized,
@@ -217,7 +220,7 @@ impl Pack for FarmBaseInfo {
     }
 
     fn pack_into_slice(&self, output: &mut [u8]) {
-        let output = array_mut_ref![output, 0, 395];
+        let output = array_mut_ref![output, 0, 17];
         let (
             is_initialized,
             total_alloc_point,
@@ -229,6 +232,9 @@ impl Pack for FarmBaseInfo {
     }
 }
 
+/// Farm state
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct FarmInfo {
     /// Initialized state
     pub is_initialized: bool,
@@ -276,7 +282,7 @@ impl Pack for FarmInfo {
 
     /// Unpacks a byte buffer into a [FarmInfo](struct.FarmInfo.html).
     fn unpack_from_slice(input: &[u8]) -> Result<Self, ProgramError> {
-        let input = array_ref![input, 0, 395];
+        let input = array_ref![input, 0, 227];
         #[allow(clippy::ptr_offset_with_cast)]
         let (
             is_initialized,
@@ -317,7 +323,7 @@ impl Pack for FarmInfo {
     }
 
     fn pack_into_slice(&self, output: &mut [u8]) {
-        let output = array_mut_ref![output, 0, 395];
+        let output = array_mut_ref![output, 0, 227];
         let (
             is_initialized,
             is_paused,
@@ -347,11 +353,17 @@ impl Pack for FarmInfo {
     }    
 }
 
+/// User's farming information
 pub struct FarmingUserInfo {
+    /// whether initialized
     pub is_initialized: bool,
+    /// user's amount
     pub amount: u64,
+    /// user's reward debt
     pub reward_debt: u64,
+    /// last update timestamp
     pub timestamp: i64,
+    /// pending deltafi
     pub pending_deltafi: u64,
 }
 
@@ -368,7 +380,7 @@ impl Pack for FarmingUserInfo {
 
     /// Unpacks a byte buffer into a [FarmInfo](struct.FarmInfo.html).
     fn unpack_from_slice(input: &[u8]) -> Result<Self, ProgramError> {
-        let input = array_ref![input, 0, 395];
+        let input = array_ref![input, 0, 33];
         #[allow(clippy::ptr_offset_with_cast)]
         let (
             is_initialized,
@@ -391,7 +403,7 @@ impl Pack for FarmingUserInfo {
     }
 
     fn pack_into_slice(&self, output: &mut [u8]) {
-        let output = array_mut_ref![output, 0, 395];
+        let output = array_mut_ref![output, 0, 33];
         let (
             is_initialized,
             amount,
