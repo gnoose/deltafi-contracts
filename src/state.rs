@@ -95,11 +95,11 @@ impl IsInitialized for SwapInfo {
 }
 
 impl Pack for SwapInfo {
-    const LEN: usize = 1064;
+    const LEN: usize = 1072;
 
     /// Unpacks a byte buffer into a [SwapInfo](struct.SwapInfo.html).
     fn unpack_from_slice(input: &[u8]) -> Result<Self, ProgramError> {
-        let input = array_ref![input, 0, 1064];
+        let input = array_ref![input, 0, 1072];
         #[allow(clippy::ptr_offset_with_cast)]
         let (
             is_initialized,
@@ -132,7 +132,7 @@ impl Pack for SwapInfo {
             base_reserve,
             quote_reserve,
         ) = array_refs![
-            input, 1, 1, 1, 8, 8, 8, 8, 8, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 64, 204, 16,
+            input, 1, 1, 1, 8, 8, 8, 8, 8, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 64, 204, 24,
             64, 64, 1, 64, 64, 64, 64
         ];
         Ok(Self {
@@ -177,7 +177,7 @@ impl Pack for SwapInfo {
     }
 
     fn pack_into_slice(&self, output: &mut [u8]) {
-        let output = array_mut_ref![output, 0, 1064];
+        let output = array_mut_ref![output, 0, 1072];
         let (
             is_initialized,
             is_paused,
@@ -210,7 +210,7 @@ impl Pack for SwapInfo {
             quote_reserve,
         ) = mut_array_refs![
             output, 1, 1, 1, 8, 8, 8, 8, 8, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 64, 204,
-            16, 64, 64, 1, 64, 64, 64, 64
+            24, 64, 64, 1, 64, 64, 64, 64
         ];
         is_initialized[0] = self.is_initialized as u8;
         is_paused[0] = self.is_paused as u8;
@@ -302,9 +302,11 @@ mod tests {
         let is_paused = false;
         let trade_reward_numerator = 1;
         let trade_reward_denominator = 2;
+        let trade_reward_cap = 100;
         let rewards = Rewards {
             trade_reward_numerator,
             trade_reward_denominator,
+            trade_reward_cap,
         };
         let k = default_k();
         let i = default_i();
