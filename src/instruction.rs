@@ -1072,52 +1072,61 @@ mod tests {
             assert_eq!(unpacked, check);
         }
 
-        // let token_a_amount: u64 = 10;
-        // let token_b_amount: u64 = 20;
-        // let min_mint_amount: u64 = 5;
-        // let check = SwapInstruction::Deposit(DepositData {
-        //     token_a_amount,
-        //     token_b_amount,
-        //     min_mint_amount,
-        // });
-        // let packed = check.pack();
-        // let mut expect = vec![2];
-        // expect.extend_from_slice(&token_a_amount.to_le_bytes());
-        // expect.extend_from_slice(&token_b_amount.to_le_bytes());
-        // expect.extend_from_slice(&min_mint_amount.to_le_bytes());
-        // assert_eq!(packed, expect);
-        // let unpacked = SwapInstruction::unpack(&expect).unwrap();
-        // assert_eq!(unpacked, check);
+        // Deposit instruction packing
+        {
+            let token_a_amount: u64 = 10;
+            let token_b_amount: u64 = 20;
+            let min_mint_amount: u64 = 5;
+            let check = SwapInstruction::Deposit(DepositData {
+                token_a_amount,
+                token_b_amount,
+                min_mint_amount,
+            });
+            let packed = check.pack();
+            let mut expect = vec![2];
+            expect.extend_from_slice(&token_a_amount.to_le_bytes());
+            expect.extend_from_slice(&token_b_amount.to_le_bytes());
+            expect.extend_from_slice(&min_mint_amount.to_le_bytes());
+            assert_eq!(packed, expect);
+            let unpacked = SwapInstruction::unpack(&expect).unwrap();
+            assert_eq!(unpacked, check);
+        }
 
-        // let pool_token_amount: u64 = 1212438012089;
-        // let minimum_token_a_amount: u64 = 102198761982612;
-        // let minimum_token_b_amount: u64 = 2011239855213;
-        // let check = SwapInstruction::Withdraw(WithdrawData {
-        //     pool_token_amount,
-        //     minimum_token_a_amount,
-        //     minimum_token_b_amount,
-        // });
-        // let packed = check.pack();
-        // let mut expect = vec![3];
-        // expect.extend_from_slice(&pool_token_amount.to_le_bytes());
-        // expect.extend_from_slice(&minimum_token_a_amount.to_le_bytes());
-        // expect.extend_from_slice(&minimum_token_b_amount.to_le_bytes());
-        // assert_eq!(packed, expect);
-        // let unpacked = SwapInstruction::unpack(&expect).unwrap();
-        // assert_eq!(unpacked, check);
+        // Withdraw instruction packing
+        {
+            let pool_token_amount: u64 = 1212438012089;
+            let minimum_token_a_amount: u64 = 102198761982612;
+            let minimum_token_b_amount: u64 = 2011239855213;
+            let check = SwapInstruction::Withdraw(WithdrawData {
+                pool_token_amount,
+                minimum_token_a_amount,
+                minimum_token_b_amount,
+            });
+            let packed = check.pack();
+            let mut expect = vec![3];
+            expect.extend_from_slice(&pool_token_amount.to_le_bytes());
+            expect.extend_from_slice(&minimum_token_a_amount.to_le_bytes());
+            expect.extend_from_slice(&minimum_token_b_amount.to_le_bytes());
+            assert_eq!(packed, expect);
+            let unpacked = SwapInstruction::unpack(&expect).unwrap();
+            assert_eq!(unpacked, check);
+        }
 
-        // let pool_token_amount: u64 = 1212438012089;
-        // let minimum_token_amount: u64 = 102198761982612;
-        // let check = SwapInstruction::WithdrawOne(WithdrawOneData {
-        //     pool_token_amount,
-        //     minimum_token_amount,
-        // });
-        // let packed = check.pack();
-        // let mut expect = vec![4];
-        // expect.extend_from_slice(&pool_token_amount.to_le_bytes());
-        // expect.extend_from_slice(&minimum_token_amount.to_le_bytes());
-        // assert_eq!(packed, expect);
-        // let unpacked = SwapInstruction::unpack(&expect).unwrap();
-        // assert_eq!(unpacked, check);
+        // WithdrawOne instruction packing
+        {
+            let pool_token_amount: u64 = 1212438012089;
+            let minimum_token_amount: u64 = 102198761982612;
+            let check = SwapInstruction::WithdrawOne(WithdrawOneData {
+                pool_token_amount,
+                minimum_token_amount,
+            });
+            let packed = check.pack();
+            let mut expect = vec![4];
+            expect.extend_from_slice(&pool_token_amount.to_le_bytes());
+            expect.extend_from_slice(&minimum_token_amount.to_le_bytes());
+            assert_eq!(packed, expect);
+            let unpacked = SwapInstruction::unpack(&expect).unwrap();
+            assert_eq!(unpacked, check);
+        }
     }
 }
