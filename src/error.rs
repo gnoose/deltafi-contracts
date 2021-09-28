@@ -46,12 +46,18 @@ pub enum SwapError {
     /// Address of the provided swap token account is incorrect.
     #[error("Address of the provided swap token account is incorrect")]
     IncorrectSwapAccount,
+    /// Address of the reward token account is incorrect.
+    #[error("Address of the reward token account is incorrect")]
+    IncorrectRewardAccount,
     /// Address of the provided token mint is incorrect
     #[error("Address of the provided token mint is incorrect")]
     IncorrectMint,
     /// The calculation failed.
     #[error("CalculationFailure")]
     CalculationFailure,
+    /// not sure number passed in is matched swap instruction.
+    #[error("No swap instruction")]
+    NoSwapInstruction,
     /// Invalid instruction number passed in.
     #[error("Invalid instruction")]
     InvalidInstruction,

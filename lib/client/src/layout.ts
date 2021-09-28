@@ -46,3 +46,69 @@ export const StableSwapLayout: typeof BufferLayout.Structure = BufferLayout.stru
     BufferLayout.nu64("withdrawFeeDenominator"),
   ]
 );
+
+// !!need to be fixed
+/**
+ * Layout for farm state
+ */
+export const FarmLayout: typeof BufferLayout.Structure = BufferLayout.struct([
+  BufferLayout.u8("isInitialized"),
+  BufferLayout.u8("isPaused"),
+  BufferLayout.u8("nonce"),
+  BufferLayout.nu64("initialAmpFactor"),
+  BufferLayout.nu64("targetAmpFactor"),
+  BufferLayout.ns64("startRampTs"),
+  BufferLayout.ns64("stopRampTs"),
+  BufferLayout.ns64("futureAdminDeadline"),
+  PublicKeyLayout("futureAdminAccount"),
+  PublicKeyLayout("adminAccount"),
+  PublicKeyLayout("tokenAccountA"),
+  PublicKeyLayout("tokenAccountB"),
+  PublicKeyLayout("tokenPool"),
+  PublicKeyLayout("mintA"),
+  PublicKeyLayout("mintB"),
+  PublicKeyLayout("adminFeeAccountA"),
+  PublicKeyLayout("adminFeeAccountB"),
+  BufferLayout.nu64("adminTradeFeeNumerator"),
+  BufferLayout.nu64("adminTradeFeeDenominator"),
+  BufferLayout.nu64("adminWithdrawFeeNumerator"),
+  BufferLayout.nu64("adminWithdrawFeeDenominator"),
+  BufferLayout.nu64("tradeFeeNumerator"),
+  BufferLayout.nu64("tradeFeeDenominator"),
+  BufferLayout.nu64("withdrawFeeNumerator"),
+  BufferLayout.nu64("withdrawFeeDenominator"),
+]);
+
+// !!need to be fixed
+/**
+ * Layout for farm base state
+ */
+export const FarmBaseLayout: typeof BufferLayout.Structure = BufferLayout.struct(
+  [
+    BufferLayout.u8("isInitialized"),
+    BufferLayout.u8("isPaused"),
+    BufferLayout.u8("nonce"),
+    BufferLayout.nu64("initialAmpFactor"),
+    BufferLayout.nu64("targetAmpFactor"),
+    BufferLayout.ns64("startRampTs"),
+    BufferLayout.ns64("stopRampTs"),
+    BufferLayout.ns64("futureAdminDeadline"),
+    PublicKeyLayout("futureAdminAccount"),
+    PublicKeyLayout("adminAccount"),
+    PublicKeyLayout("tokenAccountA"),
+    PublicKeyLayout("tokenAccountB"),
+    PublicKeyLayout("tokenPool"),
+    PublicKeyLayout("mintA"),
+    PublicKeyLayout("mintB"),
+    PublicKeyLayout("adminFeeAccountA"),
+    PublicKeyLayout("adminFeeAccountB"),
+    BufferLayout.nu64("adminTradeFeeNumerator"),
+    BufferLayout.nu64("adminTradeFeeDenominator"),
+    BufferLayout.nu64("adminWithdrawFeeNumerator"),
+    BufferLayout.nu64("adminWithdrawFeeDenominator"),
+    BufferLayout.nu64("tradeFeeNumerator"),
+    BufferLayout.nu64("tradeFeeDenominator"),
+    BufferLayout.nu64("withdrawFeeNumerator"),
+    BufferLayout.nu64("withdrawFeeDenominator"),
+  ]
+);

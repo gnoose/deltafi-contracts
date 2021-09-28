@@ -44,7 +44,7 @@ pub mod test_utils {
     use super::*;
     use crate::{
         bn::FixedU256, curve::ZERO_TS, fees::Fees, instruction::*, processor::Processor,
-        state::SwapInfo,
+        rewards::Rewards, state::SwapInfo,
     };
 
     /// Test program id for the swap program.
@@ -62,6 +62,12 @@ pub mod test_utils {
         trade_fee_denominator: 100,
         withdraw_fee_numerator: 6,
         withdraw_fee_denominator: 100,
+    };
+
+    /// Rewards for testing
+    pub const DEFAULT_TEST_REWARDS: Rewards = Rewards {
+        trade_reward_numerator: 1,
+        trade_reward_denominator: 2,
     };
 
     /// Slope Value for testing
@@ -109,6 +115,10 @@ pub mod test_utils {
         pub token_b_account: Account,
         pub token_b_mint_key: Pubkey,
         pub token_b_mint_account: Account,
+        pub deltafi_token_key: Pubkey,
+        pub deltafi_token_account: Account,
+        pub deltafi_mint_key: Pubkey,
+        pub deltafi_mint_account: Account,
         pub admin_key: Pubkey,
         pub admin_account: Account,
         pub admin_fee_a_key: Pubkey,
@@ -116,6 +126,7 @@ pub mod test_utils {
         pub admin_fee_b_key: Pubkey,
         pub admin_fee_b_account: Account,
         pub fees: Fees,
+        pub rewards: Rewards,
         pub k: FixedU256,
         pub i: FixedU256,
         pub base_target: FixedU256,
@@ -131,6 +142,7 @@ pub mod test_utils {
             token_a_amount: u64,
             token_b_amount: u64,
             fees: Fees,
+            rewards: Rewards,
             k: FixedU256,
             i: FixedU256,
         ) -> Self {
@@ -149,6 +161,20 @@ pub mod test_utils {
                 &TOKEN_PROGRAM_ID,
                 &pool_mint_key,
                 &mut pool_mint_account,
+                &authority_key,
+                &user_key,
+                0,
+            );
+            let (deltafi_mint_key, mut deltafi_mint_account) = create_mint(
+                &TOKEN_PROGRAM_ID,
+                &authority_key,
+                DEFAULT_TOKEN_DECIMALS,
+                None,
+            );
+            let (deltafi_token_key, deltafi_token_account) = mint_token(
+                &TOKEN_PROGRAM_ID,
+                &deltafi_mint_key,
+                &mut deltafi_mint_account,
                 &authority_key,
                 &user_key,
                 0,
@@ -215,6 +241,10 @@ pub mod test_utils {
                 token_b_mint_account,
                 token_b_key,
                 token_b_account,
+                deltafi_mint_key,
+                deltafi_mint_account,
+                deltafi_token_key,
+                deltafi_token_account,
                 admin_key: admin_account.owner,
                 admin_account,
                 admin_fee_a_key,
@@ -222,6 +252,7 @@ pub mod test_utils {
                 admin_fee_b_key,
                 admin_fee_b_account,
                 fees,
+                rewards,
                 k,
                 i,
                 base_target,
@@ -247,9 +278,12 @@ pub mod test_utils {
                     &self.token_b_key,
                     &self.pool_mint_key,
                     &self.pool_token_key,
+                    &self.deltafi_mint_key,
+                    &self.deltafi_token_key,
                     self.nonce,
                     self.initial_amp_factor,
                     self.fees,
+                    self.rewards,
                     self.k.inner_u64()?,
                     self.i.inner_u64()?,
                 )
@@ -266,6 +300,8 @@ pub mod test_utils {
                     &mut self.token_b_account,
                     &mut self.pool_mint_account,
                     &mut self.pool_token_account,
+                    &mut self.deltafi_mint_account,
+                    &mut self.deltafi_token_account,
                     &mut Account::default(),
                 ],
             )
@@ -428,6 +464,7 @@ pub mod test_utils {
                     admin_destination_key = self.get_admin_fee_key(swap_destination_key);
                 }
             }
+
             let mut admin_destination_account =
                 self.get_admin_fee_account(&admin_destination_key).clone();
             let mut swap_source_account = self.get_token_account(swap_source_key).clone();
@@ -444,6 +481,8 @@ pub mod test_utils {
                     &swap_source_key,
                     &swap_destination_key,
                     &user_destination_key,
+                    &self.deltafi_token_key,
+                    &self.deltafi_mint_key,
                     &admin_destination_key,
                     amount_in,
                     minimum_amount_out,
@@ -457,6 +496,8 @@ pub mod test_utils {
                     &mut swap_source_account,
                     &mut swap_destination_account,
                     &mut user_destination_account,
+                    &mut self.deltafi_token_account,
+                    &mut self.deltafi_mint_account,
                     &mut admin_destination_account,
                     &mut Account::default(),
                     &mut clock_account(ZERO_TS),
@@ -847,8 +888,49 @@ pub mod test_utils {
                 ],
             )
         }
+
+        pub fn set_new_rewards(&mut self, new_rewards: Rewards) -> ProgramResult {
+            do_process_instruction(
+                set_rewards(
+                    &SWAP_PROGRAM_ID,
+                    &self.swap_key,
+                    &self.authority_key,
+                    &self.admin_key,
+                    new_rewards,
+                )
+                .unwrap(),
+                vec![
+                    &mut self.swap_account,
+                    &mut Account::default(),
+                    &mut self.admin_account,
+                ],
+            )
+        }
     }
 
+    pub struct FarmAccountInfo {
+        pub nonce: u8,
+        pub authority_key: Pubkey,
+        pub alloc_point: u64,
+        pub reward_unit: u64,
+        pub farm_base_key: Pubkey,
+        pub farm_base_account: Account,
+        pub farm_key: Pubkey,
+        pub farm_account: Account,
+        pub pool_mint_key: Pubkey,
+        pub pool_mint_account: Account,
+        pub pool_token_key: Pubkey,
+        pub pool_token_account: Account,
+        pub token_deltafi_key: Pubkey,
+        pub token_deltafi_account: Account,
+        pub token_deltafi_mint_key: Pubkey,
+        pub token_deltafi_mint_account: Account,
+        pub admin_key: Pubkey,
+        pub admin_account: Account,
+        pub admin_fee_deltafi_key: Pubkey,
+        pub admin_fee_deltafi_account: Account,
+        pub fees: Fees,
+    }
     struct TestSyscallStubs {}
     impl program_stubs::SyscallStubs for TestSyscallStubs {
         fn sol_invoke_signed(

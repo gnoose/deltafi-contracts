@@ -13,6 +13,7 @@ pub mod math2;
 pub mod oracle;
 pub mod pool_converter;
 pub mod processor;
+pub mod rewards;
 pub mod state;
 pub mod utils;
 pub mod v2curve;

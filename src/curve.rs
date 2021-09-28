@@ -294,6 +294,8 @@ impl StableSwap {
     }
 }
 
+/// The StableFarm invariant calculator
+
 #[cfg(test)]
 mod tests {
     use std::cmp;
@@ -776,4 +778,13 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn test_compute_pending_reward() {}
+
+    #[test]
+    fn test_compute_reward_debt() {}
+
+    #[test]
+    fn test_compute_acc_deltafi_per_share() {}
 }
