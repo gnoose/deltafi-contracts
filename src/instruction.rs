@@ -27,6 +27,10 @@ pub struct InitializeData {
     pub fees: Fees,
     /// Rewards
     pub rewards: Rewards,
+    /// Slope variable - real value * 10**6
+    pub k: u64,
+    /// mid price 0 ~ 10**6
+    pub i: u64,
 }
 
 /// Swap instruction data
@@ -37,6 +41,8 @@ pub struct SwapData {
     pub amount_in: u64,
     /// Minimum amount of DESTINATION token to output, prevents excessive slippage
     pub minimum_amount_out: u64,
+    /// Swap direction 0 -> Sell Base Token, 1 -> Sell Quote Token
+    pub swap_direction: u64,
 }
 
 /// Deposit instruction data
@@ -506,19 +512,25 @@ impl SwapInstruction {
                 let (fees, rest) = rest.split_at(Fees::LEN);
                 let fees = Fees::unpack_unchecked(fees)?;
                 let rewards = Rewards::unpack_unchecked(rest)?;
+                let (k, rest) = unpack_u64(rest)?;
+                let (i, _rest) = unpack_u64(rest)?;
                 Self::Initialize(InitializeData {
                     nonce,
                     amp_factor,
                     fees,
                     rewards,
+                    k,
+                    i,
                 })
             }
             1 => {
                 let (amount_in, rest) = unpack_u64(rest)?;
                 let (minimum_amount_out, _rest) = unpack_u64(rest)?;
+                let (swap_direction, _rest) = unpack_u64(rest)?;
                 Self::Swap(SwapData {
                     amount_in,
                     minimum_amount_out,
+                    swap_direction,
                 })
             }
             2 => {
@@ -549,7 +561,7 @@ impl SwapInstruction {
                     minimum_token_amount,
                 })
             }
-            _ => return Err(SwapError::NoSwapInstruction.into()),
+            _ => return Err(SwapError::InvalidInstruction.into()),
         })
     }
 
@@ -562,6 +574,8 @@ impl SwapInstruction {
                 amp_factor,
                 fees,
                 rewards,
+                k,
+                i,
             }) => {
                 buf.push(0);
                 buf.push(nonce);
@@ -572,14 +586,18 @@ impl SwapInstruction {
                 let mut rewards_slice = [0u8; Rewards::LEN];
                 Pack::pack_into_slice(&rewards, &mut rewards_slice[..]);
                 buf.extend_from_slice(&rewards_slice);
+                buf.extend_from_slice(&k.to_le_bytes());
+                buf.extend_from_slice(&i.to_le_bytes());
             }
             Self::Swap(SwapData {
                 amount_in,
                 minimum_amount_out,
+                swap_direction,
             }) => {
                 buf.push(1);
                 buf.extend_from_slice(&amount_in.to_le_bytes());
                 buf.extend_from_slice(&minimum_amount_out.to_le_bytes());
+                buf.extend_from_slice(&swap_direction.to_le_bytes());
             }
             Self::Deposit(DepositData {
                 token_a_amount,
@@ -635,12 +653,16 @@ pub fn initialize(
     amp_factor: u64,
     fees: Fees,
     rewards: Rewards,
+    k: u64,
+    i: u64,
 ) -> Result<Instruction, ProgramError> {
     let data = SwapInstruction::Initialize(InitializeData {
         nonce,
         amp_factor,
         fees,
         rewards,
+        k,
+        i,
     })
     .pack();
 
@@ -772,10 +794,12 @@ pub fn swap(
     admin_fee_destination_pubkey: &Pubkey,
     amount_in: u64,
     minimum_amount_out: u64,
+    swap_direction: u64,
 ) -> Result<Instruction, ProgramError> {
     let data = SwapInstruction::Swap(SwapData {
         amount_in,
         minimum_amount_out,
+        swap_direction,
     })
     .pack();
 
@@ -883,6 +907,10 @@ pub fn unpack<T>(input: &[u8]) -> Result<&T, ProgramError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::utils::{
+        test_utils::{default_i, default_k},
+        SWAP_DIRECTION_SELL_BASE,
+    };
 
     #[test]
     fn test_admin_instruction_packing() {
@@ -995,11 +1023,15 @@ mod tests {
             trade_reward_numerator: 1,
             trade_reward_denominator: 2,
         };
+        let k = default_k().inner_u64().unwrap();
+        let i = default_i().inner_u64().unwrap();
         let check = SwapInstruction::Initialize(InitializeData {
             nonce,
             amp_factor,
             fees,
             rewards,
+            k,
+            i,
         });
         let packed = check.pack();
         let mut expect: Vec<u8> = vec![0, nonce];
@@ -1007,6 +1039,8 @@ mod tests {
         let mut fees_slice = [0u8; Fees::LEN];
         fees.pack_into_slice(&mut fees_slice[..]);
         expect.extend_from_slice(&fees_slice);
+        expect.extend_from_slice(&k.to_le_bytes());
+        expect.extend_from_slice(&i.to_le_bytes());
         let mut rewards_slice = [0u8; Rewards::LEN];
         rewards.pack_into_slice(&mut rewards_slice);
         expect.extend_from_slice(&rewards_slice);
@@ -1016,14 +1050,17 @@ mod tests {
 
         let amount_in: u64 = 2;
         let minimum_amount_out: u64 = 10;
+        let swap_direction: u64 = SWAP_DIRECTION_SELL_BASE;
         let check = SwapInstruction::Swap(SwapData {
             amount_in,
             minimum_amount_out,
+            swap_direction,
         });
         let packed = check.pack();
         let mut expect = vec![1];
         expect.extend_from_slice(&amount_in.to_le_bytes());
         expect.extend_from_slice(&minimum_amount_out.to_le_bytes());
+        expect.extend_from_slice(&swap_direction.to_le_bytes());
         assert_eq!(packed, expect);
         let unpacked = SwapInstruction::unpack(&expect).unwrap();
         assert_eq!(unpacked, check);

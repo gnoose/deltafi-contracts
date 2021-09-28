@@ -5,8 +5,17 @@ use spl_token::state::Account;
 
 use crate::error::SwapError;
 
+/// swap directions - sell base
+pub const SWAP_DIRECTION_SELL_BASE: u64 = 0;
+
+/// swap directions - sell quote
+pub const SWAP_DIRECTION_SELL_QUOTE: u64 = 1;
+
 /// Default token decimals
 pub const DEFAULT_TOKEN_DECIMALS: u8 = 6;
+
+/// Default base point with default token decimals
+pub const DEFAULT_BASE_POINT: u64 = 1000000;
 
 /// Calculates the authority id by generating a program address.
 pub fn authority_id(program_id: &Pubkey, my_info: &Pubkey, nonce: u8) -> Result<Pubkey, SwapError> {
@@ -118,6 +127,12 @@ pub mod test_utils {
         pub admin_fee_b_account: Account,
         pub fees: Fees,
         pub rewards: Rewards,
+        pub k: FixedU256,
+        pub i: FixedU256,
+        pub base_target: FixedU256,
+        pub quote_target: FixedU256,
+        pub base_reserve: FixedU256,
+        pub quote_reserve: FixedU256,
     }
 
     impl SwapAccountInfo {
@@ -128,6 +143,8 @@ pub mod test_utils {
             token_b_amount: u64,
             fees: Fees,
             rewards: Rewards,
+            k: FixedU256,
+            i: FixedU256,
         ) -> Self {
             let swap_key = pubkey_rand();
             let swap_account = Account::new(0, SwapInfo::get_packed_len(), &SWAP_PROGRAM_ID);
@@ -200,6 +217,10 @@ pub mod test_utils {
             );
 
             let admin_account = Account::default();
+            let base_target = FixedU256::zero();
+            let quote_target = FixedU256::zero();
+            let base_reserve = FixedU256::zero();
+            let quote_reserve = FixedU256::zero();
 
             SwapAccountInfo {
                 nonce,
@@ -232,6 +253,12 @@ pub mod test_utils {
                 admin_fee_b_account,
                 fees,
                 rewards,
+                k,
+                i,
+                base_target,
+                quote_target,
+                base_reserve,
+                quote_reserve,
             }
         }
 
@@ -257,6 +284,8 @@ pub mod test_utils {
                     self.initial_amp_factor,
                     self.fees,
                     self.rewards,
+                    self.k.inner_u64()?,
+                    self.i.inner_u64()?,
                 )
                 .unwrap(),
                 vec![
@@ -381,27 +410,61 @@ pub mod test_utils {
             mut user_destination_account: &mut Account,
             amount_in: u64,
             minimum_amount_out: u64,
+            swap_direction: u64,
         ) -> ProgramResult {
             // approve moving from user source account
-            do_process_instruction(
-                approve(
-                    &TOKEN_PROGRAM_ID,
-                    &user_source_key,
-                    &self.authority_key,
-                    &user_key,
-                    &[],
-                    amount_in,
-                )
-                .unwrap(),
-                vec![
-                    &mut user_source_account,
-                    &mut Account::default(),
-                    &mut Account::default(),
-                ],
-            )
-            .unwrap();
+            let admin_destination_key;
 
-            let admin_destination_key = self.get_admin_fee_key(swap_destination_key);
+            match swap_direction {
+                SWAP_DIRECTION_SELL_BASE => {
+                    msg!("swap: swap direction sell base");
+                    do_process_instruction(
+                        approve(
+                            &TOKEN_PROGRAM_ID,
+                            &user_source_key,
+                            &self.authority_key,
+                            &user_key,
+                            &[],
+                            amount_in,
+                        )
+                        .unwrap(),
+                        vec![
+                            &mut user_source_account,
+                            &mut Account::default(),
+                            &mut Account::default(),
+                        ],
+                    )
+                    .unwrap();
+
+                    admin_destination_key = self.get_admin_fee_key(swap_destination_key);
+                }
+                SWAP_DIRECTION_SELL_QUOTE => {
+                    msg!("swap: swap direction sell quote");
+                    do_process_instruction(
+                        approve(
+                            &TOKEN_PROGRAM_ID,
+                            &user_destination_key,
+                            &self.authority_key,
+                            &user_key,
+                            &[],
+                            amount_in,
+                        )
+                        .unwrap(),
+                        vec![
+                            &mut user_destination_account,
+                            &mut Account::default(),
+                            &mut Account::default(),
+                        ],
+                    )
+                    .unwrap();
+
+                    admin_destination_key = self.get_admin_fee_key(swap_source_key);
+                }
+                _ => {
+                    admin_destination_key = self.get_admin_fee_key(swap_destination_key);
+                }
+            }
+
             let mut admin_destination_account =
                 self.get_admin_fee_account(&admin_destination_key).clone();
             let mut swap_source_account = self.get_token_account(swap_source_key).clone();
@@ -423,6 +486,7 @@ pub mod test_utils {
                     &admin_destination_key,
                     amount_in,
                     minimum_amount_out,
+                    swap_direction,
                 )
                 .unwrap(),
                 vec![
