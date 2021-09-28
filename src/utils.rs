@@ -68,6 +68,7 @@ pub mod test_utils {
     pub const DEFAULT_TEST_REWARDS: Rewards = Rewards {
         trade_reward_numerator: 1,
         trade_reward_denominator: 2,
+        trade_reward_cap: 100,
     };
 
     /// Slope Value for testing

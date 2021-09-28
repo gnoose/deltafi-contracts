@@ -1041,6 +1041,7 @@ mod tests {
         let new_rewards: Rewards = Rewards {
             trade_reward_numerator: 2,
             trade_reward_denominator: 3,
+            trade_reward_cap: 100,
         };
 
         // swap not initialized

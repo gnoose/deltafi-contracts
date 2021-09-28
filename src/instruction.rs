@@ -994,6 +994,7 @@ mod tests {
         let new_rewards = Rewards {
             trade_reward_numerator: 1,
             trade_reward_denominator: 2,
+            trade_reward_cap: 100,
         };
         let check = AdminInstruction::SetNewRewards(new_rewards);
         let packed = check.pack();
@@ -1025,6 +1026,7 @@ mod tests {
             let rewards = Rewards {
                 trade_reward_numerator: 1,
                 trade_reward_denominator: 2,
+                trade_reward_cap: 100,
             };
             let k = default_k().inner_u64().unwrap();
             let i = default_i().inner_u64().unwrap();
