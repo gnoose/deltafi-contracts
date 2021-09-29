@@ -1037,16 +1037,17 @@ mod tests {
                 trade_reward_cap: 100,
             };
             letk = default_k().inner_u64().unwrap();
-        let i = default_i().inner_u64().unwrap();
-        let is_open_twap = TWAP_OPENED;
+            let i = default_i().inner_u64().unwrap();
+            let is_open_twap = TWAP_OPENED;
 
-        let check = SwapInstruction::Initialize(InitializeData {
-            nonce,
-            amp_factor,
-            fees,rewards,
-            k,
-            i,
-            is_open_twap,
+            let check = SwapInstruction::Initialize(InitializeData {
+                nonce,
+                amp_factor,
+                fees,
+                rewards,
+                k,
+                i,
+                is_open_twap,
             });
             let packed = check.pack();
             let mut expect: Vec<u8> = vec![0, nonce];
@@ -1056,9 +1057,10 @@ mod tests {
             expect.extend_from_slice(&fees_slice);
             let mut rewards_slice = [0u8; Rewards::LEN];
             rewards.pack_into_slice(&mut rewards_slice);
-            expect.extend_from_slice(&rewards_slice);expect.extend_from_slice(&k.to_le_bytes());
-        expect.extend_from_slice(&i.to_le_bytes());
-        expect.extend_from_slice(&is_open_twap.to_le_bytes());
+            expect.extend_from_slice(&rewards_slice);
+            expect.extend_from_slice(&k.to_le_bytes());
+            expect.extend_from_slice(&i.to_le_bytes());
+            expect.extend_from_slice(&is_open_twap.to_le_bytes());
             assert_eq!(packed, expect);
             let unpacked = SwapInstruction::unpack(&expect).unwrap();
             assert_eq!(unpacked, check);
