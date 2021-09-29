@@ -17,6 +17,12 @@ pub const DEFAULT_TOKEN_DECIMALS: u8 = 6;
 /// Default base point with default token decimals
 pub const DEFAULT_BASE_POINT: u64 = 1000000;
 
+/// Open Twap Flag
+pub const TWAP_OPENED: u64 = 1;
+
+/// Close Twap Falg
+pub const TWAP_CLOSED: u64 = 0;
+
 /// Calculates the authority id by generating a program address.
 pub fn authority_id(program_id: &Pubkey, my_info: &Pubkey, nonce: u8) -> Result<Pubkey, SwapError> {
     Pubkey::create_program_address(&[&my_info.to_bytes()[..32], &[nonce]], program_id)
