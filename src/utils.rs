@@ -17,6 +17,12 @@ pub const DEFAULT_TOKEN_DECIMALS: u8 = 6;
 /// Default base point with default token decimals
 pub const DEFAULT_BASE_POINT: u64 = 1000000;
 
+/// Open Twap Flag
+pub const TWAP_OPENED: u64 = 1;
+
+/// Close Twap Falg
+pub const TWAP_CLOSED: u64 = 0;
+
 /// Calculates the authority id by generating a program address.
 pub fn authority_id(program_id: &Pubkey, my_info: &Pubkey, nonce: u8) -> Result<Pubkey, SwapError> {
     Pubkey::create_program_address(&[&my_info.to_bytes()[..32], &[nonce]], program_id)
@@ -30,6 +36,8 @@ pub fn unpack_token_account(data: &[u8]) -> Result<Account, SwapError> {
 
 #[cfg(test)]
 pub mod test_utils {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
     use solana_program::{
         account_info::AccountInfo, clock::Clock, entrypoint::ProgramResult,
         instruction::Instruction, msg, program_error::ProgramError, program_pack::Pack,
@@ -134,6 +142,9 @@ pub mod test_utils {
         pub quote_target: FixedU256,
         pub base_reserve: FixedU256,
         pub quote_reserve: FixedU256,
+        pub is_open_twap: u64,
+        pub block_timestamp_last: i64,
+        pub base_price_cumulative_last: FixedU256,
     }
 
     impl SwapAccountInfo {
@@ -146,6 +157,7 @@ pub mod test_utils {
             rewards: Rewards,
             k: FixedU256,
             i: FixedU256,
+            is_open_twap: u64,
         ) -> Self {
             let swap_key = pubkey_rand();
             let swap_account = Account::new(0, SwapInfo::get_packed_len(), &SWAP_PROGRAM_ID);
@@ -222,6 +234,11 @@ pub mod test_utils {
             let quote_target = FixedU256::zero();
             let base_reserve = FixedU256::zero();
             let quote_reserve = FixedU256::zero();
+            let block_timestamp_last = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i64;
+            let base_price_cumulative_last = FixedU256::zero();
 
             SwapAccountInfo {
                 nonce,
@@ -260,6 +277,9 @@ pub mod test_utils {
                 quote_target,
                 base_reserve,
                 quote_reserve,
+                is_open_twap,
+                block_timestamp_last,
+                base_price_cumulative_last,
             }
         }
 
@@ -287,6 +307,7 @@ pub mod test_utils {
                     self.rewards,
                     self.k.inner_u64()?,
                     self.i.inner_u64()?,
+                    self.is_open_twap,
                 )
                 .unwrap(),
                 vec![

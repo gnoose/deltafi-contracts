@@ -34,7 +34,8 @@ use crate::{
     rewards::Rewards,
     state::SwapInfo,
     utils,
-    v2curve::{adjusted_target, sell_base_token, sell_quote_token, PMMState},
+    utils::TWAP_OPENED,
+    v2curve::{adjusted_target, get_mid_price, sell_base_token, sell_quote_token, PMMState},
 };
 
 /// Program state handler. (and general curve params)
@@ -130,6 +131,7 @@ impl Processor {
     }
 
     /// Processes an [Initialize](enum.Instruction.html).
+    #[allow(clippy::too_many_arguments)]
     pub fn process_initialize(
         program_id: &Pubkey,
         nonce: u8,
@@ -138,6 +140,7 @@ impl Processor {
         rewards: Rewards,
         k_v: u64,
         i_v: u64,
+        is_open_twap: u64,
         accounts: &[AccountInfo],
     ) -> ProgramResult {
         let account_info_iter = &mut accounts.iter();
@@ -265,6 +268,10 @@ impl Processor {
         let total_supply = FixedU256::new_from_fixed_u64(pool_mint.supply)?;
         let base_target = FixedU256::zero();
         let quote_target = FixedU256::zero();
+        let block_timestamp_last: i64 = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
 
         let (mint_amount, new_base_target, new_quote_target, new_base_reserve, new_quote_reserve) =
             get_buy_shares(
@@ -287,6 +294,33 @@ impl Processor {
             nonce,
             mint_amount.inner_u64()?,
         )?;
+        let new_block_timestamp_last: i64 = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        let mut base_price_cumulative_last = FixedU256::zero();
+        if is_open_twap == TWAP_OPENED {
+            let time_elapsed = new_block_timestamp_last - block_timestamp_last;
+            if time_elapsed > 0
+                && new_base_reserve.inner_u64()? != 0
+                && new_quote_reserve.inner_u64()? != 0
+            {
+                let state = PMMState::new(
+                    i,
+                    k,
+                    new_base_reserve,
+                    new_quote_reserve,
+                    new_base_target,
+                    new_quote_target,
+                    token_swap.r,
+                );
+
+                base_price_cumulative_last = base_price_cumulative_last.checked_add(
+                    get_mid_price(state)?
+                        .checked_mul_floor(FixedU256::new_from_u64(time_elapsed as u64)?)?,
+                )?;
+            }
+        }
 
         let obj = SwapInfo {
             is_initialized: true,
@@ -318,6 +352,9 @@ impl Processor {
             quote_target: new_quote_target,
             base_reserve: new_base_reserve,
             quote_reserve: new_quote_reserve,
+            is_open_twap,
+            block_timestamp_last: new_block_timestamp_last,
+            base_price_cumulative_last,
         };
         SwapInfo::pack(obj, &mut swap_info.data.borrow_mut())?;
         Ok(())
@@ -507,6 +544,34 @@ impl Processor {
         let new_base_reserve = base_balance.checked_add(pay_base_amount)?;
         let new_quote_reserve = quote_balance.checked_sub(dy_swap_amount)?;
 
+        let block_timestamp_last: i64 = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        let mut base_price_cumulative_last = token_swap.base_price_cumulative_last;
+        if token_swap.is_open_twap == TWAP_OPENED {
+            let time_elapsed = block_timestamp_last - token_swap.block_timestamp_last;
+            if time_elapsed > 0
+                && new_base_reserve.inner_u64()? != 0
+                && new_quote_reserve.inner_u64()? != 0
+            {
+                let state = PMMState::new(
+                    token_swap.i,
+                    token_swap.k,
+                    new_base_reserve,
+                    new_quote_reserve,
+                    new_base_target,
+                    new_quote_target,
+                    token_swap.r,
+                );
+
+                base_price_cumulative_last = base_price_cumulative_last.checked_add(
+                    get_mid_price(state)?
+                        .checked_mul_floor(FixedU256::new_from_u64(time_elapsed as u64)?)?,
+                )?;
+            }
+        }
+
         let obj = SwapInfo {
             is_initialized: token_swap.is_initialized,
             is_paused: token_swap.is_paused,
@@ -537,6 +602,9 @@ impl Processor {
             quote_target: new_quote_target,
             base_reserve: new_base_reserve,
             quote_reserve: new_quote_reserve,
+            is_open_twap: token_swap.is_open_twap,
+            block_timestamp_last,
+            base_price_cumulative_last,
         };
         SwapInfo::pack(obj, &mut swap_info.data.borrow_mut())?;
 
@@ -707,6 +775,34 @@ impl Processor {
         let new_base_reserve = base_balance.checked_sub(dy_swap_amount)?;
         let new_quote_reserve = quote_balance.checked_add(pay_quote_amount)?;
 
+        let block_timestamp_last: i64 = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        let mut base_price_cumulative_last = token_swap.base_price_cumulative_last;
+        if token_swap.is_open_twap == TWAP_OPENED {
+            let time_elapsed = block_timestamp_last - token_swap.block_timestamp_last;
+            if time_elapsed > 0
+                && new_base_reserve.inner_u64()? != 0
+                && new_quote_reserve.inner_u64()? != 0
+            {
+                let state = PMMState::new(
+                    token_swap.i,
+                    token_swap.k,
+                    new_base_reserve,
+                    new_quote_reserve,
+                    new_base_target,
+                    new_quote_target,
+                    token_swap.r,
+                );
+
+                base_price_cumulative_last = base_price_cumulative_last.checked_add(
+                    get_mid_price(state)?
+                        .checked_mul_floor(FixedU256::new_from_u64(time_elapsed as u64)?)?,
+                )?;
+            }
+        }
+
         let obj = SwapInfo {
             is_initialized: token_swap.is_initialized,
             is_paused: token_swap.is_paused,
@@ -737,6 +833,9 @@ impl Processor {
             quote_target: new_quote_target,
             base_reserve: new_base_reserve,
             quote_reserve: new_quote_reserve,
+            is_open_twap: token_swap.is_open_twap,
+            block_timestamp_last,
+            base_price_cumulative_last,
         };
         SwapInfo::pack(obj, &mut swap_info.data.borrow_mut())?;
 
@@ -869,6 +968,34 @@ impl Processor {
             mint_amount.inner_u64()?,
         )?;
 
+        let block_timestamp_last: i64 = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        let mut base_price_cumulative_last = token_swap.base_price_cumulative_last;
+        if token_swap.is_open_twap == TWAP_OPENED {
+            let time_elapsed = block_timestamp_last - token_swap.block_timestamp_last;
+            if time_elapsed > 0
+                && new_base_reserve.inner_u64()? != 0
+                && new_quote_reserve.inner_u64()? != 0
+            {
+                let state = PMMState::new(
+                    token_swap.i,
+                    token_swap.k,
+                    new_base_reserve,
+                    new_quote_reserve,
+                    new_base_target,
+                    new_quote_target,
+                    token_swap.r,
+                );
+
+                base_price_cumulative_last = base_price_cumulative_last.checked_add(
+                    get_mid_price(state)?
+                        .checked_mul_floor(FixedU256::new_from_u64(time_elapsed as u64)?)?,
+                )?;
+            }
+        }
+
         let obj = SwapInfo {
             is_initialized: token_swap.is_initialized,
             is_paused: token_swap.is_paused,
@@ -899,6 +1026,9 @@ impl Processor {
             quote_target: new_quote_target,
             base_reserve: new_base_reserve,
             quote_reserve: new_quote_reserve,
+            is_open_twap: token_swap.is_open_twap,
+            block_timestamp_last,
+            base_price_cumulative_last,
         };
         SwapInfo::pack(obj, &mut swap_info.data.borrow_mut())?;
 
@@ -1186,10 +1316,19 @@ impl Processor {
                 rewards,
                 k,
                 i,
+                is_open_twap,
             }) => {
                 msg!("Instruction: Init");
                 Self::process_initialize(
-                    program_id, nonce, amp_factor, fees, rewards, k, i, accounts,
+                    program_id,
+                    nonce,
+                    amp_factor,
+                    fees,
+                    rewards,
+                    k,
+                    i,
+                    is_open_twap,
+                    accounts,
                 )
             }
             SwapInstruction::Swap(SwapData {
@@ -1384,6 +1523,7 @@ mod tests {
             DEFAULT_TEST_REWARDS,
             default_k(),
             default_i(),
+            TWAP_OPENED,
         );
 
         // wrong nonce for authority_key
@@ -2036,6 +2176,7 @@ mod tests {
             DEFAULT_TEST_REWARDS,
             default_k(),
             default_i(),
+            TWAP_OPENED,
         );
 
         let deposit_a = token_a_amount / 10;
@@ -2552,6 +2693,7 @@ mod tests {
             DEFAULT_TEST_REWARDS,
             default_k(),
             default_i(),
+            TWAP_OPENED,
         );
         let withdrawer_key = pubkey_rand();
         let initial_a = token_a_amount / 10;
@@ -3173,6 +3315,7 @@ mod tests {
             .checked_div_floor(FixedU256::new(10.into()))
             .unwrap();
         let i = FixedU256::one();
+        let is_open_twap = TWAP_OPENED;
 
         let swap_fees: Fees = Fees {
             admin_trade_fee_numerator: 1,
@@ -3194,6 +3337,7 @@ mod tests {
             DEFAULT_TEST_REWARDS,
             k,
             i,
+            is_open_twap,
         );
 
         let initial_a = token_a_amount
@@ -3385,6 +3529,7 @@ mod tests {
             DEFAULT_TEST_REWARDS,
             default_k(),
             default_i(),
+            TWAP_OPENED,
         );
         let initial_a = token_a_amount;
         let initial_b = token_b_amount;
@@ -3800,6 +3945,7 @@ mod tests {
             DEFAULT_TEST_REWARDS,
             default_k(),
             default_i(),
+            TWAP_OPENED,
         );
         let withdrawer_key = pubkey_rand();
         let initial_a = token_a_amount / 10;

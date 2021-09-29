@@ -1,5 +1,7 @@
 //! Program rewards
 
+use std::cmp::Ordering;
+
 use arrayref::{array_mut_ref, array_ref, array_refs, mut_array_refs};
 use solana_program::{
     program_error::ProgramError,
@@ -7,7 +9,6 @@ use solana_program::{
 };
 
 use crate::bn::{FixedU256, U256};
-use std::cmp::Ordering;
 
 /// Rewards structure
 #[repr(C)]

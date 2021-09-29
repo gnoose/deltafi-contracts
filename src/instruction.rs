@@ -31,6 +31,8 @@ pub struct InitializeData {
     pub k: u64,
     /// mid price 0 ~ 10**6
     pub i: u64,
+    /// flag to know about twap open
+    pub is_open_twap: u64,
 }
 
 /// Swap instruction data
@@ -514,7 +516,8 @@ impl SwapInstruction {
                 let (rewards, rest) = rest.split_at(Rewards::LEN);
                 let rewards = Rewards::unpack_unchecked(rewards)?;
                 let (k, rest) = unpack_u64(rest)?;
-                let (i, _rest) = unpack_u64(rest)?;
+                let (i, rest) = unpack_u64(rest)?;
+                let (is_open_twap, _rest) = unpack_u64(rest)?;
                 Self::Initialize(InitializeData {
                     nonce,
                     amp_factor,
@@ -522,6 +525,7 @@ impl SwapInstruction {
                     rewards,
                     k,
                     i,
+                    is_open_twap,
                 })
             }
             1 => {
@@ -577,6 +581,7 @@ impl SwapInstruction {
                 rewards,
                 k,
                 i,
+                is_open_twap,
             }) => {
                 buf.push(0);
                 buf.push(nonce);
@@ -589,6 +594,7 @@ impl SwapInstruction {
                 buf.extend_from_slice(&rewards_slice);
                 buf.extend_from_slice(&k.to_le_bytes());
                 buf.extend_from_slice(&i.to_le_bytes());
+                buf.extend_from_slice(&is_open_twap.to_le_bytes());
             }
             Self::Swap(SwapData {
                 amount_in,
@@ -656,6 +662,7 @@ pub fn initialize(
     rewards: Rewards,
     k: u64,
     i: u64,
+    is_open_twap: u64,
 ) -> Result<Instruction, ProgramError> {
     let data = SwapInstruction::Initialize(InitializeData {
         nonce,
@@ -664,6 +671,7 @@ pub fn initialize(
         rewards,
         k,
         i,
+        is_open_twap,
     })
     .pack();
 
@@ -910,7 +918,7 @@ mod tests {
     use super::*;
     use crate::utils::{
         test_utils::{default_i, default_k},
-        SWAP_DIRECTION_SELL_BASE,
+        SWAP_DIRECTION_SELL_BASE, TWAP_OPENED,
     };
 
     #[test]
@@ -1030,6 +1038,8 @@ mod tests {
             };
             let k = default_k().inner_u64().unwrap();
             let i = default_i().inner_u64().unwrap();
+            let is_open_twap = TWAP_OPENED;
+
             let check = SwapInstruction::Initialize(InitializeData {
                 nonce,
                 amp_factor,
@@ -1037,6 +1047,7 @@ mod tests {
                 rewards,
                 k,
                 i,
+                is_open_twap,
             });
             let packed = check.pack();
             let mut expect: Vec<u8> = vec![0, nonce];
@@ -1049,6 +1060,7 @@ mod tests {
             expect.extend_from_slice(&rewards_slice);
             expect.extend_from_slice(&k.to_le_bytes());
             expect.extend_from_slice(&i.to_le_bytes());
+            expect.extend_from_slice(&is_open_twap.to_le_bytes());
             assert_eq!(packed, expect);
             let unpacked = SwapInstruction::unpack(&expect).unwrap();
             assert_eq!(unpacked, check);
