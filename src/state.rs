@@ -7,7 +7,7 @@ use solana_program::{
     pubkey::Pubkey,
 };
 
-use crate::{bn::FixedU256, fees::Fees, oracle::Oracle, v2curve::RState};
+use crate::{bn::FixedU256, fees::Fees, oracle::Oracle, rewards::Rewards, v2curve::RState};
 
 /// Program states.
 #[repr(C)]
@@ -46,6 +46,8 @@ pub struct SwapInfo {
     pub token_a: Pubkey,
     /// Token B
     pub token_b: Pubkey,
+    /// Deltafi token
+    pub deltafi_token: Pubkey,
 
     /// Pool tokens are issued when A or B tokens are deposited.
     /// Pool tokens can be withdrawn back to the original A or B token.
@@ -54,6 +56,9 @@ pub struct SwapInfo {
     pub token_a_mint: Pubkey,
     /// Mint information for token B
     pub token_b_mint: Pubkey,
+    /// deltafi tokens are rewarded when swapping is successfully processed.
+    /// Mint deltafi token
+    pub deltafi_mint: Pubkey,
 
     /// Public key of the admin token account to receive trading and / or withdrawal fees for token a
     pub admin_fee_key_a: Pubkey,
@@ -61,9 +66,11 @@ pub struct SwapInfo {
     pub admin_fee_key_b: Pubkey,
     /// Fees
     pub fees: Fees,
-
     /// Oracle
     pub oracle: Oracle,
+    /// Rewards
+    pub rewards: Rewards,
+
     /// Slope value - 0 < k < 1
     pub k: FixedU256,
     /// Mid price
@@ -94,11 +101,11 @@ impl IsInitialized for SwapInfo {
 }
 
 impl Pack for SwapInfo {
-    const LEN: usize = 984;
+    const LEN: usize = 1072;
 
     /// Unpacks a byte buffer into a [SwapInfo](struct.SwapInfo.html).
     fn unpack_from_slice(input: &[u8]) -> Result<Self, ProgramError> {
-        let input = array_ref![input, 0, 1064];
+        let input = array_ref![input, 0, 1152];
         #[allow(clippy::ptr_offset_with_cast)]
         let (
             is_initialized,
@@ -113,13 +120,16 @@ impl Pack for SwapInfo {
             admin_key,
             token_a,
             token_b,
+            deltafi_token,
             pool_mint,
             token_a_mint,
             token_b_mint,
+            deltafi_mint,
             admin_fee_key_a,
             admin_fee_key_b,
             fees,
             oracle,
+            rewards,
             k,
             i,
             r,
@@ -131,8 +141,8 @@ impl Pack for SwapInfo {
             block_timestamp_last,
             base_price_cumulative_last,
         ) = array_refs![
-            input, 1, 1, 1, 8, 8, 8, 8, 8, 32, 32, 32, 32, 32, 32, 32, 32, 32, 64, 204, 64, 64, 1,
-            64, 64, 64, 64, 8, 8, 64
+            input, 1, 1, 1, 8, 8, 8, 8, 8, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 64, 204, 24,
+            64, 64, 1, 64, 64, 64, 64, 8, 8, 64
         ];
         Ok(Self {
             is_initialized: match is_initialized {
@@ -155,13 +165,16 @@ impl Pack for SwapInfo {
             admin_key: Pubkey::new_from_array(*admin_key),
             token_a: Pubkey::new_from_array(*token_a),
             token_b: Pubkey::new_from_array(*token_b),
+            deltafi_token: Pubkey::new_from_array(*deltafi_token),
             pool_mint: Pubkey::new_from_array(*pool_mint),
             token_a_mint: Pubkey::new_from_array(*token_a_mint),
             token_b_mint: Pubkey::new_from_array(*token_b_mint),
+            deltafi_mint: Pubkey::new_from_array(*deltafi_mint),
             admin_fee_key_a: Pubkey::new_from_array(*admin_fee_key_a),
             admin_fee_key_b: Pubkey::new_from_array(*admin_fee_key_b),
             fees: Fees::unpack_from_slice(fees)?,
             oracle: Oracle::unpack_from_slice(oracle)?,
+            rewards: Rewards::unpack_from_slice(rewards)?,
             k: FixedU256::unpack_from_slice(k)?,
             i: FixedU256::unpack_from_slice(i)?,
             r: RState::unpack(r)?,
@@ -176,7 +189,7 @@ impl Pack for SwapInfo {
     }
 
     fn pack_into_slice(&self, output: &mut [u8]) {
-        let output = array_mut_ref![output, 0, 1064];
+        let output = array_mut_ref![output, 0, 1152];
         let (
             is_initialized,
             is_paused,
@@ -190,13 +203,16 @@ impl Pack for SwapInfo {
             admin_key,
             token_a,
             token_b,
+            deltafi_token,
             pool_mint,
             token_a_mint,
             token_b_mint,
+            deltafi_mint,
             admin_fee_key_a,
             admin_fee_key_b,
             fees,
             oracle,
+            rewards,
             k,
             i,
             r,
@@ -208,8 +224,8 @@ impl Pack for SwapInfo {
             block_timestamp_last,
             base_cumulative_price_last,
         ) = mut_array_refs![
-            output, 1, 1, 1, 8, 8, 8, 8, 8, 32, 32, 32, 32, 32, 32, 32, 32, 32, 64, 204, 64, 64, 1,
-            64, 64, 64, 64, 8, 8, 64
+            output, 1, 1, 1, 8, 8, 8, 8, 8, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 64, 204,
+            24, 64, 64, 1, 64, 64, 64, 64, 8, 8, 64
         ];
         is_initialized[0] = self.is_initialized as u8;
         is_paused[0] = self.is_paused as u8;
@@ -223,13 +239,16 @@ impl Pack for SwapInfo {
         admin_key.copy_from_slice(self.admin_key.as_ref());
         token_a.copy_from_slice(self.token_a.as_ref());
         token_b.copy_from_slice(self.token_b.as_ref());
+        deltafi_token.copy_from_slice(self.deltafi_token.as_ref());
         pool_mint.copy_from_slice(self.pool_mint.as_ref());
         token_a_mint.copy_from_slice(self.token_a_mint.as_ref());
         token_b_mint.copy_from_slice(self.token_b_mint.as_ref());
+        deltafi_mint.copy_from_slice(self.deltafi_mint.as_ref());
         admin_fee_key_a.copy_from_slice(self.admin_fee_key_a.as_ref());
         admin_fee_key_b.copy_from_slice(self.admin_fee_key_b.as_ref());
         self.fees.pack_into_slice(&mut fees[..]);
         self.oracle.pack_into_slice(&mut oracle[..]);
+        self.rewards.pack_into_slice(&mut rewards[..]);
         self.k.pack_into_slice(&mut k[..]);
         self.i.pack_into_slice(&mut i[..]);
         *r = self.r.pack();
@@ -273,13 +292,17 @@ mod tests {
         let token_b_mint_raw = [7u8; 32];
         let admin_fee_key_a_raw = [8u8; 32];
         let admin_fee_key_b_raw = [9u8; 32];
+        let deltafi_token_raw = [10u8; 32];
+        let deltafi_mint_raw = [11u8; 32];
         let admin_key = Pubkey::new_from_array(admin_key_raw);
         let future_admin_key = Pubkey::new_from_array(future_admin_key_raw);
         let token_a = Pubkey::new_from_array(token_a_raw);
         let token_b = Pubkey::new_from_array(token_b_raw);
+        let deltafi_token = Pubkey::new_from_array(deltafi_token_raw);
         let pool_mint = Pubkey::new_from_array(pool_mint_raw);
         let token_a_mint = Pubkey::new_from_array(token_a_mint_raw);
         let token_b_mint = Pubkey::new_from_array(token_b_mint_raw);
+        let deltafi_mint = Pubkey::new_from_array(deltafi_mint_raw);
         let admin_fee_key_a = Pubkey::new_from_array(admin_fee_key_a_raw);
         let admin_fee_key_b = Pubkey::new_from_array(admin_fee_key_b_raw);
         let admin_trade_fee_numerator = 1;
@@ -301,6 +324,16 @@ mod tests {
             withdraw_fee_denominator,
         };
         let oracle = Oracle::new(token_a, token_b);
+        let is_initialized = true;
+        let is_paused = false;
+        let trade_reward_numerator = 1;
+        let trade_reward_denominator = 2;
+        let trade_reward_cap = 100;
+        let rewards = Rewards {
+            trade_reward_numerator,
+            trade_reward_denominator,
+            trade_reward_cap,
+        };
         let k = default_k();
         let i = default_i();
         let r = RState::One;
@@ -314,8 +347,6 @@ mod tests {
             .as_secs() as i64;
         let base_cumulative_price_last = rand::thread_rng().gen_range(ZERO_TS, i64::MAX);
 
-        let is_initialized = true;
-        let is_paused = false;
         let swap_info = SwapInfo {
             is_initialized,
             is_paused,
@@ -329,13 +360,16 @@ mod tests {
             admin_key,
             token_a,
             token_b,
+            deltafi_token,
             pool_mint,
             token_a_mint,
             token_b_mint,
+            deltafi_mint,
             admin_fee_key_a,
             admin_fee_key_b,
             fees,
             oracle,
+            rewards,
             k,
             i,
             r,
@@ -363,9 +397,11 @@ mod tests {
         packed.extend_from_slice(&admin_key_raw);
         packed.extend_from_slice(&token_a_raw);
         packed.extend_from_slice(&token_b_raw);
+        packed.extend_from_slice(&deltafi_token_raw);
         packed.extend_from_slice(&pool_mint_raw);
         packed.extend_from_slice(&token_a_mint_raw);
         packed.extend_from_slice(&token_b_mint_raw);
+        packed.extend_from_slice(&deltafi_mint_raw);
         packed.extend_from_slice(&admin_fee_key_a_raw);
         packed.extend_from_slice(&admin_fee_key_b_raw);
         packed.extend_from_slice(&admin_trade_fee_numerator.to_le_bytes());
@@ -376,9 +412,15 @@ mod tests {
         packed.extend_from_slice(&trade_fee_denominator.to_le_bytes());
         packed.extend_from_slice(&withdraw_fee_numerator.to_le_bytes());
         packed.extend_from_slice(&withdraw_fee_denominator.to_le_bytes());
+
         let mut packed_oracle = [0u8; Oracle::LEN];
         oracle.pack_into_slice(&mut packed_oracle);
         packed.extend_from_slice(&packed_oracle);
+
+        let mut packed_rewards = [0u8; Rewards::LEN];
+        rewards.pack_into_slice(&mut packed_rewards);
+        packed.extend_from_slice(&packed_rewards);
+
         let mut packed_k = [0u8; FixedU256::LEN];
         k.pack_into_slice(&mut packed_k);
         packed.extend_from_slice(&packed_k);

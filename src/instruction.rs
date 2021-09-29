@@ -12,8 +12,9 @@ use solana_program::{
     sysvar::clock,
 };
 
-use crate::{error::SwapError, fees::Fees};
+use crate::{error::SwapError, fees::Fees, rewards::Rewards};
 
+/// SWAP INSTRUNCTION DATA
 /// Initialize instruction data
 #[repr(C)]
 #[derive(Debug, PartialEq)]
@@ -24,6 +25,8 @@ pub struct InitializeData {
     pub amp_factor: u64,
     /// Fees
     pub fees: Fees,
+    /// Rewards
+    pub rewards: Rewards,
     /// Slope variable - real value * 10**6
     pub k: u64,
     /// mid price 0 ~ 10**6
@@ -80,6 +83,7 @@ pub struct WithdrawOneData {
     pub minimum_token_amount: u64,
 }
 
+/// ADMIN INSTRUCTION DATA
 /// RampA instruction data
 #[repr(C)]
 #[derive(Clone, Debug, PartialEq)]
@@ -88,6 +92,37 @@ pub struct RampAData {
     pub target_amp: u64,
     /// Unix timestamp to stop ramp
     pub stop_ramp_ts: i64,
+}
+/// Farm Initialize instruction data
+#[repr(C)]
+#[derive(Clone, Debug, PartialEq)]
+pub struct FarmData {
+    /// alloc point for farm
+    pub alloc_point: u64,
+    ///
+    pub reward_unit: u64,
+}
+
+/// FARM INSTRUCTION DATA
+
+/// Farm Deposit instruction data
+#[repr(C)]
+#[derive(Clone, Debug, PartialEq)]
+pub struct FarmingWithdrawData {
+    /// Amount of pool tokens to withdraw.
+    pub pool_token_amount: u64,
+    /// Minimum amount of LP token to receive, prevents excessive slippage
+    pub min_pool_token_amount: u64,
+}
+
+/// Farm Deposit instruction data
+#[repr(C)]
+#[derive(Clone, Debug, PartialEq)]
+pub struct FarmingDepositData {
+    /// LP token amount to deposit
+    pub pool_token_amount: u64,
+    /// Minimum detafi tokens to mint, prevents excessive slippage
+    pub min_mint_amount: u64,
 }
 
 /// Admin only instructions.
@@ -110,6 +145,8 @@ pub enum AdminInstruction {
     CommitNewAdmin,
     /// TODO: Docs
     SetNewFees(Fees),
+    /// TODO: Docs
+    SetNewRewards(Rewards),
 }
 
 impl AdminInstruction {
@@ -134,6 +171,10 @@ impl AdminInstruction {
             107 => {
                 let fees = Fees::unpack_unchecked(rest)?;
                 Some(Self::SetNewFees(fees))
+            }
+            108 => {
+                let rewards = Rewards::unpack_unchecked(rest)?;
+                Some(Self::SetNewRewards(rewards))
             }
             _ => None,
         })
@@ -162,6 +203,12 @@ impl AdminInstruction {
                 let mut fees_slice = [0u8; Fees::LEN];
                 Pack::pack_into_slice(&fees, &mut fees_slice[..]);
                 buf.extend_from_slice(&fees_slice);
+            }
+            Self::SetNewRewards(rewards) => {
+                buf.push(108);
+                let mut rewards_slice = [0u8; Rewards::LEN];
+                Pack::pack_into_slice(&rewards, &mut rewards_slice[..]);
+                buf.extend_from_slice(&rewards_slice);
             }
         }
         buf
@@ -359,6 +406,29 @@ pub fn set_new_fees(
     })
 }
 
+/// Creates a 'set_rewards' instruction.
+pub fn set_rewards(
+    program_id: &Pubkey,
+    swap_pubkey: &Pubkey,
+    authority_pubkey: &Pubkey,
+    admin_pubkey: &Pubkey,
+    new_rewards: Rewards,
+) -> Result<Instruction, ProgramError> {
+    let data = AdminInstruction::SetNewRewards(new_rewards).pack();
+
+    let accounts = vec![
+        AccountMeta::new(*swap_pubkey, true),
+        AccountMeta::new(*authority_pubkey, false),
+        AccountMeta::new(*admin_pubkey, true),
+    ];
+
+    Ok(Instruction {
+        program_id: *program_id,
+        accounts,
+        data,
+    })
+}
+
 /// Instructions supported by the SwapInfo program.
 #[repr(C)]
 #[derive(Debug, PartialEq)]
@@ -441,8 +511,10 @@ impl SwapInstruction {
             0 => {
                 let (&nonce, rest) = rest.split_first().ok_or(SwapError::InvalidInstruction)?;
                 let (amp_factor, rest) = unpack_u64(rest)?;
-                let (fee_byte, rest) = rest.split_at(Fees::LEN);
-                let fees = Fees::unpack_unchecked(fee_byte)?;
+                let (fees, rest) = rest.split_at(Fees::LEN);
+                let fees = Fees::unpack_unchecked(fees)?;
+                let (rewards, rest) = rest.split_at(Rewards::LEN);
+                let rewards = Rewards::unpack_unchecked(rewards)?;
                 let (k, rest) = unpack_u64(rest)?;
                 let (i, rest) = unpack_u64(rest)?;
                 let (is_open_twap, _rest) = unpack_u64(rest)?;
@@ -450,6 +522,7 @@ impl SwapInstruction {
                     nonce,
                     amp_factor,
                     fees,
+                    rewards,
                     k,
                     i,
                     is_open_twap,
@@ -505,6 +578,7 @@ impl SwapInstruction {
                 nonce,
                 amp_factor,
                 fees,
+                rewards,
                 k,
                 i,
                 is_open_twap,
@@ -515,6 +589,9 @@ impl SwapInstruction {
                 let mut fees_slice = [0u8; Fees::LEN];
                 Pack::pack_into_slice(&fees, &mut fees_slice[..]);
                 buf.extend_from_slice(&fees_slice);
+                let mut rewards_slice = [0u8; Rewards::LEN];
+                Pack::pack_into_slice(&rewards, &mut rewards_slice[..]);
+                buf.extend_from_slice(&rewards_slice);
                 buf.extend_from_slice(&k.to_le_bytes());
                 buf.extend_from_slice(&i.to_le_bytes());
                 buf.extend_from_slice(&is_open_twap.to_le_bytes());
@@ -577,9 +654,12 @@ pub fn initialize(
     token_b_pubkey: &Pubkey,
     pool_mint_pubkey: &Pubkey,
     destination_pubkey: &Pubkey, // Desintation to mint pool tokens for bootstrapper
+    deltafi_mint_pubkey: &Pubkey,
+    deltafi_token_pubkey: &Pubkey,
     nonce: u8,
     amp_factor: u64,
     fees: Fees,
+    rewards: Rewards,
     k: u64,
     i: u64,
     is_open_twap: u64,
@@ -588,6 +668,7 @@ pub fn initialize(
         nonce,
         amp_factor,
         fees,
+        rewards,
         k,
         i,
         is_open_twap,
@@ -606,6 +687,8 @@ pub fn initialize(
         AccountMeta::new(*token_b_pubkey, false),
         AccountMeta::new(*pool_mint_pubkey, false),
         AccountMeta::new(*destination_pubkey, false),
+        AccountMeta::new(*deltafi_mint_pubkey, false),
+        AccountMeta::new(*deltafi_token_pubkey, false),
         AccountMeta::new(*pool_token_program_id, false),
     ];
 
@@ -715,6 +798,8 @@ pub fn swap(
     swap_source_pubkey: &Pubkey,
     swap_destination_pubkey: &Pubkey,
     destination_pubkey: &Pubkey,
+    reward_token_pubkey: &Pubkey,
+    reward_mint_pubkey: &Pubkey,
     admin_fee_destination_pubkey: &Pubkey,
     amount_in: u64,
     minimum_amount_out: u64,
@@ -734,6 +819,8 @@ pub fn swap(
         AccountMeta::new(*swap_source_pubkey, false),
         AccountMeta::new(*swap_destination_pubkey, false),
         AccountMeta::new(*destination_pubkey, false),
+        AccountMeta::new(*reward_token_pubkey, false),
+        AccountMeta::new(*reward_mint_pubkey, false),
         AccountMeta::new(*admin_fee_destination_pubkey, false),
         AccountMeta::new(*token_program_id, false),
         AccountMeta::new(clock::id(), false),
@@ -911,111 +998,147 @@ mod tests {
         assert_eq!(packed, expect);
         let unpacked = AdminInstruction::unpack(&expect).unwrap();
         assert_eq!(unpacked, Some(check));
+
+        let new_rewards = Rewards {
+            trade_reward_numerator: 1,
+            trade_reward_denominator: 2,
+            trade_reward_cap: 100,
+        };
+        let check = AdminInstruction::SetNewRewards(new_rewards);
+        let packed = check.pack();
+        let mut expect: Vec<u8> = vec![108];
+        let mut new_rewards_slice = [0u8; Rewards::LEN];
+        new_rewards.pack_into_slice(&mut new_rewards_slice[..]);
+        expect.extend_from_slice(&new_rewards_slice);
+        assert_eq!(packed, expect);
+        let unpacked = AdminInstruction::unpack(&expect).unwrap();
+        assert_eq!(unpacked, Some(check));
     }
 
     #[test]
     fn test_swap_instruction_packing() {
-        let nonce: u8 = 255;
-        let amp_factor: u64 = 0;
-        let fees = Fees {
-            admin_trade_fee_numerator: 1,
-            admin_trade_fee_denominator: 2,
-            admin_withdraw_fee_numerator: 3,
-            admin_withdraw_fee_denominator: 4,
-            trade_fee_numerator: 5,
-            trade_fee_denominator: 6,
-            withdraw_fee_numerator: 7,
-            withdraw_fee_denominator: 8,
-        };
-        let k = default_k().inner_u64().unwrap();
+        // Initialize instruction packing
+        {
+            let nonce: u8 = 255;
+            let amp_factor: u64 = 0;
+            let fees = Fees {
+                admin_trade_fee_numerator: 1,
+                admin_trade_fee_denominator: 2,
+                admin_withdraw_fee_numerator: 3,
+                admin_withdraw_fee_denominator: 4,
+                trade_fee_numerator: 5,
+                trade_fee_denominator: 6,
+                withdraw_fee_numerator: 7,
+                withdraw_fee_denominator: 8,
+            };
+            let rewards = Rewards {
+                trade_reward_numerator: 1,
+                trade_reward_denominator: 2,
+                trade_reward_cap: 100,
+            };
+            letk = default_k().inner_u64().unwrap();
         let i = default_i().inner_u64().unwrap();
         let is_open_twap = TWAP_OPENED;
 
         let check = SwapInstruction::Initialize(InitializeData {
             nonce,
             amp_factor,
-            fees,
+            fees,rewards,
             k,
             i,
             is_open_twap,
-        });
-        let packed = check.pack();
-        let mut expect: Vec<u8> = vec![0, nonce];
-        expect.extend_from_slice(&amp_factor.to_le_bytes());
-        let mut fees_slice = [0u8; Fees::LEN];
-        fees.pack_into_slice(&mut fees_slice[..]);
-        expect.extend_from_slice(&fees_slice);
-        expect.extend_from_slice(&k.to_le_bytes());
+            });
+            let packed = check.pack();
+            let mut expect: Vec<u8> = vec![0, nonce];
+            expect.extend_from_slice(&amp_factor.to_le_bytes());
+            let mut fees_slice = [0u8; Fees::LEN];
+            fees.pack_into_slice(&mut fees_slice[..]);
+            expect.extend_from_slice(&fees_slice);
+            let mut rewards_slice = [0u8; Rewards::LEN];
+            rewards.pack_into_slice(&mut rewards_slice);
+            expect.extend_from_slice(&rewards_slice);expect.extend_from_slice(&k.to_le_bytes());
         expect.extend_from_slice(&i.to_le_bytes());
         expect.extend_from_slice(&is_open_twap.to_le_bytes());
+            assert_eq!(packed, expect);
+            let unpacked = SwapInstruction::unpack(&expect).unwrap();
+            assert_eq!(unpacked, check);
+        }
 
-        assert_eq!(packed, expect);
-        let unpacked = SwapInstruction::unpack(&expect).unwrap();
-        assert_eq!(unpacked, check);
+        // Swap instruction packing
+        {
+            let amount_in: u64 = 2;
+            let minimum_amount_out: u64 = 10;
+            let swap_direction: u64 = SWAP_DIRECTION_SELL_BASE;
+            let check = SwapInstruction::Swap(SwapData {
+                amount_in,
+                minimum_amount_out,
+                swap_direction,
+            });
+            let packed = check.pack();
+            let mut expect = vec![1];
+            expect.extend_from_slice(&amount_in.to_le_bytes());
+            expect.extend_from_slice(&minimum_amount_out.to_le_bytes());
+            expect.extend_from_slice(&swap_direction.to_le_bytes());
+            assert_eq!(packed, expect);
+            let unpacked = SwapInstruction::unpack(&expect).unwrap();
+            assert_eq!(unpacked, check);
+        }
 
-        let amount_in: u64 = 2;
-        let minimum_amount_out: u64 = 10;
-        let swap_direction: u64 = SWAP_DIRECTION_SELL_BASE;
-        let check = SwapInstruction::Swap(SwapData {
-            amount_in,
-            minimum_amount_out,
-            swap_direction,
-        });
-        let packed = check.pack();
-        let mut expect = vec![1];
-        expect.extend_from_slice(&amount_in.to_le_bytes());
-        expect.extend_from_slice(&minimum_amount_out.to_le_bytes());
-        expect.extend_from_slice(&swap_direction.to_le_bytes());
-        assert_eq!(packed, expect);
-        let unpacked = SwapInstruction::unpack(&expect).unwrap();
-        assert_eq!(unpacked, check);
+        // Deposit instruction packing
+        {
+            let token_a_amount: u64 = 10;
+            let token_b_amount: u64 = 20;
+            let min_mint_amount: u64 = 5;
+            let check = SwapInstruction::Deposit(DepositData {
+                token_a_amount,
+                token_b_amount,
+                min_mint_amount,
+            });
+            let packed = check.pack();
+            let mut expect = vec![2];
+            expect.extend_from_slice(&token_a_amount.to_le_bytes());
+            expect.extend_from_slice(&token_b_amount.to_le_bytes());
+            expect.extend_from_slice(&min_mint_amount.to_le_bytes());
+            assert_eq!(packed, expect);
+            let unpacked = SwapInstruction::unpack(&expect).unwrap();
+            assert_eq!(unpacked, check);
+        }
 
-        let token_a_amount: u64 = 10;
-        let token_b_amount: u64 = 20;
-        let min_mint_amount: u64 = 5;
-        let check = SwapInstruction::Deposit(DepositData {
-            token_a_amount,
-            token_b_amount,
-            min_mint_amount,
-        });
-        let packed = check.pack();
-        let mut expect = vec![2];
-        expect.extend_from_slice(&token_a_amount.to_le_bytes());
-        expect.extend_from_slice(&token_b_amount.to_le_bytes());
-        expect.extend_from_slice(&min_mint_amount.to_le_bytes());
-        assert_eq!(packed, expect);
-        let unpacked = SwapInstruction::unpack(&expect).unwrap();
-        assert_eq!(unpacked, check);
+        // Withdraw instruction packing
+        {
+            let pool_token_amount: u64 = 1212438012089;
+            let minimum_token_a_amount: u64 = 102198761982612;
+            let minimum_token_b_amount: u64 = 2011239855213;
+            let check = SwapInstruction::Withdraw(WithdrawData {
+                pool_token_amount,
+                minimum_token_a_amount,
+                minimum_token_b_amount,
+            });
+            let packed = check.pack();
+            let mut expect = vec![3];
+            expect.extend_from_slice(&pool_token_amount.to_le_bytes());
+            expect.extend_from_slice(&minimum_token_a_amount.to_le_bytes());
+            expect.extend_from_slice(&minimum_token_b_amount.to_le_bytes());
+            assert_eq!(packed, expect);
+            let unpacked = SwapInstruction::unpack(&expect).unwrap();
+            assert_eq!(unpacked, check);
+        }
 
-        let pool_token_amount: u64 = 1212438012089;
-        let minimum_token_a_amount: u64 = 102198761982612;
-        let minimum_token_b_amount: u64 = 2011239855213;
-        let check = SwapInstruction::Withdraw(WithdrawData {
-            pool_token_amount,
-            minimum_token_a_amount,
-            minimum_token_b_amount,
-        });
-        let packed = check.pack();
-        let mut expect = vec![3];
-        expect.extend_from_slice(&pool_token_amount.to_le_bytes());
-        expect.extend_from_slice(&minimum_token_a_amount.to_le_bytes());
-        expect.extend_from_slice(&minimum_token_b_amount.to_le_bytes());
-        assert_eq!(packed, expect);
-        let unpacked = SwapInstruction::unpack(&expect).unwrap();
-        assert_eq!(unpacked, check);
-
-        let pool_token_amount: u64 = 1212438012089;
-        let minimum_token_amount: u64 = 102198761982612;
-        let check = SwapInstruction::WithdrawOne(WithdrawOneData {
-            pool_token_amount,
-            minimum_token_amount,
-        });
-        let packed = check.pack();
-        let mut expect = vec![4];
-        expect.extend_from_slice(&pool_token_amount.to_le_bytes());
-        expect.extend_from_slice(&minimum_token_amount.to_le_bytes());
-        assert_eq!(packed, expect);
-        let unpacked = SwapInstruction::unpack(&expect).unwrap();
-        assert_eq!(unpacked, check);
+        // WithdrawOne instruction packing
+        {
+            let pool_token_amount: u64 = 1212438012089;
+            let minimum_token_amount: u64 = 102198761982612;
+            let check = SwapInstruction::WithdrawOne(WithdrawOneData {
+                pool_token_amount,
+                minimum_token_amount,
+            });
+            let packed = check.pack();
+            let mut expect = vec![4];
+            expect.extend_from_slice(&pool_token_amount.to_le_bytes());
+            expect.extend_from_slice(&minimum_token_amount.to_le_bytes());
+            assert_eq!(packed, expect);
+            let unpacked = SwapInstruction::unpack(&expect).unwrap();
+            assert_eq!(unpacked, check);
+        }
     }
 }
