@@ -34,7 +34,6 @@ use crate::{
     rewards::Rewards,
     state::SwapInfo,
     utils,
-    utils::TWAP_OPENED,
     v2curve::{adjusted_target, get_mid_price, sell_base_token, sell_quote_token, PMMState},
 };
 
@@ -299,7 +298,7 @@ impl Processor {
             .unwrap()
             .as_secs() as i64;
         let mut base_price_cumulative_last = FixedU256::zero();
-        if is_open_twap == TWAP_OPENED {
+        if is_open_twap == utils::TWAP_OPENED {
             let time_elapsed = new_block_timestamp_last - block_timestamp_last;
             if time_elapsed > 0
                 && new_base_reserve.inner_u64()? != 0
@@ -505,6 +504,11 @@ impl Processor {
                 return Err(ProgramError::InvalidArgument);
             }
         }
+        let mid_price = get_mid_price(state).unwrap();
+        let rewards = &token_swap.rewards;
+        let amount_to_reward = rewards
+            .trade_reward_fixed_u256(pay_base_amount.checked_mul_floor(mid_price)?)
+            .unwrap();
         let dy_swap_amount = receive_quote_amount.checked_sub(dy_fee)?;
         let new_base_target = state.b_0;
         let new_quote_target = quote_target;
@@ -540,6 +544,15 @@ impl Processor {
             token_swap.nonce,
             admin_fee.inner_u64()?,
         )?;
+        Self::token_mint_to(
+            swap_info.key,
+            token_program_info.clone(),
+            reward_mint_info.clone(),
+            reward_token_info.clone(),
+            authority_info.clone(),
+            token_swap.nonce,
+            amount_to_reward.inner_u64()?,
+        )?;
 
         let new_base_reserve = base_balance.checked_add(pay_base_amount)?;
         let new_quote_reserve = quote_balance.checked_sub(dy_swap_amount)?;
@@ -549,7 +562,7 @@ impl Processor {
             .unwrap()
             .as_secs() as i64;
         let mut base_price_cumulative_last = token_swap.base_price_cumulative_last;
-        if token_swap.is_open_twap == TWAP_OPENED {
+        if token_swap.is_open_twap == utils::TWAP_OPENED {
             let time_elapsed = block_timestamp_last - token_swap.block_timestamp_last;
             if time_elapsed > 0
                 && new_base_reserve.inner_u64()? != 0
@@ -736,6 +749,11 @@ impl Processor {
                 return Err(ProgramError::InvalidArgument);
             }
         }
+        let mid_price = get_mid_price(state).unwrap();
+        let rewards = &token_swap.rewards;
+        let amount_to_reward = rewards
+            .trade_reward_fixed_u256(pay_quote_amount.checked_mul_floor(mid_price)?)
+            .unwrap();
         let dy_swap_amount = receive_base_amount.checked_sub(dy_fee)?;
         let new_base_target = base_target;
         let new_quote_target = state.q_0;
@@ -771,6 +789,15 @@ impl Processor {
             token_swap.nonce,
             admin_fee.inner_u64()?,
         )?;
+        Self::token_mint_to(
+            swap_info.key,
+            token_program_info.clone(),
+            reward_mint_info.clone(),
+            reward_token_info.clone(),
+            authority_info.clone(),
+            token_swap.nonce,
+            amount_to_reward.inner_u64()?,
+        )?;
 
         let new_base_reserve = base_balance.checked_sub(dy_swap_amount)?;
         let new_quote_reserve = quote_balance.checked_add(pay_quote_amount)?;
@@ -780,7 +807,7 @@ impl Processor {
             .unwrap()
             .as_secs() as i64;
         let mut base_price_cumulative_last = token_swap.base_price_cumulative_last;
-        if token_swap.is_open_twap == TWAP_OPENED {
+        if token_swap.is_open_twap == utils::TWAP_OPENED {
             let time_elapsed = block_timestamp_last - token_swap.block_timestamp_last;
             if time_elapsed > 0
                 && new_base_reserve.inner_u64()? != 0
@@ -973,7 +1000,7 @@ impl Processor {
             .unwrap()
             .as_secs() as i64;
         let mut base_price_cumulative_last = token_swap.base_price_cumulative_last;
-        if token_swap.is_open_twap == TWAP_OPENED {
+        if token_swap.is_open_twap == utils::TWAP_OPENED {
             let time_elapsed = block_timestamp_last - token_swap.block_timestamp_last;
             if time_elapsed > 0
                 && new_base_reserve.inner_u64()? != 0
@@ -1523,7 +1550,7 @@ mod tests {
             DEFAULT_TEST_REWARDS,
             default_k(),
             default_i(),
-            TWAP_OPENED,
+            utils::TWAP_OPENED,
         );
 
         // wrong nonce for authority_key
@@ -2176,7 +2203,7 @@ mod tests {
             DEFAULT_TEST_REWARDS,
             default_k(),
             default_i(),
-            TWAP_OPENED,
+            utils::TWAP_OPENED,
         );
 
         let deposit_a = token_a_amount / 10;
@@ -2693,7 +2720,7 @@ mod tests {
             DEFAULT_TEST_REWARDS,
             default_k(),
             default_i(),
-            TWAP_OPENED,
+            utils::TWAP_OPENED,
         );
         let withdrawer_key = pubkey_rand();
         let initial_a = token_a_amount / 10;
@@ -3315,7 +3342,7 @@ mod tests {
             .checked_div_floor(FixedU256::new(10.into()))
             .unwrap();
         let i = FixedU256::one();
-        let is_open_twap = TWAP_OPENED;
+        let is_open_twap = utils::TWAP_OPENED;
 
         let swap_fees: Fees = Fees {
             admin_trade_fee_numerator: 1,
@@ -3328,13 +3355,19 @@ mod tests {
             withdraw_fee_denominator: 2000,
         };
 
+        let swap_rewards = Rewards {
+            trade_reward_numerator: 1,
+            trade_reward_denominator: 1000,
+            trade_reward_cap: 100,
+        };
+
         let mut accounts = SwapAccountInfo::new(
             &user_key,
             amp_factor,
             token_a_amount.inner_u64().unwrap(),
             token_b_amount.inner_u64().unwrap(),
             swap_fees,
-            DEFAULT_TEST_REWARDS,
+            swap_rewards,
             k,
             i,
             is_open_twap,
@@ -3375,11 +3408,16 @@ mod tests {
             utils::unpack_token_account(&accounts.admin_fee_b_account.data).unwrap();
         let token_admin_fee_b_amount = swap_token_admin_fee_b.amount;
 
+        let swap_reward_token =
+            utils::unpack_token_account(&accounts.deltafi_token_account.data).unwrap();
+        let deltafi_reward_amount = swap_reward_token.amount;
+
         assert_eq!(token_a_amount, 1000000000);
         assert_eq!(token_b_amount, 1000000000);
         // assert_eq!(token_admin_amount, 1000);
         assert_eq!(token_admin_fee_a_amount, 0);
         assert_eq!(token_admin_fee_b_amount, 0);
+        assert_eq!(deltafi_reward_amount, 0);
         assert_eq!(initial_info.base_target.inner_u64().unwrap(), 1000000000);
         assert_eq!(initial_info.quote_target.inner_u64().unwrap(), 1000000000);
         assert_eq!(initial_info.base_reserve.inner_u64().unwrap(), 1000000000);
@@ -3429,6 +3467,10 @@ mod tests {
             utils::unpack_token_account(&accounts.admin_fee_b_account.data).unwrap();
         let token_admin_fee_b_amount = swap_token_admin_fee_b.amount;
 
+        let swap_reward_token =
+            utils::unpack_token_account(&accounts.deltafi_token_account.data).unwrap();
+        let deltafi_reward_amount = swap_reward_token.amount;
+
         let user_token_a = utils::unpack_token_account(&token_a_account.data).unwrap();
         let user_token_a_amount = user_token_a.amount;
 
@@ -3450,6 +3492,7 @@ mod tests {
         assert_eq!(token_b_amount.checked_div(DEFAULT_BASE_POINT).unwrap(), 910);
         assert_eq!(token_admin_fee_a_amount, 0);
         assert_eq!(token_admin_fee_b_amount, 0);
+        assert_eq!(deltafi_reward_amount, 10000);
         assert_eq!(swap_info.base_target.into_u64_ceil().unwrap(), 1000);
         assert_eq!(swap_info.quote_target.into_u64_ceil().unwrap(), 1000);
         assert_eq!(swap_info.base_reserve.into_u64_ceil().unwrap(), 1100);
@@ -3486,6 +3529,10 @@ mod tests {
             utils::unpack_token_account(&accounts.admin_fee_b_account.data).unwrap();
         let token_admin_fee_b_amount = swap_token_admin_fee_b.amount;
 
+        let swap_reward_token =
+            utils::unpack_token_account(&accounts.deltafi_token_account.data).unwrap();
+        let deltafi_reward_amount = swap_reward_token.amount;
+
         let user_token_a = utils::unpack_token_account(&token_a_account.data).unwrap();
         let user_token_a_amount = user_token_a.amount;
 
@@ -3507,6 +3554,7 @@ mod tests {
         );
         assert_eq!(token_admin_fee_a_amount, 52);
         assert_eq!(token_admin_fee_b_amount, 0);
+        assert_eq!(deltafi_reward_amount, 20000);
         assert_eq!(swap_info.base_target.into_u64_ceil().unwrap(), 1000);
         assert_eq!(swap_info.quote_target.into_u64_ceil().unwrap(), 1006);
         assert_eq!(swap_info.base_reserve.into_u64_ceil().unwrap(), 997);
@@ -3529,7 +3577,7 @@ mod tests {
             DEFAULT_TEST_REWARDS,
             default_k(),
             default_i(),
-            TWAP_OPENED,
+            utils::TWAP_OPENED,
         );
         let initial_a = token_a_amount;
         let initial_b = token_b_amount;
@@ -3945,7 +3993,7 @@ mod tests {
             DEFAULT_TEST_REWARDS,
             default_k(),
             default_i(),
-            TWAP_OPENED,
+            utils::TWAP_OPENED,
         );
         let withdrawer_key = pubkey_rand();
         let initial_a = token_a_amount / 10;
