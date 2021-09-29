@@ -353,7 +353,10 @@ mod tests {
     use solana_sdk::clock::Epoch;
 
     use super::*;
-    use crate::{curve::ZERO_TS, utils::test_utils::*};
+    use crate::{
+        curve::ZERO_TS,
+        utils::{test_utils::*, TWAP_OPENED},
+    };
 
     const DEFAULT_TOKEN_A_AMOUNT: u64 = 1_000_000_000;
     const DEFAULT_TOKEN_B_AMOUNT: u64 = 1_000_000_000;
@@ -409,6 +412,7 @@ mod tests {
             DEFAULT_TEST_REWARDS,
             default_k(),
             default_i(),
+            TWAP_OPENED,
         );
 
         // swap not initialized
@@ -523,6 +527,7 @@ mod tests {
             DEFAULT_TEST_REWARDS,
             default_k(),
             default_i(),
+            TWAP_OPENED,
         );
 
         // swap not initialized
@@ -587,6 +592,7 @@ mod tests {
             DEFAULT_TEST_REWARDS,
             default_k(),
             default_i(),
+            TWAP_OPENED,
         );
 
         // swap not initialized
@@ -641,6 +647,7 @@ mod tests {
             DEFAULT_TEST_REWARDS,
             default_k(),
             default_i(),
+            TWAP_OPENED,
         );
 
         // swap not initialized
@@ -702,6 +709,7 @@ mod tests {
             DEFAULT_TEST_REWARDS,
             default_k(),
             default_i(),
+            TWAP_OPENED,
         );
         let (
             admin_fee_key_a,
@@ -793,6 +801,7 @@ mod tests {
             DEFAULT_TEST_REWARDS,
             default_k(),
             default_i(),
+            TWAP_OPENED,
         );
 
         // swap not initialized
@@ -881,6 +890,7 @@ mod tests {
             DEFAULT_TEST_REWARDS,
             default_k(),
             default_i(),
+            TWAP_OPENED,
         );
 
         // swap not initialized
@@ -964,6 +974,7 @@ mod tests {
             DEFAULT_TEST_REWARDS,
             default_k(),
             default_i(),
+            TWAP_OPENED,
         );
 
         let new_fees: Fees = Fees {
@@ -1036,6 +1047,7 @@ mod tests {
             DEFAULT_TEST_REWARDS,
             default_k(),
             default_i(),
+            TWAP_OPENED,
         );
 
         let new_rewards: Rewards = Rewards {

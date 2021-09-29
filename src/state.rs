@@ -101,7 +101,7 @@ impl IsInitialized for SwapInfo {
 }
 
 impl Pack for SwapInfo {
-    const LEN: usize = 1072;
+    const LEN: usize = 1152;
 
     /// Unpacks a byte buffer into a [SwapInfo](struct.SwapInfo.html).
     fn unpack_from_slice(input: &[u8]) -> Result<Self, ProgramError> {
@@ -222,7 +222,7 @@ impl Pack for SwapInfo {
             quote_reserve,
             is_open_twap,
             block_timestamp_last,
-            base_cumulative_price_last,
+            base_price_cumulative_last,
         ) = mut_array_refs![
             output, 1, 1, 1, 8, 8, 8, 8, 8, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 64, 204,
             24, 64, 64, 1, 64, 64, 64, 64, 8, 8, 64
@@ -259,7 +259,7 @@ impl Pack for SwapInfo {
         *is_open_twap = self.is_open_twap.to_le_bytes();
         *block_timestamp_last = self.block_timestamp_last.to_le_bytes();
         self.base_price_cumulative_last
-            .pack_into_slice(&mut base_cumulative_price_last[..]);
+            .pack_into_slice(&mut base_price_cumulative_last[..]);
     }
 }
 
@@ -267,12 +267,10 @@ impl Pack for SwapInfo {
 mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use rand::{thread_rng, Rng};
-
     use super::*;
-    use crate::{
-        curve::ZERO_TS,
-        utils::test_utils::{default_i, default_k},
+    use crate::utils::{
+        test_utils::{default_i, default_k},
+        TWAP_OPENED,
     };
 
     #[test]
@@ -341,11 +339,12 @@ mod tests {
         let quote_target = FixedU256::zero();
         let base_reserve = FixedU256::zero();
         let quote_reserve = FixedU256::zero();
+        let is_open_twap = TWAP_OPENED;
         let block_timestamp_last: i64 = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs() as i64;
-        let base_cumulative_price_last = rand::thread_rng().gen_range(ZERO_TS, i64::MAX);
+        let base_price_cumulative_last = FixedU256::zero();
 
         let swap_info = SwapInfo {
             is_initialized,
@@ -444,9 +443,9 @@ mod tests {
         packed.extend_from_slice(&packed_quote_reserve);
         packed.extend_from_slice(&is_open_twap.to_le_bytes());
         packed.extend_from_slice(&block_timestamp_last.to_le_bytes());
-        let mut packed_base_cumulative_price_last = [0u8; FixedU256::LEN];
-        base_cumulative_price_last.pack_into_slice(&mut packed_base_cumulative_price_last);
-        packed.extend_from_slice(&packed_base_cumulative_price_last);
+        let mut packed_base_price_cumulative_last = [0u8; FixedU256::LEN];
+        base_price_cumulative_last.pack_into_slice(&mut packed_base_price_cumulative_last);
+        packed.extend_from_slice(&packed_base_price_cumulative_last);
 
         let unpacked = SwapInfo::unpack(&packed).unwrap();
         assert_eq!(swap_info, unpacked);

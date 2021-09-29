@@ -1036,7 +1036,7 @@ mod tests {
                 trade_reward_denominator: 2,
                 trade_reward_cap: 100,
             };
-            letk = default_k().inner_u64().unwrap();
+            let k = default_k().inner_u64().unwrap();
             let i = default_i().inner_u64().unwrap();
             let is_open_twap = TWAP_OPENED;
 

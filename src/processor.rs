@@ -1523,6 +1523,7 @@ mod tests {
             DEFAULT_TEST_REWARDS,
             default_k(),
             default_i(),
+            TWAP_OPENED,
         );
 
         // wrong nonce for authority_key
@@ -2175,6 +2176,7 @@ mod tests {
             DEFAULT_TEST_REWARDS,
             default_k(),
             default_i(),
+            TWAP_OPENED,
         );
 
         let deposit_a = token_a_amount / 10;
@@ -2691,6 +2693,7 @@ mod tests {
             DEFAULT_TEST_REWARDS,
             default_k(),
             default_i(),
+            TWAP_OPENED,
         );
         let withdrawer_key = pubkey_rand();
         let initial_a = token_a_amount / 10;
@@ -3312,6 +3315,7 @@ mod tests {
             .checked_div_floor(FixedU256::new(10.into()))
             .unwrap();
         let i = FixedU256::one();
+        let is_open_twap = TWAP_OPENED;
 
         let swap_fees: Fees = Fees {
             admin_trade_fee_numerator: 1,
@@ -3333,6 +3337,7 @@ mod tests {
             DEFAULT_TEST_REWARDS,
             k,
             i,
+            is_open_twap,
         );
 
         let initial_a = token_a_amount
@@ -3524,6 +3529,7 @@ mod tests {
             DEFAULT_TEST_REWARDS,
             default_k(),
             default_i(),
+            TWAP_OPENED,
         );
         let initial_a = token_a_amount;
         let initial_b = token_b_amount;
@@ -3939,6 +3945,7 @@ mod tests {
             DEFAULT_TEST_REWARDS,
             default_k(),
             default_i(),
+            TWAP_OPENED,
         );
         let withdrawer_key = pubkey_rand();
         let initial_a = token_a_amount / 10;
