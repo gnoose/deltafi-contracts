@@ -2,6 +2,7 @@
 
 use arrayref::{array_mut_ref, array_ref, array_refs, mut_array_refs};
 use solana_program::{
+    msg,
     program_error::ProgramError,
     program_pack::{IsInitialized, Pack, Sealed},
     pubkey::Pubkey,
@@ -179,6 +180,8 @@ impl Pack for SwapInfo {
 }
 
 /// Farm's base information
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct FarmBaseInfo {
     /// whether initialized
     pub is_initialized: bool,
@@ -196,7 +199,6 @@ impl IsInitialized for FarmBaseInfo {
 }
 
 impl Pack for FarmBaseInfo {
-    /// !! must calc out right size after deciding all field.
     const LEN: usize = 17;
 
     /// Unpacks a byte buffer into a [FarmInfo](struct.FarmInfo.html).
@@ -277,8 +279,7 @@ impl IsInitialized for FarmInfo {
 }
 
 impl Pack for FarmInfo {
-    /// !! must calc out right size after deciding all field.
-    const LEN: usize = 395;
+    const LEN: usize = 227;
 
     /// Unpacks a byte buffer into a [FarmInfo](struct.FarmInfo.html).
     fn unpack_from_slice(input: &[u8]) -> Result<Self, ProgramError> {
@@ -354,6 +355,8 @@ impl Pack for FarmInfo {
 }
 
 /// User's farming information
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct FarmingUserInfo {
     /// whether initialized
     pub is_initialized: bool,
@@ -375,8 +378,7 @@ impl IsInitialized for FarmingUserInfo {
 }
 
 impl Pack for FarmingUserInfo {
-    /// !! must calc out right size after deciding all field.
-    const LEN: usize = 395;
+    const LEN: usize = 33;
 
     /// Unpacks a byte buffer into a [FarmInfo](struct.FarmInfo.html).
     fn unpack_from_slice(input: &[u8]) -> Result<Self, ProgramError> {
@@ -389,6 +391,7 @@ impl Pack for FarmingUserInfo {
             timestamp,
             pending_deltafi,
         ) = array_refs![input, 1, 8, 8, 8, 8];
+
         Ok(Self {
             is_initialized: match is_initialized {
                 [0] => false,
