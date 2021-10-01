@@ -51,7 +51,7 @@ pub mod test_utils {
 
     use super::*;
     use crate::{
-        bn::FixedU256, 
+        bn::FixedU256,
         curve::ZERO_TS,
         fees::Fees,
         instruction::*,

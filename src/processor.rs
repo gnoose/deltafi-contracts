@@ -31,7 +31,7 @@ use crate::{
     math2::{get_buy_shares, get_deposit_adjustment_amount},
     oracle::Oracle,
     pool_converter::PoolTokenConverter,
-    rewards::Rewards,    
+    rewards::Rewards,
     state::{FarmBaseInfo, FarmInfo, FarmingUserInfo, SwapInfo},
     utils,
     v2curve::{adjusted_target, get_mid_price, sell_base_token, sell_quote_token, PMMState},
@@ -128,7 +128,6 @@ impl Processor {
             signers,
         )
     }
-
 
     /// Update deltafi pool
     #[allow(clippy::too_many_arguments)]
@@ -942,8 +941,7 @@ impl Processor {
         SwapInfo::pack(obj, &mut swap_info.data.borrow_mut())?;
 
         Ok(())
-    }    
-
+    }
 
     /// Processes an [Deposit](enum.Instruction.html).
     pub fn process_deposit(
@@ -1136,8 +1134,7 @@ impl Processor {
         SwapInfo::pack(obj, &mut swap_info.data.borrow_mut())?;
 
         Ok(())
-    }    
-
+    }
 
     /// Processes an [Withdraw](enum.Instruction.html).
     pub fn process_withdraw(
@@ -1905,7 +1902,7 @@ impl Processor {
                 Self::process_farming_pending_deltafi(program_id, accounts)
             } // _ => Err(SwapError::InvalidInstruction.into())
         }
-    }    
+    }
 }
 
 impl PrintProgramError for SwapError {

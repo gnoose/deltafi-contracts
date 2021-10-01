@@ -260,7 +260,7 @@ impl AdminInstruction {
                 let mut rewards_slice = [0u8; Rewards::LEN];
                 Pack::pack_into_slice(&rewards, &mut rewards_slice[..]);
                 buf.extend_from_slice(&rewards_slice);
-            }            
+            }
         }
         buf
     }
@@ -1689,8 +1689,8 @@ mod tests {
                 Err(_) => {}
             }
         }
-    }   
-    
+    }
+
     #[test]
     fn test_farming_instruction_packing() {
         let pool_token_amount: u64 = 10;
@@ -1746,5 +1746,5 @@ mod tests {
             unpacked, check,
             "test packing and unpacking of the instruction to print pending deltafi in farm"
         );
-    }    
+    }
 }

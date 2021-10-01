@@ -263,7 +263,6 @@ impl Pack for SwapInfo {
     }
 }
 
-
 /// Farm's base information
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]

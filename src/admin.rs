@@ -1232,7 +1232,6 @@ mod tests {
         }
     }
 
-
     #[test]
     fn test_initialize_farm() {
         let user_key = pubkey_rand();
