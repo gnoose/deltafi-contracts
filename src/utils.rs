@@ -800,7 +800,7 @@ pub mod test_utils {
 
     impl FarmAccountInfo {
         pub fn new(
-            user_key: &Pubkey,
+            mint_owner_key: &Pubkey,
             token_pool_amount: u64,
             alloc_point: u64,
             reward_unit: u64,
@@ -818,7 +818,7 @@ pub mod test_utils {
             // !! need to fix with real pool account from token swap.
             let (pool_mint_key, mut pool_mint_account) = create_mint(
                 &TOKEN_PROGRAM_ID,
-                &authority_key,
+                &mint_owner_key,
                 DEFAULT_TOKEN_DECIMALS,
                 None,
             );
@@ -826,17 +826,17 @@ pub mod test_utils {
                 &TOKEN_PROGRAM_ID,
                 &pool_mint_key,
                 &mut pool_mint_account,
+                &mint_owner_key,
                 &authority_key,
-                &user_key,
                 token_pool_amount,
             );
             let (token_deltafi_mint_key, mut token_deltafi_mint_account) =
-                create_mint(&TOKEN_PROGRAM_ID, &user_key, DEFAULT_TOKEN_DECIMALS, None);
+                create_mint(&TOKEN_PROGRAM_ID, &mint_owner_key, DEFAULT_TOKEN_DECIMALS, None);
             let (token_deltafi_key, token_deltafi_account) = mint_token(
                 &TOKEN_PROGRAM_ID,
                 &token_deltafi_mint_key,
                 &mut token_deltafi_mint_account,
-                &user_key,
+                &mint_owner_key,
                 &authority_key,
                 0,
             );
@@ -844,7 +844,7 @@ pub mod test_utils {
                 &TOKEN_PROGRAM_ID,
                 &token_deltafi_mint_key,
                 &mut token_deltafi_mint_account,
-                &user_key,
+                &mint_owner_key,
                 &authority_key,
                 0,
             );
@@ -924,7 +924,7 @@ pub mod test_utils {
 
         pub fn setup_token_accounts(
             &mut self,
-            _farm_owner: &Pubkey,
+            mint_owner: &Pubkey,
             account_owner: &Pubkey,
             lp_amount: u64,
             deltafi_amount: u64,
@@ -938,7 +938,7 @@ pub mod test_utils {
                 &TOKEN_PROGRAM_ID,
                 &self.pool_mint_key,
                 &mut self.pool_mint_account,
-                &self.authority_key,
+                &mint_owner,
                 &account_owner,
                 lp_amount,
             );
@@ -946,7 +946,7 @@ pub mod test_utils {
                 &TOKEN_PROGRAM_ID,
                 &self.token_deltafi_mint_key,
                 &mut self.token_deltafi_mint_account,
-                &self.authority_key,
+                &mint_owner,
                 &account_owner,
                 deltafi_amount,
             );
@@ -1077,7 +1077,7 @@ pub mod test_utils {
             )
             .unwrap();
 
-            // perform deposit
+            // perform withdraw
             do_process_instruction(
                 farm_withdraw(
                     &SWAP_PROGRAM_ID,
@@ -1146,25 +1146,19 @@ pub mod test_utils {
                 farm_emergency_withdraw(
                     &SWAP_PROGRAM_ID,
                     &TOKEN_PROGRAM_ID,
-                    &self.farm_base_key,
                     &self.farm_key,
                     &self.authority_key,
                     &pool_key,
                     &user_farming_key,
                     &self.pool_token_key,
-                    &self.token_deltafi_mint_key,
-                    &self.pool_token_key,
                 )
                 .unwrap(),
                 vec![
-                    &mut self.farm_base_account,
                     &mut self.farm_account,
                     &mut Account::default(),
                     &mut pool_account,
                     &mut user_farming_account,
                     &mut self.pool_token_account,
-                    &mut self.token_deltafi_mint_account,
-                    // &mut self.pool_token_account,
                     &mut Account::default(),
                     &mut clock_account(ZERO_TS),
                 ],
@@ -1209,6 +1203,7 @@ pub mod test_utils {
                     &self.farm_key,
                     &user_farming_key,
                     &pool_key,
+                    &self.pool_mint_key,
                 )
                 .unwrap(),
                 vec![
@@ -1216,6 +1211,7 @@ pub mod test_utils {
                     &mut self.farm_account,
                     &mut user_farming_account,
                     &mut pool_account,
+                    &mut self.pool_mint_account,
                     &mut clock_account(ZERO_TS),
                 ],
             )

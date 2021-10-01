@@ -4,7 +4,7 @@ use solana_program::{
     account_info::{next_account_info, AccountInfo},
     entrypoint::ProgramResult,
     msg,
-    program_error::{ProgramError},
+    program_error::ProgramError,
     program_pack::Pack,
     pubkey::Pubkey,
     sysvar::{clock::Clock, Sysvar},
@@ -888,7 +888,6 @@ mod tests {
 
         accounts.initialize_swap().unwrap();
         msg!("++++++++++");
-
 
         // wrong nonce for authority_key
         {

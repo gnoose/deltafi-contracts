@@ -74,7 +74,6 @@ pub struct WithdrawOneData {
     pub minimum_token_amount: u64,
 }
 
-
 /// ADMIN INSTRUCTION DATA
 /// RampA instruction data
 #[repr(C)]
@@ -987,7 +986,7 @@ pub enum FarmingInstruction {
     ///   8. `[writable]` admin_fee_a admin fee Account for token_a.
     ///   9. `[writable]` admin_fee_b admin fee Account for token_b.
     ///   10. `[]` Token program id
-    EmergencyWithdraw(),    
+    EmergencyWithdraw(),
 
     ///   Withdraw tokens from the pool at the current ratio forceful.
     ///
@@ -1002,7 +1001,7 @@ pub enum FarmingInstruction {
     ///   8. `[writable]` admin_fee_a admin fee Account for token_a.
     ///   9. `[writable]` admin_fee_b admin fee Account for token_b.
     ///   10. `[]` Token program id
-    PrintPendingDeltafi(),    
+    PrintPendingDeltafi(),
 }
 
 impl FarmingInstruction {
@@ -1010,9 +1009,7 @@ impl FarmingInstruction {
     pub fn unpack(input: &[u8]) -> Result<Self, ProgramError> {
         let (&tag, rest) = input.split_first().ok_or(SwapError::InvalidInstruction)?;
         Ok(match tag {
-            0x1e => {
-                Self::EnableUser()
-            }
+            0x1e => Self::EnableUser(),
             0x1f => {
                 let (pool_token_amount, _rest) = unpack_u64(rest)?;
                 // let (_min_mint_amount, _rest) = unpack_u64(rest)?;
@@ -1029,12 +1026,8 @@ impl FarmingInstruction {
                     min_pool_token_amount,
                 })
             }
-            0x21 => {
-                Self::EmergencyWithdraw()
-            }
-            0x22 => {
-                Self::PrintPendingDeltafi()
-            }
+            0x21 => Self::EmergencyWithdraw(),
+            0x22 => Self::PrintPendingDeltafi(),
             _ => return Err(SwapError::InvalidInstruction.into()),
         })
     }
@@ -1056,7 +1049,7 @@ impl FarmingInstruction {
             }
             Self::Withdraw(FarmingWithdrawData {
                 pool_token_amount,
-                min_pool_token_amount
+                min_pool_token_amount,
             }) => {
                 buf.push(0x20);
                 buf.extend_from_slice(&pool_token_amount.to_le_bytes());
@@ -1187,26 +1180,20 @@ pub fn farm_withdraw(
 pub fn farm_emergency_withdraw(
     program_id: &Pubkey,
     token_program_id: &Pubkey,
-    farm_base_pubkey: &Pubkey,
     farm_pubkey: &Pubkey,
     authority_pubkey: &Pubkey,
     source_pubkey: &Pubkey,
     user_farming_pubkey: &Pubkey,
     pool_token_pubkey: &Pubkey,
-    deltafi_mint_pubkey: &Pubkey,
-    dest_pubkey: &Pubkey,
 ) -> Result<Instruction, ProgramError> {
     let data = FarmingInstruction::EmergencyWithdraw().pack();
 
     let accounts = vec![
-        AccountMeta::new(*farm_base_pubkey, false),
         AccountMeta::new(*farm_pubkey, false),
         AccountMeta::new(*authority_pubkey, false),
         AccountMeta::new(*source_pubkey, false),
         AccountMeta::new(*user_farming_pubkey, false),
         AccountMeta::new(*pool_token_pubkey, false),
-        AccountMeta::new(*deltafi_mint_pubkey, false),
-        AccountMeta::new(*dest_pubkey, false),
         AccountMeta::new(*token_program_id, false),
         AccountMeta::new(clock::id(), false),
     ];
@@ -1225,6 +1212,7 @@ pub fn farm_pending_deltafi(
     farm_pubkey: &Pubkey,
     user_farming_pubkey: &Pubkey,
     pool_token_pubkey: &Pubkey,
+    pool_mint_pubkey: &Pubkey,
 ) -> Result<Instruction, ProgramError> {
     let data = FarmingInstruction::PrintPendingDeltafi().pack();
 
@@ -1233,6 +1221,7 @@ pub fn farm_pending_deltafi(
         AccountMeta::new(*farm_pubkey, false),
         AccountMeta::new(*user_farming_pubkey, false),
         AccountMeta::new(*pool_token_pubkey, false),
+        AccountMeta::new(*pool_mint_pubkey, false),
         AccountMeta::new(clock::id(), false),
     ];
 
@@ -1300,28 +1289,44 @@ mod tests {
         expect.extend_from_slice(&stop_ramp_ts.to_le_bytes());
         assert_eq!(packed, expect);
         let unpacked = AdminInstruction::unpack(&expect).unwrap();
-        assert_eq!(unpacked, Some(check), "test packing and unpacking of the admin instruction to RampA");
+        assert_eq!(
+            unpacked,
+            Some(check),
+            "test packing and unpacking of the admin instruction to RampA"
+        );
 
         let check = AdminInstruction::StopRampA;
         let packed = check.pack();
         let expect: Vec<u8> = vec![0x65];
         assert_eq!(packed, expect);
         let unpacked = AdminInstruction::unpack(&expect).unwrap();
-        assert_eq!(unpacked, Some(check), "test packing and unpacking of the admin instruction to StopRampA");
+        assert_eq!(
+            unpacked,
+            Some(check),
+            "test packing and unpacking of the admin instruction to StopRampA"
+        );
 
         let check = AdminInstruction::Pause;
         let packed = check.pack();
         let expect: Vec<u8> = vec![0x66];
         assert_eq!(packed, expect);
         let unpacked = AdminInstruction::unpack(&expect).unwrap();
-        assert_eq!(unpacked, Some(check), "test packing and unpacking of the admin instruction to Pause");
+        assert_eq!(
+            unpacked,
+            Some(check),
+            "test packing and unpacking of the admin instruction to Pause"
+        );
 
         let check = AdminInstruction::Unpause;
         let packed = check.pack();
         let expect: Vec<u8> = vec![0x67];
         assert_eq!(packed, expect);
         let unpacked = AdminInstruction::unpack(&expect).unwrap();
-        assert_eq!(unpacked, Some(check), "test packing and unpacking of the admin instruction to Unpause");
+        assert_eq!(
+            unpacked,
+            Some(check),
+            "test packing and unpacking of the admin instruction to Unpause"
+        );
 
         let check = AdminInstruction::SetFeeAccount;
         let packed = check.pack();
@@ -1335,14 +1340,22 @@ mod tests {
         let expect: Vec<u8> = vec![0x69];
         assert_eq!(packed, expect);
         let unpacked = AdminInstruction::unpack(&expect).unwrap();
-        assert_eq!(unpacked, Some(check), "test packing and unpacking of the admin instruction to ApplyNewAdmin");
+        assert_eq!(
+            unpacked,
+            Some(check),
+            "test packing and unpacking of the admin instruction to ApplyNewAdmin"
+        );
 
         let check = AdminInstruction::CommitNewAdmin;
         let packed = check.pack();
         let expect: Vec<u8> = vec![0x6A];
         assert_eq!(packed, expect);
         let unpacked = AdminInstruction::unpack(&expect).unwrap();
-        assert_eq!(unpacked, Some(check), "test packing and unpacking of the admin instruction to CommitNewAdmin");
+        assert_eq!(
+            unpacked,
+            Some(check),
+            "test packing and unpacking of the admin instruction to CommitNewAdmin"
+        );
 
         let new_fees = Fees {
             admin_trade_fee_numerator: 1,
@@ -1376,7 +1389,10 @@ mod tests {
         let mut expect = vec![0x6C, nonce];
         expect.extend_from_slice(&alloc_point.to_le_bytes());
         expect.extend_from_slice(&reward_unit.to_le_bytes());
-        assert_eq!(packed, expect, "test packing and unpacking of the admin instruction to InitializeFarm");
+        assert_eq!(
+            packed, expect,
+            "test packing and unpacking of the admin instruction to InitializeFarm"
+        );
         let unpacked = AdminInstruction::unpack(&expect).unwrap();
         assert_eq!(unpacked, Some(check));
 
@@ -1392,7 +1408,10 @@ mod tests {
         let mut expect = vec![0x6D, nonce];
         expect.extend_from_slice(&alloc_point.to_le_bytes());
         expect.extend_from_slice(&reward_unit.to_le_bytes());
-        assert_eq!(packed, expect, "test packing and unpacking of the admin instruction to SetFarm");
+        assert_eq!(
+            packed, expect,
+            "test packing and unpacking of the admin instruction to SetFarm"
+        );
         let unpacked = AdminInstruction::unpack(&expect).unwrap();
         assert_eq!(unpacked, Some(check));
     }
@@ -1425,15 +1444,13 @@ mod tests {
         assert_eq!(packed, expect);
         let unpacked_result = SwapInstruction::unpack(&expect);
         match unpacked_result {
-            Ok(unpacked) => {
-                match unpacked {
-                    Some(instruction) => {
-                        assert_eq!(instruction, check);
-                    },
-                    None => (),
-                }        
-            }
-            Err(_) => {},
+            Ok(unpacked) => match unpacked {
+                Some(instruction) => {
+                    assert_eq!(instruction, check);
+                }
+                None => (),
+            },
+            Err(_) => {}
         }
 
         let amount_in: u64 = 2;
@@ -1449,15 +1466,13 @@ mod tests {
         assert_eq!(packed, expect);
         let unpacked_result = SwapInstruction::unpack(&expect);
         match unpacked_result {
-            Ok(unpacked) => {
-                match unpacked {
-                    Some(instruction) => {
-                        assert_eq!(instruction, check);
-                    },
-                    None => (),
-                }        
-            }
-            Err(_) => {},
+            Ok(unpacked) => match unpacked {
+                Some(instruction) => {
+                    assert_eq!(instruction, check);
+                }
+                None => (),
+            },
+            Err(_) => {}
         }
 
         let token_a_amount: u64 = 10;
@@ -1476,15 +1491,13 @@ mod tests {
         assert_eq!(packed, expect);
         let unpacked_result = SwapInstruction::unpack(&expect);
         match unpacked_result {
-            Ok(unpacked) => {
-                match unpacked {
-                    Some(instruction) => {
-                        assert_eq!(instruction, check);
-                    },
-                    None => (),
-                }        
-            }
-            Err(_) => {},
+            Ok(unpacked) => match unpacked {
+                Some(instruction) => {
+                    assert_eq!(instruction, check);
+                }
+                None => (),
+            },
+            Err(_) => {}
         }
 
         let pool_token_amount: u64 = 1212438012089;
@@ -1503,15 +1516,13 @@ mod tests {
         assert_eq!(packed, expect);
         let unpacked_result = SwapInstruction::unpack(&expect);
         match unpacked_result {
-            Ok(unpacked) => {
-                match unpacked {
-                    Some(instruction) => {
-                        assert_eq!(instruction, check);
-                    },
-                    None => (),
-                }        
+            Ok(unpacked) => match unpacked {
+                Some(instruction) => {
+                    assert_eq!(instruction, check);
+                }
+                None => (),
             },
-            Err(_) => {},
+            Err(_) => {}
         }
 
         let pool_token_amount: u64 = 1212438012089;
@@ -1527,15 +1538,13 @@ mod tests {
         assert_eq!(packed, expect);
         let unpacked_result = SwapInstruction::unpack(&expect);
         match unpacked_result {
-            Ok(unpacked) => {
-                match unpacked {
-                    Some(instruction) => {
-                        assert_eq!(instruction, check);
-                    },
-                    None => (),
-                }        
+            Ok(unpacked) => match unpacked {
+                Some(instruction) => {
+                    assert_eq!(instruction, check);
+                }
+                None => (),
             },
-            Err(_) => {},
+            Err(_) => {}
         }
     }
 
@@ -1553,7 +1562,10 @@ mod tests {
         // expect.extend_from_slice(&min_mint_amount.to_le_bytes());
         assert_eq!(packed, expect);
         let unpacked = FarmingInstruction::unpack(&expect).unwrap();
-        assert_eq!(unpacked, check, "test packing and unpacking of the instruction to deposit into farm");
+        assert_eq!(
+            unpacked, check,
+            "test packing and unpacking of the instruction to deposit into farm"
+        );
 
         let pool_token_amount: u64 = 1212438012089;
         let min_pool_token_amount: u64 = 1021987682612;
@@ -1567,20 +1579,29 @@ mod tests {
         expect.extend_from_slice(&min_pool_token_amount.to_le_bytes());
         assert_eq!(packed, expect);
         let unpacked = FarmingInstruction::unpack(&expect).unwrap();
-        assert_eq!(unpacked, check, "test packing and unpacking of the instruction to withdraw from farm");
+        assert_eq!(
+            unpacked, check,
+            "test packing and unpacking of the instruction to withdraw from farm"
+        );
 
         let check = FarmingInstruction::EmergencyWithdraw();
         let packed = check.pack();
         let expect = vec![0x21];
         assert_eq!(packed, expect);
         let unpacked = FarmingInstruction::unpack(&expect).unwrap();
-        assert_eq!(unpacked, check, "test packing and unpacking of the instruction to withdraw emergency from farm");
+        assert_eq!(
+            unpacked, check,
+            "test packing and unpacking of the instruction to withdraw emergency from farm"
+        );
 
         let check = FarmingInstruction::PrintPendingDeltafi();
         let packed = check.pack();
         let expect = vec![0x22];
         assert_eq!(packed, expect);
         let unpacked = FarmingInstruction::unpack(&expect).unwrap();
-        assert_eq!(unpacked, check, "test packing and unpacking of the instruction to print pending deltafi in farm");
+        assert_eq!(
+            unpacked, check,
+            "test packing and unpacking of the instruction to print pending deltafi in farm"
+        );
     }
 }
