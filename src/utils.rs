@@ -51,8 +51,13 @@ pub mod test_utils {
 
     use super::*;
     use crate::{
-        bn::FixedU256, curve::ZERO_TS, fees::Fees, instruction::*, processor::Processor,
-        rewards::Rewards, state::SwapInfo,
+        bn::FixedU256,
+        curve::ZERO_TS,
+        fees::Fees,
+        instruction::*,
+        processor::Processor,
+        rewards::Rewards,
+        state::{FarmBaseInfo, FarmInfo, FarmingUserInfo, SwapInfo},
     };
 
     /// Test program id for the swap program.
@@ -953,6 +958,431 @@ pub mod test_utils {
         pub admin_fee_deltafi_account: Account,
         pub fees: Fees,
     }
+
+    impl FarmAccountInfo {
+        pub fn new(
+            mint_owner_key: &Pubkey,
+            token_pool_amount: u64,
+            alloc_point: u64,
+            reward_unit: u64,
+            fees: Fees,
+        ) -> Self {
+            let farm_base_key = pubkey_rand();
+            let farm_base_account =
+                Account::new(0, FarmBaseInfo::get_packed_len(), &SWAP_PROGRAM_ID);
+
+            let farm_key = pubkey_rand();
+            let farm_account = Account::new(0, FarmInfo::get_packed_len(), &SWAP_PROGRAM_ID);
+            let (authority_key, nonce) =
+                Pubkey::find_program_address(&[&farm_key.to_bytes()[..]], &SWAP_PROGRAM_ID);
+
+            // !! need to fix with real pool account from token swap.
+            let (pool_mint_key, mut pool_mint_account) = create_mint(
+                &TOKEN_PROGRAM_ID,
+                &mint_owner_key,
+                DEFAULT_TOKEN_DECIMALS,
+                None,
+            );
+            let (pool_token_key, pool_token_account) = mint_token(
+                &TOKEN_PROGRAM_ID,
+                &pool_mint_key,
+                &mut pool_mint_account,
+                &mint_owner_key,
+                &authority_key,
+                token_pool_amount,
+            );
+            let (token_deltafi_mint_key, mut token_deltafi_mint_account) = create_mint(
+                &TOKEN_PROGRAM_ID,
+                &mint_owner_key,
+                DEFAULT_TOKEN_DECIMALS,
+                None,
+            );
+            let (token_deltafi_key, token_deltafi_account) = mint_token(
+                &TOKEN_PROGRAM_ID,
+                &token_deltafi_mint_key,
+                &mut token_deltafi_mint_account,
+                &mint_owner_key,
+                &authority_key,
+                0,
+            );
+            let (admin_fee_deltafi_key, admin_fee_deltafi_account) = mint_token(
+                &TOKEN_PROGRAM_ID,
+                &token_deltafi_mint_key,
+                &mut token_deltafi_mint_account,
+                &mint_owner_key,
+                &authority_key,
+                0,
+            );
+
+            let admin_account = Account::default();
+
+            FarmAccountInfo {
+                nonce,
+                authority_key,
+                alloc_point,
+                reward_unit,
+                farm_base_key,
+                farm_base_account,
+                farm_key,
+                farm_account,
+                pool_mint_key,
+                pool_mint_account,
+                pool_token_key,
+                pool_token_account,
+                token_deltafi_mint_key,
+                token_deltafi_mint_account,
+                token_deltafi_key,
+                token_deltafi_account,
+                admin_key: admin_account.owner,
+                admin_account,
+                admin_fee_deltafi_key,
+                admin_fee_deltafi_account,
+                fees,
+            }
+        }
+
+        pub fn initialize_farm(&mut self, current_ts: i64) -> ProgramResult {
+            // msg!("deltafi mint: {:2X?} {:2X?}", self.token_deltafi_mint_key, self.token_deltafi_mint_account);
+            do_process_instruction(
+                initialize_farm(
+                    &SWAP_PROGRAM_ID,
+                    &self.farm_base_key,
+                    &self.farm_key,
+                    &self.authority_key,
+                    &self.admin_key,
+                    &self.pool_mint_key,
+                    &self.token_deltafi_mint_key,
+                    self.nonce,
+                    self.alloc_point,
+                    self.reward_unit,
+                )
+                .unwrap(),
+                vec![
+                    &mut self.farm_base_account,
+                    &mut self.farm_account,
+                    &mut Account::default(),
+                    &mut self.admin_account,
+                    &mut clock_account(current_ts),
+                    &mut self.pool_mint_account,
+                    &mut self.token_deltafi_mint_account,
+                ],
+            )
+        }
+
+        pub fn apply_new_admin_for_farm(&mut self, current_ts: i64) -> ProgramResult {
+            do_process_instruction(
+                apply_new_admin_for_farm(
+                    &SWAP_PROGRAM_ID,
+                    &self.farm_key,
+                    &self.authority_key,
+                    &self.admin_key,
+                )
+                .unwrap(),
+                vec![
+                    &mut self.farm_account,
+                    &mut Account::default(),
+                    &mut self.admin_account,
+                    &mut clock_account(current_ts),
+                ],
+            )
+        }
+
+        pub fn setup_token_accounts(
+            &mut self,
+            mint_owner: &Pubkey,
+            account_owner: &Pubkey,
+            lp_amount: u64,
+            deltafi_amount: u64,
+        ) -> (Pubkey, Account, Pubkey, Account, Pubkey, Account) {
+            // please care this as only testing purpose.
+            let user_farming_key = pubkey_rand();
+            let user_farming_account =
+                Account::new(0, FarmingUserInfo::get_packed_len(), &SWAP_PROGRAM_ID);
+
+            let (pool_key, pool_account) = mint_token(
+                &TOKEN_PROGRAM_ID,
+                &self.pool_mint_key,
+                &mut self.pool_mint_account,
+                &mint_owner,
+                &account_owner,
+                lp_amount,
+            );
+            let (deltafi_key, deltafi_account) = mint_token(
+                &TOKEN_PROGRAM_ID,
+                &self.token_deltafi_mint_key,
+                &mut self.token_deltafi_mint_account,
+                &mint_owner,
+                &account_owner,
+                deltafi_amount,
+            );
+            (
+                pool_key,
+                pool_account,
+                deltafi_key,
+                deltafi_account,
+                user_farming_key,
+                user_farming_account,
+            )
+        }
+
+        pub fn enable_user(
+            &mut self,
+            user_farming_key: &Pubkey,
+            mut user_farming_acount: &mut Account,
+        ) -> ProgramResult {
+            do_process_instruction(
+                farm_enable_user(
+                    &SWAP_PROGRAM_ID,
+                    &self.farm_key,
+                    &self.authority_key,
+                    user_farming_key,
+                )
+                .unwrap(),
+                vec![
+                    &mut self.farm_account,
+                    &mut Account::default(),
+                    &mut user_farming_acount,
+                ],
+            )
+        }
+
+        pub fn deposit(
+            &mut self,
+            depositor_key: &Pubkey,
+            depositor_farming_key: &Pubkey,
+            mut depositor_farming_account: &mut Account,
+            depositor_pool_key: &Pubkey,
+            mut depositor_pool_account: &mut Account,
+            depositor_deltafi_key: &Pubkey,
+            mut depositor_deltafi_account: &mut Account,
+            amount_lp: u64,
+            min_mint_amount: u64,
+        ) -> ProgramResult {
+            do_process_instruction(
+                approve(
+                    &TOKEN_PROGRAM_ID,
+                    &depositor_pool_key,
+                    &self.authority_key,
+                    &depositor_key,
+                    &[],
+                    amount_lp,
+                )
+                .unwrap(),
+                vec![
+                    &mut depositor_pool_account,
+                    &mut Account::default(),
+                    &mut Account::default(),
+                ],
+            )
+            .unwrap();
+
+            // perform deposit
+            do_process_instruction(
+                farm_deposit(
+                    &SWAP_PROGRAM_ID,
+                    &TOKEN_PROGRAM_ID,
+                    &self.farm_base_key,
+                    &self.farm_key,
+                    &self.authority_key,
+                    &self.admin_fee_deltafi_key,
+                    &depositor_pool_key,
+                    &depositor_farming_key,
+                    &self.pool_token_key,
+                    &self.token_deltafi_mint_key,
+                    &depositor_deltafi_key,
+                    amount_lp,
+                    min_mint_amount,
+                )
+                .unwrap(),
+                vec![
+                    &mut self.farm_base_account,
+                    &mut self.farm_account,
+                    &mut Account::default(),
+                    &mut self.admin_fee_deltafi_account,
+                    &mut depositor_pool_account,
+                    &mut depositor_farming_account,
+                    &mut self.pool_token_account,
+                    &mut self.token_deltafi_mint_account,
+                    &mut depositor_deltafi_account,
+                    &mut Account::default(),
+                    &mut clock_account(ZERO_TS),
+                ],
+            )?;
+
+            Ok(())
+        }
+
+        pub fn withdraw(
+            &mut self,
+            user_key: &Pubkey,
+            user_farming_key: &Pubkey,
+            mut user_farming_account: &mut Account,
+            pool_key: &Pubkey,
+            mut pool_account: &mut Account,
+            withdrawer_deltafi_key: &Pubkey,
+            mut withdrawer_deltafi_account: &mut Account,
+            amount_lp: u64,
+            min_mint_amount: u64,
+        ) -> ProgramResult {
+            do_process_instruction(
+                approve(
+                    &TOKEN_PROGRAM_ID,
+                    &pool_key,
+                    &self.authority_key,
+                    &user_key,
+                    &[],
+                    amount_lp,
+                )
+                .unwrap(),
+                vec![
+                    &mut pool_account,
+                    &mut Account::default(),
+                    &mut Account::default(),
+                ],
+            )
+            .unwrap();
+
+            // perform withdraw
+            do_process_instruction(
+                farm_withdraw(
+                    &SWAP_PROGRAM_ID,
+                    &TOKEN_PROGRAM_ID,
+                    &self.farm_base_key,
+                    &self.farm_key,
+                    &self.authority_key,
+                    &self.admin_fee_deltafi_key,
+                    &pool_key,
+                    &user_farming_key,
+                    &self.pool_token_key,
+                    &self.token_deltafi_mint_key,
+                    &withdrawer_deltafi_key,
+                    amount_lp,
+                    min_mint_amount,
+                )
+                .unwrap(),
+                vec![
+                    &mut self.farm_base_account,
+                    &mut self.farm_account,
+                    &mut Account::default(),
+                    &mut self.admin_fee_deltafi_account,
+                    &mut pool_account,
+                    &mut user_farming_account,
+                    &mut self.pool_token_account,
+                    &mut self.token_deltafi_mint_account,
+                    &mut withdrawer_deltafi_account,
+                    &mut Account::default(),
+                    &mut clock_account(ZERO_TS),
+                ],
+            )?;
+
+            Ok(())
+        }
+
+        pub fn emergency_withdraw(
+            &mut self,
+            user_key: &Pubkey,
+            user_farming_key: &Pubkey,
+            mut user_farming_account: &mut Account,
+            pool_key: &Pubkey,
+            mut pool_account: &mut Account,
+            amount_lp: u64,
+            _min_mint_amount: u64,
+        ) -> ProgramResult {
+            do_process_instruction(
+                approve(
+                    &TOKEN_PROGRAM_ID,
+                    &pool_key,
+                    &self.authority_key,
+                    &user_key,
+                    &[],
+                    amount_lp,
+                )
+                .unwrap(),
+                vec![
+                    &mut pool_account,
+                    &mut Account::default(),
+                    &mut Account::default(),
+                ],
+            )
+            .unwrap();
+
+            // perform deposit
+            do_process_instruction(
+                farm_emergency_withdraw(
+                    &SWAP_PROGRAM_ID,
+                    &TOKEN_PROGRAM_ID,
+                    &self.farm_key,
+                    &self.authority_key,
+                    &pool_key,
+                    &user_farming_key,
+                    &self.pool_token_key,
+                )
+                .unwrap(),
+                vec![
+                    &mut self.farm_account,
+                    &mut Account::default(),
+                    &mut pool_account,
+                    &mut user_farming_account,
+                    &mut self.pool_token_account,
+                    &mut Account::default(),
+                    &mut clock_account(ZERO_TS),
+                ],
+            )?;
+
+            Ok(())
+        }
+
+        pub fn print_pending_deltafi(
+            &mut self,
+            user_key: &Pubkey,
+            user_farming_key: &Pubkey,
+            mut user_farming_account: &mut Account,
+            pool_key: &Pubkey,
+            mut pool_account: &mut Account,
+            amount_lp: u64,
+            _min_mint_amount: u64,
+        ) -> ProgramResult {
+            do_process_instruction(
+                approve(
+                    &TOKEN_PROGRAM_ID,
+                    &pool_key,
+                    &self.authority_key,
+                    &user_key,
+                    &[],
+                    amount_lp,
+                )
+                .unwrap(),
+                vec![
+                    &mut pool_account,
+                    &mut Account::default(),
+                    &mut Account::default(),
+                ],
+            )
+            .unwrap();
+
+            // perform deposit
+            do_process_instruction(
+                farm_pending_deltafi(
+                    &SWAP_PROGRAM_ID,
+                    &self.farm_base_key,
+                    &self.farm_key,
+                    &user_farming_key,
+                    &pool_key,
+                    &self.pool_mint_key,
+                )
+                .unwrap(),
+                vec![
+                    &mut self.farm_base_account,
+                    &mut self.farm_account,
+                    &mut user_farming_account,
+                    &mut pool_account,
+                    &mut self.pool_mint_account,
+                    &mut clock_account(ZERO_TS),
+                ],
+            )
+        }
+    }
+
     struct TestSyscallStubs {}
     impl program_stubs::SyscallStubs for TestSyscallStubs {
         fn sol_invoke_signed(
@@ -1008,7 +1438,6 @@ pub mod test_utils {
         accounts: Vec<&mut Account>,
     ) -> ProgramResult {
         test_syscall_stubs();
-
         // approximate the logic in the actual runtime which runs the instruction
         // and only updates accounts if the instruction is successful
         let mut account_clones = accounts.iter().map(|x| (*x).clone()).collect::<Vec<_>>();

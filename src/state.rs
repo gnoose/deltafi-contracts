@@ -2,6 +2,7 @@
 
 use arrayref::{array_mut_ref, array_ref, array_refs, mut_array_refs};
 use solana_program::{
+    // msg,
     program_error::ProgramError,
     program_pack::{IsInitialized, Pack, Sealed},
     pubkey::Pubkey,
@@ -9,7 +10,7 @@ use solana_program::{
 
 use crate::{bn::FixedU256, fees::Fees, oracle::Oracle, rewards::Rewards, v2curve::RState};
 
-/// Program states.
+/// Swap states.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct SwapInfo {
@@ -99,7 +100,6 @@ impl IsInitialized for SwapInfo {
         self.is_initialized
     }
 }
-
 impl Pack for SwapInfo {
     const LEN: usize = 1152;
 
@@ -260,6 +260,231 @@ impl Pack for SwapInfo {
         *block_timestamp_last = self.block_timestamp_last.to_le_bytes();
         self.base_price_cumulative_last
             .pack_into_slice(&mut base_price_cumulative_last[..]);
+    }
+}
+
+/// Farm's base information
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FarmBaseInfo {
+    /// whether initialized
+    pub is_initialized: bool,
+    /// Total allocation points
+    pub total_alloc_point: u64,
+    /// reward unit
+    pub reward_unit: u64,
+}
+
+impl Sealed for FarmBaseInfo {}
+impl IsInitialized for FarmBaseInfo {
+    fn is_initialized(&self) -> bool {
+        self.is_initialized
+    }
+}
+
+impl Pack for FarmBaseInfo {
+    const LEN: usize = 17;
+
+    /// Unpacks a byte buffer into a [FarmInfo](struct.FarmInfo.html).
+    fn unpack_from_slice(input: &[u8]) -> Result<Self, ProgramError> {
+        let input = array_ref![input, 0, 17];
+        #[allow(clippy::ptr_offset_with_cast)]
+        let (is_initialized, total_alloc_point, reward_unit) = array_refs![input, 1, 8, 8];
+        Ok(Self {
+            is_initialized: match is_initialized {
+                [0] => false,
+                [1] => true,
+                _ => return Err(ProgramError::InvalidAccountData),
+            },
+            total_alloc_point: u64::from_le_bytes(*total_alloc_point),
+            reward_unit: u64::from_le_bytes(*reward_unit),
+        })
+    }
+
+    fn pack_into_slice(&self, output: &mut [u8]) {
+        let output = array_mut_ref![output, 0, 17];
+        let (is_initialized, total_alloc_point, reward_unit) = mut_array_refs![output, 1, 8, 8];
+        is_initialized[0] = self.is_initialized as u8;
+        *total_alloc_point = self.total_alloc_point.to_le_bytes();
+        *reward_unit = self.reward_unit.to_le_bytes();
+    }
+}
+
+/// Farm state
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FarmInfo {
+    /// Initialized state
+    pub is_initialized: bool,
+
+    /// Paused state
+    pub is_paused: bool,
+
+    /// Nonce used in program address
+    /// The program address is created deterministically with the nonce,
+    /// swap program id, and swap account pubkey.  This program address has
+    /// authority over the swap's token A account, token B account, and pool
+    /// token mint.
+    pub nonce: u8,
+
+    /// Deadline to transfer admin control to future_admin_key
+    pub future_admin_deadline: i64,
+    /// Public key of the admin account to be applied
+    pub future_admin_key: Pubkey,
+    /// Public key of admin account to execute admin instructions
+    pub admin_key: Pubkey,
+
+    /// Mint information for lp token
+    pub pool_mint: Pubkey,
+    /// Mint information for deltafi
+    pub token_deltafi_mint: Pubkey,
+    /// Fees
+    pub fees: Fees,
+    /// the value corresponding accDeltafiPerShare parameter to use in farming
+    pub acc_deltafi_per_share: u64,
+    /// Timestamp when calculate reward last     
+    pub last_reward_timestamp: i64,
+    /// allocation point
+    pub alloc_point: u64,
+}
+impl Sealed for FarmInfo {}
+impl IsInitialized for FarmInfo {
+    fn is_initialized(&self) -> bool {
+        self.is_initialized
+    }
+}
+
+impl Pack for FarmInfo {
+    const LEN: usize = 227;
+
+    /// Unpacks a byte buffer into a [FarmInfo](struct.FarmInfo.html).
+    fn unpack_from_slice(input: &[u8]) -> Result<Self, ProgramError> {
+        let input = array_ref![input, 0, 227];
+        #[allow(clippy::ptr_offset_with_cast)]
+        let (
+            is_initialized,
+            is_paused,
+            nonce,
+            future_admin_deadline,
+            future_admin_key,
+            admin_key,
+            pool_mint,
+            token_deltafi_mint,
+            fees,
+            acc_deltafi_per_share,
+            last_reward_timestamp,
+            alloc_point,
+        ) = array_refs![input, 1, 1, 1, 8, 32, 32, 32, 32, 64, 8, 8, 8];
+        Ok(Self {
+            is_initialized: match is_initialized {
+                [0] => false,
+                [1] => true,
+                _ => return Err(ProgramError::InvalidAccountData),
+            },
+            is_paused: match is_paused {
+                [0] => false,
+                [1] => true,
+                _ => return Err(ProgramError::InvalidAccountData),
+            },
+            nonce: nonce[0],
+            future_admin_deadline: i64::from_le_bytes(*future_admin_deadline),
+            future_admin_key: Pubkey::new_from_array(*future_admin_key),
+            admin_key: Pubkey::new_from_array(*admin_key),
+            pool_mint: Pubkey::new_from_array(*pool_mint),
+            token_deltafi_mint: Pubkey::new_from_array(*token_deltafi_mint),
+            fees: Fees::unpack_from_slice(fees)?,
+            acc_deltafi_per_share: u64::from_le_bytes(*acc_deltafi_per_share),
+            last_reward_timestamp: i64::from_le_bytes(*last_reward_timestamp),
+            alloc_point: u64::from_le_bytes(*alloc_point),
+        })
+    }
+
+    fn pack_into_slice(&self, output: &mut [u8]) {
+        let output = array_mut_ref![output, 0, 227];
+        let (
+            is_initialized,
+            is_paused,
+            nonce,
+            future_admin_deadline,
+            future_admin_key,
+            admin_key,
+            pool_mint,
+            token_deltafi_mint,
+            fees,
+            acc_deltafi_per_share,
+            last_reward_timestamp,
+            alloc_point,
+        ) = mut_array_refs![output, 1, 1, 1, 8, 32, 32, 32, 32, 64, 8, 8, 8];
+        is_initialized[0] = self.is_initialized as u8;
+        is_paused[0] = self.is_paused as u8;
+        nonce[0] = self.nonce;
+        *future_admin_deadline = self.future_admin_deadline.to_le_bytes();
+        future_admin_key.copy_from_slice(self.future_admin_key.as_ref());
+        admin_key.copy_from_slice(self.admin_key.as_ref());
+        pool_mint.copy_from_slice(self.pool_mint.as_ref());
+        token_deltafi_mint.copy_from_slice(self.token_deltafi_mint.as_ref());
+        self.fees.pack_into_slice(&mut fees[..]);
+        *acc_deltafi_per_share = self.acc_deltafi_per_share.to_le_bytes();
+        *last_reward_timestamp = self.last_reward_timestamp.to_le_bytes();
+        *alloc_point = self.alloc_point.to_le_bytes();
+    }
+}
+
+/// User's farming information
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FarmingUserInfo {
+    /// whether initialized
+    pub is_initialized: bool,
+    /// user's amount
+    pub amount: u64,
+    /// user's reward debt
+    pub reward_debt: u64,
+    /// last update timestamp
+    pub timestamp: i64,
+    /// pending deltafi
+    pub pending_deltafi: u64,
+}
+
+impl Sealed for FarmingUserInfo {}
+impl IsInitialized for FarmingUserInfo {
+    fn is_initialized(&self) -> bool {
+        self.is_initialized
+    }
+}
+
+impl Pack for FarmingUserInfo {
+    const LEN: usize = 33;
+
+    /// Unpacks a byte buffer into a [FarmInfo](struct.FarmInfo.html).
+    fn unpack_from_slice(input: &[u8]) -> Result<Self, ProgramError> {
+        let input = array_ref![input, 0, 33];
+        #[allow(clippy::ptr_offset_with_cast)]
+        let (is_initialized, amount, reward_debt, timestamp, pending_deltafi) =
+            array_refs![input, 1, 8, 8, 8, 8];
+
+        Ok(Self {
+            is_initialized: match is_initialized {
+                [0] => false,
+                [1] => true,
+                _ => return Err(ProgramError::InvalidAccountData),
+            },
+            amount: u64::from_le_bytes(*amount),
+            reward_debt: u64::from_le_bytes(*reward_debt),
+            timestamp: i64::from_le_bytes(*timestamp),
+            pending_deltafi: u64::from_le_bytes(*pending_deltafi),
+        })
+    }
+
+    fn pack_into_slice(&self, output: &mut [u8]) {
+        let output = array_mut_ref![output, 0, 33];
+        let (is_initialized, amount, reward_debt, timestamp, pending_deltafi) =
+            mut_array_refs![output, 1, 8, 8, 8, 8];
+        is_initialized[0] = self.is_initialized as u8;
+        *amount = self.amount.to_le_bytes();
+        *reward_debt = self.reward_debt.to_le_bytes();
+        *timestamp = self.timestamp.to_le_bytes();
+        *pending_deltafi = self.pending_deltafi.to_le_bytes();
     }
 }
 

@@ -6,6 +6,7 @@ use std::{convert::TryInto, mem::size_of};
 
 use solana_program::{
     instruction::{AccountMeta, Instruction},
+    // msg,
     program_error::ProgramError,
     program_pack::Pack,
     pubkey::Pubkey,
@@ -97,9 +98,11 @@ pub struct RampAData {
 #[repr(C)]
 #[derive(Clone, Debug, PartialEq)]
 pub struct FarmData {
+    /// Nonce used to create valid program address
+    pub nonce: u8,
     /// alloc point for farm
     pub alloc_point: u64,
-    ///
+    /// reward unit for farm
     pub reward_unit: u64,
 }
 
@@ -121,8 +124,8 @@ pub struct FarmingWithdrawData {
 pub struct FarmingDepositData {
     /// LP token amount to deposit
     pub pool_token_amount: u64,
-    /// Minimum detafi tokens to mint, prevents excessive slippage
-    pub min_mint_amount: u64,
+    // / Minimum detafi tokens to mint, prevents excessive slippage
+    // pub min_mint_amount: u64,
 }
 
 /// Admin only instructions.
@@ -145,6 +148,12 @@ pub enum AdminInstruction {
     CommitNewAdmin,
     /// TODO: Docs
     SetNewFees(Fees),
+    /// Add new farm with alloc point.
+    InitializeFarm(FarmData),
+    /// Set alloc point to farm.
+    SetFarm(FarmData),
+    /// TODO: Docs
+    ApplyNewAdminForFarm,
     /// TODO: Docs
     SetNewRewards(Rewards),
 }
@@ -154,7 +163,7 @@ impl AdminInstruction {
     pub fn unpack(input: &[u8]) -> Result<Option<Self>, ProgramError> {
         let (&tag, rest) = input.split_first().ok_or(SwapError::InvalidInstruction)?;
         Ok(match tag {
-            100 => {
+            0x64 => {
                 let (target_amp, rest) = unpack_u64(rest)?;
                 let (stop_ramp_ts, _rest) = unpack_i64(rest)?;
                 Some(Self::RampA(RampAData {
@@ -162,17 +171,38 @@ impl AdminInstruction {
                     stop_ramp_ts,
                 }))
             }
-            101 => Some(Self::StopRampA),
-            102 => Some(Self::Pause),
-            103 => Some(Self::Unpause),
-            104 => Some(Self::SetFeeAccount),
-            105 => Some(Self::ApplyNewAdmin),
-            106 => Some(Self::CommitNewAdmin),
-            107 => {
+            0x65 => Some(Self::StopRampA),
+            0x66 => Some(Self::Pause),
+            0x67 => Some(Self::Unpause),
+            0x68 => Some(Self::SetFeeAccount),
+            0x69 => Some(Self::ApplyNewAdmin),
+            0x6A => Some(Self::CommitNewAdmin),
+            0x6B => {
                 let fees = Fees::unpack_unchecked(rest)?;
                 Some(Self::SetNewFees(fees))
             }
-            108 => {
+            0x6C => {
+                let (&nonce, rest) = rest.split_first().ok_or(SwapError::InvalidInstruction)?;
+                let (alloc_point, rest) = unpack_u64(rest)?;
+                let (reward_unit, _rest) = unpack_u64(rest)?;
+                Some(Self::InitializeFarm(FarmData {
+                    nonce,
+                    alloc_point,
+                    reward_unit,
+                }))
+            }
+            0x6D => {
+                let (&nonce, rest) = rest.split_first().ok_or(SwapError::InvalidInstruction)?;
+                let (alloc_point, rest) = unpack_u64(rest)?;
+                let (reward_unit, _rest) = unpack_u64(rest)?;
+                Some(Self::SetFarm(FarmData {
+                    nonce,
+                    alloc_point,
+                    reward_unit,
+                }))
+            }
+            0x6E => Some(Self::ApplyNewAdminForFarm),
+            0x6F => {
                 let rewards = Rewards::unpack_unchecked(rest)?;
                 Some(Self::SetNewRewards(rewards))
             }
@@ -188,24 +218,45 @@ impl AdminInstruction {
                 target_amp,
                 stop_ramp_ts,
             }) => {
-                buf.push(100);
+                buf.push(0x64);
                 buf.extend_from_slice(&target_amp.to_le_bytes());
                 buf.extend_from_slice(&stop_ramp_ts.to_le_bytes());
             }
-            Self::StopRampA => buf.push(101),
-            Self::Pause => buf.push(102),
-            Self::Unpause => buf.push(103),
-            Self::SetFeeAccount => buf.push(104),
-            Self::ApplyNewAdmin => buf.push(105),
-            Self::CommitNewAdmin => buf.push(106),
+            Self::StopRampA => buf.push(0x65),
+            Self::Pause => buf.push(0x66),
+            Self::Unpause => buf.push(0x67),
+            Self::SetFeeAccount => buf.push(0x68),
+            Self::ApplyNewAdmin => buf.push(0x69),
+            Self::CommitNewAdmin => buf.push(0x6a),
             Self::SetNewFees(fees) => {
-                buf.push(107);
+                buf.push(0x6b);
                 let mut fees_slice = [0u8; Fees::LEN];
                 Pack::pack_into_slice(&fees, &mut fees_slice[..]);
                 buf.extend_from_slice(&fees_slice);
             }
+            Self::InitializeFarm(FarmData {
+                nonce,
+                alloc_point,
+                reward_unit,
+            }) => {
+                buf.push(0x6c);
+                buf.push(nonce);
+                buf.extend_from_slice(&alloc_point.to_le_bytes());
+                buf.extend_from_slice(&reward_unit.to_le_bytes());
+            }
+            Self::SetFarm(FarmData {
+                nonce,
+                alloc_point,
+                reward_unit,
+            }) => {
+                buf.push(0x6d);
+                buf.push(nonce);
+                buf.extend_from_slice(&alloc_point.to_le_bytes());
+                buf.extend_from_slice(&reward_unit.to_le_bytes());
+            }
+            Self::ApplyNewAdminForFarm => buf.push(0x6e),
             Self::SetNewRewards(rewards) => {
-                buf.push(108);
+                buf.push(0x6f);
                 let mut rewards_slice = [0u8; Rewards::LEN];
                 Pack::pack_into_slice(&rewards, &mut rewards_slice[..]);
                 buf.extend_from_slice(&rewards_slice);
@@ -334,6 +385,29 @@ pub fn apply_new_admin(
     })
 }
 
+/// Creates a 'apply_new_admin_for_farm' instruction
+pub fn apply_new_admin_for_farm(
+    program_id: &Pubkey,
+    farm_pubkey: &Pubkey,
+    authority_pubkey: &Pubkey,
+    admin_pubkey: &Pubkey,
+) -> Result<Instruction, ProgramError> {
+    let data = AdminInstruction::ApplyNewAdminForFarm.pack();
+
+    let accounts = vec![
+        AccountMeta::new(*farm_pubkey, true),
+        AccountMeta::new(*authority_pubkey, false),
+        AccountMeta::new(*admin_pubkey, true),
+        AccountMeta::new(clock::id(), false),
+    ];
+
+    Ok(Instruction {
+        program_id: *program_id,
+        accounts,
+        data,
+    })
+}
+
 /// Creates a 'commit_new_admin' instruction
 pub fn commit_new_admin(
     program_id: &Pubkey,
@@ -429,6 +503,75 @@ pub fn set_rewards(
     })
 }
 
+/// Creates a 'initialize_farm' instruction
+pub fn initialize_farm(
+    program_id: &Pubkey,
+    farm_base_pubkey: &Pubkey,
+    farm_pubkey: &Pubkey,
+    authority_pubkey: &Pubkey,
+    admin_pubkey: &Pubkey,
+    pool_mint_pubkey: &Pubkey,
+    deltafi_mint_pubkey: &Pubkey,
+    nonce: u8,
+    alloc_point: u64,
+    reward_unit: u64,
+) -> Result<Instruction, ProgramError> {
+    let data = AdminInstruction::InitializeFarm(FarmData {
+        nonce,
+        alloc_point,
+        reward_unit,
+    })
+    .pack();
+
+    let accounts = vec![
+        AccountMeta::new(*farm_base_pubkey, false),
+        AccountMeta::new(*farm_pubkey, true),
+        AccountMeta::new(*authority_pubkey, false),
+        AccountMeta::new(*admin_pubkey, true),
+        AccountMeta::new(clock::id(), false),
+        AccountMeta::new(*pool_mint_pubkey, false),
+        AccountMeta::new(*deltafi_mint_pubkey, false),
+    ];
+
+    Ok(Instruction {
+        program_id: *program_id,
+        accounts,
+        data,
+    })
+}
+
+/// Creates a 'set_farm' instruction
+pub fn set_farm(
+    program_id: &Pubkey,
+    farm_base_pubkey: &Pubkey,
+    farm_pubkey: &Pubkey,
+    authority_pubkey: &Pubkey,
+    admin_pubkey: &Pubkey,
+    nonce: u8,
+    alloc_point: u64,
+    reward_unit: u64,
+) -> Result<Instruction, ProgramError> {
+    let data = AdminInstruction::InitializeFarm(FarmData {
+        nonce,
+        alloc_point,
+        reward_unit,
+    })
+    .pack();
+
+    let accounts = vec![
+        AccountMeta::new(*farm_base_pubkey, false),
+        AccountMeta::new(*farm_pubkey, true),
+        AccountMeta::new(*authority_pubkey, false),
+        AccountMeta::new(*admin_pubkey, true),
+    ];
+
+    Ok(Instruction {
+        program_id: *program_id,
+        accounts,
+        data,
+    })
+}
+
 /// Instructions supported by the SwapInfo program.
 #[repr(C)]
 #[derive(Debug, PartialEq)]
@@ -505,10 +648,10 @@ pub enum SwapInstruction {
 
 impl SwapInstruction {
     /// Unpacks a byte buffer into a [SwapInstruction](enum.SwapInstruction.html).
-    pub fn unpack(input: &[u8]) -> Result<Self, ProgramError> {
+    pub fn unpack(input: &[u8]) -> Result<Option<Self>, ProgramError> {
         let (&tag, rest) = input.split_first().ok_or(SwapError::InvalidInstruction)?;
         Ok(match tag {
-            0 => {
+            0x0 => {
                 let (&nonce, rest) = rest.split_first().ok_or(SwapError::InvalidInstruction)?;
                 let (amp_factor, rest) = unpack_u64(rest)?;
                 let (fees, rest) = rest.split_at(Fees::LEN);
@@ -518,7 +661,7 @@ impl SwapInstruction {
                 let (k, rest) = unpack_u64(rest)?;
                 let (i, rest) = unpack_u64(rest)?;
                 let (is_open_twap, _rest) = unpack_u64(rest)?;
-                Self::Initialize(InitializeData {
+                Some(Self::Initialize(InitializeData {
                     nonce,
                     amp_factor,
                     fees,
@@ -526,47 +669,47 @@ impl SwapInstruction {
                     k,
                     i,
                     is_open_twap,
-                })
+                }))
             }
-            1 => {
+            0x1 => {
                 let (amount_in, rest) = unpack_u64(rest)?;
                 let (minimum_amount_out, rest) = unpack_u64(rest)?;
                 let (swap_direction, _rest) = unpack_u64(rest)?;
-                Self::Swap(SwapData {
+                Some(Self::Swap(SwapData {
                     amount_in,
                     minimum_amount_out,
                     swap_direction,
-                })
+                }))
             }
-            2 => {
+            0x2 => {
                 let (token_a_amount, rest) = unpack_u64(rest)?;
                 let (token_b_amount, rest) = unpack_u64(rest)?;
                 let (min_mint_amount, _rest) = unpack_u64(rest)?;
-                Self::Deposit(DepositData {
+                Some(Self::Deposit(DepositData {
                     token_a_amount,
                     token_b_amount,
                     min_mint_amount,
-                })
+                }))
             }
-            3 => {
+            0x3 => {
                 let (pool_token_amount, rest) = unpack_u64(rest)?;
                 let (minimum_token_a_amount, rest) = unpack_u64(rest)?;
                 let (minimum_token_b_amount, _rest) = unpack_u64(rest)?;
-                Self::Withdraw(WithdrawData {
+                Some(Self::Withdraw(WithdrawData {
                     pool_token_amount,
                     minimum_token_a_amount,
                     minimum_token_b_amount,
-                })
+                }))
             }
-            4 => {
+            0x4 => {
                 let (pool_token_amount, rest) = unpack_u64(rest)?;
                 let (minimum_token_amount, _rest) = unpack_u64(rest)?;
-                Self::WithdrawOne(WithdrawOneData {
+                Some(Self::WithdrawOne(WithdrawOneData {
                     pool_token_amount,
                     minimum_token_amount,
-                })
+                }))
             }
-            _ => return Err(SwapError::InvalidInstruction.into()),
+            _ => None,
         })
     }
 
@@ -583,7 +726,7 @@ impl SwapInstruction {
                 i,
                 is_open_twap,
             }) => {
-                buf.push(0);
+                buf.push(0x0);
                 buf.push(nonce);
                 buf.extend_from_slice(&amp_factor.to_le_bytes());
                 let mut fees_slice = [0u8; Fees::LEN];
@@ -601,7 +744,7 @@ impl SwapInstruction {
                 minimum_amount_out,
                 swap_direction,
             }) => {
-                buf.push(1);
+                buf.push(0x1);
                 buf.extend_from_slice(&amount_in.to_le_bytes());
                 buf.extend_from_slice(&minimum_amount_out.to_le_bytes());
                 buf.extend_from_slice(&swap_direction.to_le_bytes());
@@ -611,7 +754,7 @@ impl SwapInstruction {
                 token_b_amount,
                 min_mint_amount,
             }) => {
-                buf.push(2);
+                buf.push(0x2);
                 buf.extend_from_slice(&token_a_amount.to_le_bytes());
                 buf.extend_from_slice(&token_b_amount.to_le_bytes());
                 buf.extend_from_slice(&min_mint_amount.to_le_bytes());
@@ -621,7 +764,7 @@ impl SwapInstruction {
                 minimum_token_a_amount,
                 minimum_token_b_amount,
             }) => {
-                buf.push(3);
+                buf.push(0x3);
                 buf.extend_from_slice(&pool_token_amount.to_le_bytes());
                 buf.extend_from_slice(&minimum_token_a_amount.to_le_bytes());
                 buf.extend_from_slice(&minimum_token_b_amount.to_le_bytes());
@@ -630,7 +773,7 @@ impl SwapInstruction {
                 pool_token_amount,
                 minimum_token_amount,
             }) => {
-                buf.push(4);
+                buf.push(0x4);
                 buf.extend_from_slice(&pool_token_amount.to_le_bytes());
                 buf.extend_from_slice(&minimum_token_amount.to_le_bytes());
             }
@@ -874,6 +1017,308 @@ pub fn withdraw_one(
     })
 }
 
+/// Instructions supported by the Farming feature.
+#[repr(C)]
+#[derive(Debug, PartialEq)]
+pub enum FarmingInstruction {
+    ///   Deposit some tokens into the pool.  The output is a "pool" token representing ownership
+    ///   into the pool. Inputs are converted to the current ratio.
+    ///
+    ///   1. `[]` Farm
+    ///   2. `[]` $authority,
+    ///   3. `[writable]` user farming account,
+    ///   6. `[]` owner.
+    ///   8. `[]` Token program id
+    EnableUser(),
+    ///   Deposit some tokens into the pool.  The output is a "pool" token representing ownership
+    ///   into the pool. Inputs are converted to the current ratio.
+    ///
+    ///   0. `[]` Token-swap
+    ///   1. `[]` $authority
+    ///   2. `[writable]` token_a $authority can transfer amount,
+    ///   3. `[writable]` token_b $authority can transfer amount,
+    ///   4. `[writable]` token_a Base Account to deposit into.
+    ///   5. `[writable]` token_b Base Account to deposit into.
+    ///   6. `[writable]` Pool MINT account, $authority is the owner.
+    ///   7. `[writable]` Pool Account to deposit the generated tokens, user is the owner.
+    ///   8. `[]` Token program id
+    ///   9. `[]` Clock sysvar
+    Deposit(FarmingDepositData),
+
+    ///   Withdraw tokens from the pool at the current ratio.
+    ///
+    ///   0. `[]` Token-swap
+    ///   1. `[]` $authority
+    ///   2. `[writable]` Pool mint account, $authority is the owner
+    ///   3. `[writable]` SOURCE Pool account, amount is transferable by $authority.
+    ///   4. `[writable]` token_a Swap Account to withdraw FROM.
+    ///   5. `[writable]` token_b Swap Account to withdraw FROM.
+    ///   6. `[writable]` token_a user Account to credit.
+    ///   7. `[writable]` token_b user Account to credit.
+    ///   8. `[writable]` admin_fee_a admin fee Account for token_a.
+    ///   9. `[writable]` admin_fee_b admin fee Account for token_b.
+    ///   10. `[]` Token program id
+    Withdraw(FarmingWithdrawData),
+
+    ///   Withdraw tokens from the pool at the current ratio forceful.
+    ///
+    ///   0. `[]` Token-swap
+    ///   1. `[]` $authority
+    ///   2. `[writable]` Pool mint account, $authority is the owner
+    ///   3. `[writable]` SOURCE Pool account, amount is transferable by $authority.
+    ///   4. `[writable]` token_a Swap Account to withdraw FROM.
+    ///   5. `[writable]` token_b Swap Account to withdraw FROM.
+    ///   6. `[writable]` token_a user Account to credit.
+    ///   7. `[writable]` token_b user Account to credit.
+    ///   8. `[writable]` admin_fee_a admin fee Account for token_a.
+    ///   9. `[writable]` admin_fee_b admin fee Account for token_b.
+    ///   10. `[]` Token program id
+    EmergencyWithdraw(),
+
+    ///   Withdraw tokens from the pool at the current ratio forceful.
+    ///
+    ///   0. `[]` Token-swap
+    ///   1. `[]` $authority
+    ///   2. `[writable]` Pool mint account, $authority is the owner
+    ///   3. `[writable]` SOURCE Pool account, amount is transferable by $authority.
+    ///   4. `[writable]` token_a Swap Account to withdraw FROM.
+    ///   5. `[writable]` token_b Swap Account to withdraw FROM.
+    ///   6. `[writable]` token_a user Account to credit.
+    ///   7. `[writable]` token_b user Account to credit.
+    ///   8. `[writable]` admin_fee_a admin fee Account for token_a.
+    ///   9. `[writable]` admin_fee_b admin fee Account for token_b.
+    ///   10. `[]` Token program id
+    PrintPendingDeltafi(),
+}
+
+impl FarmingInstruction {
+    /// Unpacks a byte buffer into a [FarmingInstruction](enum.FarmingInstruction.html).
+    pub fn unpack(input: &[u8]) -> Result<Self, ProgramError> {
+        let (&tag, rest) = input.split_first().ok_or(SwapError::InvalidInstruction)?;
+        Ok(match tag {
+            0x1e => Self::EnableUser(),
+            0x1f => {
+                let (pool_token_amount, _rest) = unpack_u64(rest)?;
+                // let (_min_mint_amount, _rest) = unpack_u64(rest)?;
+                Self::Deposit(FarmingDepositData {
+                    pool_token_amount,
+                    // min_mint_amount,
+                })
+            }
+            0x20 => {
+                let (pool_token_amount, rest) = unpack_u64(rest)?;
+                let (min_pool_token_amount, _rest) = unpack_u64(rest)?;
+                Self::Withdraw(FarmingWithdrawData {
+                    pool_token_amount,
+                    min_pool_token_amount,
+                })
+            }
+            0x21 => Self::EmergencyWithdraw(),
+            0x22 => Self::PrintPendingDeltafi(),
+            _ => return Err(SwapError::InvalidInstruction.into()),
+        })
+    }
+
+    /// Packs a [FarmingInstruction](enum.FarmingInstruction.html) into a byte buffer.
+    pub fn pack(&self) -> Vec<u8> {
+        let mut buf = Vec::with_capacity(size_of::<Self>());
+        match *self {
+            Self::EnableUser() => {
+                buf.push(0x1e);
+            }
+            Self::Deposit(FarmingDepositData {
+                pool_token_amount,
+                // min_mint_amount,
+            }) => {
+                buf.push(0x1f);
+                buf.extend_from_slice(&pool_token_amount.to_le_bytes());
+                // buf.extend_from_slice(&min_mint_amount.to_le_bytes());
+            }
+            Self::Withdraw(FarmingWithdrawData {
+                pool_token_amount,
+                min_pool_token_amount,
+            }) => {
+                buf.push(0x20);
+                buf.extend_from_slice(&pool_token_amount.to_le_bytes());
+                buf.extend_from_slice(&min_pool_token_amount.to_le_bytes());
+            }
+            Self::EmergencyWithdraw() => {
+                buf.push(0x21);
+            }
+            Self::PrintPendingDeltafi() => {
+                buf.push(0x22);
+            }
+        }
+        buf
+    }
+}
+
+/// Creates a 'farm_enable_user' instruction.
+pub fn farm_enable_user(
+    program_id: &Pubkey,
+    farm_pubkey: &Pubkey,
+    authority_pubkey: &Pubkey,
+    user_farming_pubkey: &Pubkey,
+    // owner: &Pubkey,
+) -> Result<Instruction, ProgramError> {
+    let data = FarmingInstruction::EnableUser().pack();
+
+    let accounts = vec![
+        AccountMeta::new(*farm_pubkey, true),
+        AccountMeta::new(*authority_pubkey, false),
+        AccountMeta::new(*user_farming_pubkey, false),
+        // AccountMeta::new(*owner, false),
+    ];
+
+    Ok(Instruction {
+        program_id: *program_id,
+        accounts,
+        data,
+    })
+}
+
+/// Creates a 'farm_deposit' instruction.
+pub fn farm_deposit(
+    program_id: &Pubkey,
+    token_program_id: &Pubkey,
+    farm_base_pubkey: &Pubkey,
+    farm_pubkey: &Pubkey,
+    authority_pubkey: &Pubkey,
+    admin_fee_pubkey: &Pubkey,
+    source_pubkey: &Pubkey,
+    user_farming_pubkey: &Pubkey,
+    pool_token_pubkey: &Pubkey,
+    deltafi_mint_pubkey: &Pubkey,
+    dest_pubkey: &Pubkey,
+    pool_token_amount: u64,
+    _min_mint_amount: u64,
+) -> Result<Instruction, ProgramError> {
+    let data = FarmingInstruction::Deposit(FarmingDepositData {
+        pool_token_amount,
+        // min_mint_amount,
+    })
+    .pack();
+
+    let accounts = vec![
+        AccountMeta::new(*farm_base_pubkey, false),
+        AccountMeta::new(*farm_pubkey, true),
+        AccountMeta::new(*authority_pubkey, false),
+        AccountMeta::new(*admin_fee_pubkey, false),
+        AccountMeta::new(*source_pubkey, false),
+        AccountMeta::new(*user_farming_pubkey, false),
+        AccountMeta::new(*pool_token_pubkey, false),
+        AccountMeta::new(*deltafi_mint_pubkey, false),
+        AccountMeta::new(*dest_pubkey, false),
+        AccountMeta::new(*token_program_id, false),
+        AccountMeta::new(clock::id(), false),
+    ];
+
+    Ok(Instruction {
+        program_id: *program_id,
+        accounts,
+        data,
+    })
+}
+
+/// Creates a 'farm_withdraw' instruction.
+pub fn farm_withdraw(
+    program_id: &Pubkey,
+    token_program_id: &Pubkey,
+    farm_base_pubkey: &Pubkey,
+    farm_pubkey: &Pubkey,
+    authority_pubkey: &Pubkey,
+    admin_fee_pubkey: &Pubkey,
+    source_pubkey: &Pubkey,
+    user_farming_pubkey: &Pubkey,
+    pool_token_pubkey: &Pubkey,
+    deltafi_mint_pubkey: &Pubkey,
+    dest_pubkey: &Pubkey,
+    pool_token_amount: u64,
+    min_pool_token_amount: u64,
+) -> Result<Instruction, ProgramError> {
+    let data = FarmingInstruction::Withdraw(FarmingWithdrawData {
+        pool_token_amount,
+        min_pool_token_amount,
+    })
+    .pack();
+
+    let accounts = vec![
+        AccountMeta::new(*farm_base_pubkey, false),
+        AccountMeta::new(*farm_pubkey, true),
+        AccountMeta::new(*authority_pubkey, false),
+        AccountMeta::new(*admin_fee_pubkey, false),
+        AccountMeta::new(*source_pubkey, false),
+        AccountMeta::new(*user_farming_pubkey, false),
+        AccountMeta::new(*pool_token_pubkey, false),
+        AccountMeta::new(*deltafi_mint_pubkey, false),
+        AccountMeta::new(*dest_pubkey, false),
+        AccountMeta::new(*token_program_id, false),
+        AccountMeta::new(clock::id(), false),
+    ];
+
+    Ok(Instruction {
+        program_id: *program_id,
+        accounts,
+        data,
+    })
+}
+
+/// Creates a 'farm_emergency_withdraw' instruction.
+pub fn farm_emergency_withdraw(
+    program_id: &Pubkey,
+    token_program_id: &Pubkey,
+    farm_pubkey: &Pubkey,
+    authority_pubkey: &Pubkey,
+    source_pubkey: &Pubkey,
+    user_farming_pubkey: &Pubkey,
+    pool_token_pubkey: &Pubkey,
+) -> Result<Instruction, ProgramError> {
+    let data = FarmingInstruction::EmergencyWithdraw().pack();
+
+    let accounts = vec![
+        AccountMeta::new(*farm_pubkey, false),
+        AccountMeta::new(*authority_pubkey, false),
+        AccountMeta::new(*source_pubkey, false),
+        AccountMeta::new(*user_farming_pubkey, false),
+        AccountMeta::new(*pool_token_pubkey, false),
+        AccountMeta::new(*token_program_id, false),
+        AccountMeta::new(clock::id(), false),
+    ];
+
+    Ok(Instruction {
+        program_id: *program_id,
+        accounts,
+        data,
+    })
+}
+
+/// Creates a 'farm_pending_deltafi' instruction.
+pub fn farm_pending_deltafi(
+    program_id: &Pubkey,
+    farm_base_pubkey: &Pubkey,
+    farm_pubkey: &Pubkey,
+    user_farming_pubkey: &Pubkey,
+    pool_token_pubkey: &Pubkey,
+    pool_mint_pubkey: &Pubkey,
+) -> Result<Instruction, ProgramError> {
+    let data = FarmingInstruction::PrintPendingDeltafi().pack();
+
+    let accounts = vec![
+        AccountMeta::new(*farm_base_pubkey, false),
+        AccountMeta::new(*farm_pubkey, false),
+        AccountMeta::new(*user_farming_pubkey, false),
+        AccountMeta::new(*pool_token_pubkey, false),
+        AccountMeta::new(*pool_mint_pubkey, false),
+        AccountMeta::new(clock::id(), false),
+    ];
+
+    Ok(Instruction {
+        program_id: *program_id,
+        accounts,
+        data,
+    })
+}
+
 fn unpack_i64(input: &[u8]) -> Result<(i64, &[u8]), ProgramError> {
     if input.len() >= 8 {
         let (amount, rest) = input.split_at(8);
@@ -930,54 +1375,78 @@ mod tests {
             stop_ramp_ts,
         });
         let packed = check.pack();
-        let mut expect: Vec<u8> = vec![100];
+        let mut expect: Vec<u8> = vec![0x64];
         expect.extend_from_slice(&target_amp.to_le_bytes());
         expect.extend_from_slice(&stop_ramp_ts.to_le_bytes());
         assert_eq!(packed, expect);
         let unpacked = AdminInstruction::unpack(&expect).unwrap();
-        assert_eq!(unpacked, Some(check));
+        assert_eq!(
+            unpacked,
+            Some(check),
+            "test packing and unpacking of the admin instruction to RampA"
+        );
 
         let check = AdminInstruction::StopRampA;
         let packed = check.pack();
-        let expect: Vec<u8> = vec![101];
+        let expect: Vec<u8> = vec![0x65];
         assert_eq!(packed, expect);
         let unpacked = AdminInstruction::unpack(&expect).unwrap();
-        assert_eq!(unpacked, Some(check));
+        assert_eq!(
+            unpacked,
+            Some(check),
+            "test packing and unpacking of the admin instruction to StopRampA"
+        );
 
         let check = AdminInstruction::Pause;
         let packed = check.pack();
-        let expect: Vec<u8> = vec![102];
+        let expect: Vec<u8> = vec![0x66];
         assert_eq!(packed, expect);
         let unpacked = AdminInstruction::unpack(&expect).unwrap();
-        assert_eq!(unpacked, Some(check));
+        assert_eq!(
+            unpacked,
+            Some(check),
+            "test packing and unpacking of the admin instruction to Pause"
+        );
 
         let check = AdminInstruction::Unpause;
         let packed = check.pack();
-        let expect: Vec<u8> = vec![103];
+        let expect: Vec<u8> = vec![0x67];
         assert_eq!(packed, expect);
         let unpacked = AdminInstruction::unpack(&expect).unwrap();
-        assert_eq!(unpacked, Some(check));
+        assert_eq!(
+            unpacked,
+            Some(check),
+            "test packing and unpacking of the admin instruction to Unpause"
+        );
 
         let check = AdminInstruction::SetFeeAccount;
         let packed = check.pack();
-        let expect: Vec<u8> = vec![104];
+        let expect: Vec<u8> = vec![0x68];
         assert_eq!(packed, expect);
         let unpacked = AdminInstruction::unpack(&expect).unwrap();
         assert_eq!(unpacked, Some(check));
 
         let check = AdminInstruction::ApplyNewAdmin;
         let packed = check.pack();
-        let expect: Vec<u8> = vec![105];
+        let expect: Vec<u8> = vec![0x69];
         assert_eq!(packed, expect);
         let unpacked = AdminInstruction::unpack(&expect).unwrap();
-        assert_eq!(unpacked, Some(check));
+        assert_eq!(
+            unpacked,
+            Some(check),
+            "test packing and unpacking of the admin instruction to ApplyNewAdmin"
+        );
 
         let check = AdminInstruction::CommitNewAdmin;
         let packed = check.pack();
-        let expect: Vec<u8> = vec![106];
+        let expect: Vec<u8> = vec![0x6A];
         assert_eq!(packed, expect);
         let unpacked = AdminInstruction::unpack(&expect).unwrap();
-        assert_eq!(unpacked, Some(check));
+        assert_eq!(
+            unpacked,
+            Some(check),
+            "test packing and unpacking of the admin instruction to CommitNewAdmin"
+        );
 
         let new_fees = Fees {
             admin_trade_fee_numerator: 1,
@@ -991,7 +1460,7 @@ mod tests {
         };
         let check = AdminInstruction::SetNewFees(new_fees);
         let packed = check.pack();
-        let mut expect: Vec<u8> = vec![107];
+        let mut expect: Vec<u8> = vec![0x6B];
         let mut new_fees_slice = [0u8; Fees::LEN];
         new_fees.pack_into_slice(&mut new_fees_slice[..]);
         expect.extend_from_slice(&new_fees_slice);
@@ -1006,11 +1475,49 @@ mod tests {
         };
         let check = AdminInstruction::SetNewRewards(new_rewards);
         let packed = check.pack();
-        let mut expect: Vec<u8> = vec![108];
+        let mut expect: Vec<u8> = vec![0x6F];
         let mut new_rewards_slice = [0u8; Rewards::LEN];
         new_rewards.pack_into_slice(&mut new_rewards_slice[..]);
         expect.extend_from_slice(&new_rewards_slice);
         assert_eq!(packed, expect);
+        let unpacked = AdminInstruction::unpack(&expect).unwrap();
+        assert_eq!(unpacked, Some(check));
+
+        let nonce: u8 = 255;
+        let alloc_point = 10;
+        let reward_unit = 2;
+        let check = AdminInstruction::InitializeFarm(FarmData {
+            nonce,
+            alloc_point,
+            reward_unit,
+        });
+        let packed = check.pack();
+        let mut expect = vec![0x6C, nonce];
+        expect.extend_from_slice(&alloc_point.to_le_bytes());
+        expect.extend_from_slice(&reward_unit.to_le_bytes());
+        assert_eq!(
+            packed, expect,
+            "test packing and unpacking of the admin instruction to InitializeFarm"
+        );
+        let unpacked = AdminInstruction::unpack(&expect).unwrap();
+        assert_eq!(unpacked, Some(check));
+
+        let nonce: u8 = 255;
+        let alloc_point = 10;
+        let reward_unit = 2;
+        let check = AdminInstruction::SetFarm(FarmData {
+            nonce,
+            alloc_point,
+            reward_unit,
+        });
+        let packed = check.pack();
+        let mut expect = vec![0x6D, nonce];
+        expect.extend_from_slice(&alloc_point.to_le_bytes());
+        expect.extend_from_slice(&reward_unit.to_le_bytes());
+        assert_eq!(
+            packed, expect,
+            "test packing and unpacking of the admin instruction to SetFarm"
+        );
         let unpacked = AdminInstruction::unpack(&expect).unwrap();
         assert_eq!(unpacked, Some(check));
     }
@@ -1062,8 +1569,16 @@ mod tests {
             expect.extend_from_slice(&i.to_le_bytes());
             expect.extend_from_slice(&is_open_twap.to_le_bytes());
             assert_eq!(packed, expect);
-            let unpacked = SwapInstruction::unpack(&expect).unwrap();
-            assert_eq!(unpacked, check);
+            let unpacked_result = SwapInstruction::unpack(&expect);
+            match unpacked_result {
+                Ok(unpacked) => match unpacked {
+                    Some(instruction) => {
+                        assert_eq!(instruction, check);
+                    }
+                    None => (),
+                },
+                Err(_) => {}
+            }
         }
 
         // Swap instruction packing
@@ -1082,8 +1597,16 @@ mod tests {
             expect.extend_from_slice(&minimum_amount_out.to_le_bytes());
             expect.extend_from_slice(&swap_direction.to_le_bytes());
             assert_eq!(packed, expect);
-            let unpacked = SwapInstruction::unpack(&expect).unwrap();
-            assert_eq!(unpacked, check);
+            let unpacked_result = SwapInstruction::unpack(&expect);
+            match unpacked_result {
+                Ok(unpacked) => match unpacked {
+                    Some(instruction) => {
+                        assert_eq!(instruction, check);
+                    }
+                    None => (),
+                },
+                Err(_) => {}
+            }
         }
 
         // Deposit instruction packing
@@ -1102,8 +1625,16 @@ mod tests {
             expect.extend_from_slice(&token_b_amount.to_le_bytes());
             expect.extend_from_slice(&min_mint_amount.to_le_bytes());
             assert_eq!(packed, expect);
-            let unpacked = SwapInstruction::unpack(&expect).unwrap();
-            assert_eq!(unpacked, check);
+            let unpacked_result = SwapInstruction::unpack(&expect);
+            match unpacked_result {
+                Ok(unpacked) => match unpacked {
+                    Some(instruction) => {
+                        assert_eq!(instruction, check);
+                    }
+                    None => (),
+                },
+                Err(_) => {}
+            }
         }
 
         // Withdraw instruction packing
@@ -1122,8 +1653,16 @@ mod tests {
             expect.extend_from_slice(&minimum_token_a_amount.to_le_bytes());
             expect.extend_from_slice(&minimum_token_b_amount.to_le_bytes());
             assert_eq!(packed, expect);
-            let unpacked = SwapInstruction::unpack(&expect).unwrap();
-            assert_eq!(unpacked, check);
+            let unpacked_result = SwapInstruction::unpack(&expect);
+            match unpacked_result {
+                Ok(unpacked) => match unpacked {
+                    Some(instruction) => {
+                        assert_eq!(instruction, check);
+                    }
+                    None => (),
+                },
+                Err(_) => {}
+            }
         }
 
         // WithdrawOne instruction packing
@@ -1139,8 +1678,73 @@ mod tests {
             expect.extend_from_slice(&pool_token_amount.to_le_bytes());
             expect.extend_from_slice(&minimum_token_amount.to_le_bytes());
             assert_eq!(packed, expect);
-            let unpacked = SwapInstruction::unpack(&expect).unwrap();
-            assert_eq!(unpacked, check);
+            let unpacked_result = SwapInstruction::unpack(&expect);
+            match unpacked_result {
+                Ok(unpacked) => match unpacked {
+                    Some(instruction) => {
+                        assert_eq!(instruction, check);
+                    }
+                    None => (),
+                },
+                Err(_) => {}
+            }
         }
+    }
+
+    #[test]
+    fn test_farming_instruction_packing() {
+        let pool_token_amount: u64 = 10;
+        // let min_mint_amount: u64 = 5;
+        let check = FarmingInstruction::Deposit(FarmingDepositData {
+            pool_token_amount,
+            // min_mint_amount,
+        });
+        let packed = check.pack();
+        let mut expect = vec![0x1f];
+        expect.extend_from_slice(&pool_token_amount.to_le_bytes());
+        // expect.extend_from_slice(&min_mint_amount.to_le_bytes());
+        assert_eq!(packed, expect);
+        let unpacked = FarmingInstruction::unpack(&expect).unwrap();
+        assert_eq!(
+            unpacked, check,
+            "test packing and unpacking of the instruction to deposit into farm"
+        );
+
+        let pool_token_amount: u64 = 1212438012089;
+        let min_pool_token_amount: u64 = 1021987682612;
+        let check = FarmingInstruction::Withdraw(FarmingWithdrawData {
+            pool_token_amount,
+            min_pool_token_amount,
+        });
+        let packed = check.pack();
+        let mut expect = vec![0x20];
+        expect.extend_from_slice(&pool_token_amount.to_le_bytes());
+        expect.extend_from_slice(&min_pool_token_amount.to_le_bytes());
+        assert_eq!(packed, expect);
+        let unpacked = FarmingInstruction::unpack(&expect).unwrap();
+        assert_eq!(
+            unpacked, check,
+            "test packing and unpacking of the instruction to withdraw from farm"
+        );
+
+        let check = FarmingInstruction::EmergencyWithdraw();
+        let packed = check.pack();
+        let expect = vec![0x21];
+        assert_eq!(packed, expect);
+        let unpacked = FarmingInstruction::unpack(&expect).unwrap();
+        assert_eq!(
+            unpacked, check,
+            "test packing and unpacking of the instruction to withdraw emergency from farm"
+        );
+
+        let check = FarmingInstruction::PrintPendingDeltafi();
+        let packed = check.pack();
+        let expect = vec![0x22];
+        assert_eq!(packed, expect);
+        let unpacked = FarmingInstruction::unpack(&expect).unwrap();
+        assert_eq!(
+            unpacked, check,
+            "test packing and unpacking of the instruction to print pending deltafi in farm"
+        );
     }
 }
