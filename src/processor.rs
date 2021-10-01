@@ -125,6 +125,7 @@ impl Processor {
     }
 
     /// Update deltafi pool
+    #[allow(clippy::too_many_arguments)]
     pub fn update_pool<'a>(
         farm: &mut FarmInfo,
         farm_key: &Pubkey,
@@ -1100,7 +1101,7 @@ impl Processor {
             return Err(SwapError::EmptyPool.into());
         }
 
-        msg!("emergency withdraw=== {:2X?}", user_farming);
+        // msg!("emergency withdraw=== {:2X?}", user_farming);
 
         Self::token_transfer(
             farm_info.key,

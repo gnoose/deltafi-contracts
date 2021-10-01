@@ -2,7 +2,7 @@
 
 use arrayref::{array_mut_ref, array_ref, array_refs, mut_array_refs};
 use solana_program::{
-    msg,
+    // msg,
     program_error::ProgramError,
     program_pack::{IsInitialized, Pack, Sealed},
     pubkey::Pubkey,
@@ -205,17 +205,13 @@ impl Pack for FarmBaseInfo {
     fn unpack_from_slice(input: &[u8]) -> Result<Self, ProgramError> {
         let input = array_ref![input, 0, 17];
         #[allow(clippy::ptr_offset_with_cast)]
-        let (
-            is_initialized,
-            total_alloc_point,
-            reward_unit,
-        ) = array_refs![input, 1, 8, 8];
+        let (is_initialized, total_alloc_point, reward_unit) = array_refs![input, 1, 8, 8];
         Ok(Self {
             is_initialized: match is_initialized {
                 [0] => false,
                 [1] => true,
                 _ => return Err(ProgramError::InvalidAccountData),
-            },            
+            },
             total_alloc_point: u64::from_le_bytes(*total_alloc_point),
             reward_unit: u64::from_le_bytes(*reward_unit),
         })
@@ -223,11 +219,7 @@ impl Pack for FarmBaseInfo {
 
     fn pack_into_slice(&self, output: &mut [u8]) {
         let output = array_mut_ref![output, 0, 17];
-        let (
-            is_initialized,
-            total_alloc_point,
-            reward_unit,
-        ) = mut_array_refs![output, 1, 8, 8];
+        let (is_initialized, total_alloc_point, reward_unit) = mut_array_refs![output, 1, 8, 8];
         is_initialized[0] = self.is_initialized as u8;
         *total_alloc_point = self.total_alloc_point.to_le_bytes();
         *reward_unit = self.reward_unit.to_le_bytes();
@@ -331,7 +323,7 @@ impl Pack for FarmInfo {
             nonce,
             future_admin_deadline,
             future_admin_key,
-            admin_key,            
+            admin_key,
             pool_mint,
             token_deltafi_mint,
             fees,
@@ -351,7 +343,7 @@ impl Pack for FarmInfo {
         *acc_deltafi_per_share = self.acc_deltafi_per_share.to_le_bytes();
         *last_reward_timestamp = self.last_reward_timestamp.to_le_bytes();
         *alloc_point = self.alloc_point.to_le_bytes();
-    }    
+    }
 }
 
 /// User's farming information
@@ -384,20 +376,15 @@ impl Pack for FarmingUserInfo {
     fn unpack_from_slice(input: &[u8]) -> Result<Self, ProgramError> {
         let input = array_ref![input, 0, 33];
         #[allow(clippy::ptr_offset_with_cast)]
-        let (
-            is_initialized,
-            amount,
-            reward_debt,
-            timestamp,
-            pending_deltafi,
-        ) = array_refs![input, 1, 8, 8, 8, 8];
+        let (is_initialized, amount, reward_debt, timestamp, pending_deltafi) =
+            array_refs![input, 1, 8, 8, 8, 8];
 
         Ok(Self {
             is_initialized: match is_initialized {
                 [0] => false,
                 [1] => true,
                 _ => return Err(ProgramError::InvalidAccountData),
-            },            
+            },
             amount: u64::from_le_bytes(*amount),
             reward_debt: u64::from_le_bytes(*reward_debt),
             timestamp: i64::from_le_bytes(*timestamp),
@@ -407,13 +394,8 @@ impl Pack for FarmingUserInfo {
 
     fn pack_into_slice(&self, output: &mut [u8]) {
         let output = array_mut_ref![output, 0, 33];
-        let (
-            is_initialized,
-            amount,
-            reward_debt,
-            timestamp,
-            pending_deltafi,
-        ) = mut_array_refs![output, 1, 8, 8, 8, 8];
+        let (is_initialized, amount, reward_debt, timestamp, pending_deltafi) =
+            mut_array_refs![output, 1, 8, 8, 8, 8];
         is_initialized[0] = self.is_initialized as u8;
         *amount = self.amount.to_le_bytes();
         *reward_debt = self.reward_debt.to_le_bytes();

@@ -830,8 +830,12 @@ pub mod test_utils {
                 &authority_key,
                 token_pool_amount,
             );
-            let (token_deltafi_mint_key, mut token_deltafi_mint_account) =
-                create_mint(&TOKEN_PROGRAM_ID, &mint_owner_key, DEFAULT_TOKEN_DECIMALS, None);
+            let (token_deltafi_mint_key, mut token_deltafi_mint_account) = create_mint(
+                &TOKEN_PROGRAM_ID,
+                &mint_owner_key,
+                DEFAULT_TOKEN_DECIMALS,
+                None,
+            );
             let (token_deltafi_key, token_deltafi_account) = mint_token(
                 &TOKEN_PROGRAM_ID,
                 &token_deltafi_mint_key,
@@ -978,7 +982,7 @@ pub mod test_utils {
                     &mut Account::default(),
                     &mut user_farming_acount,
                 ],
-            )            
+            )
         }
 
         pub fn deposit(

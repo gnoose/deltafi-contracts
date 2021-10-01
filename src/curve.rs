@@ -1,9 +1,6 @@
 //! Swap calculations and curve invariant implementation
 
-use crate::{
-    bn::U256, 
-    fees::Fees,
-};
+use crate::{bn::U256, fees::Fees};
 
 /// Number of coins
 const N_COINS: u64 = 2;
@@ -307,10 +304,7 @@ pub struct Farm {
 
 impl Farm {
     /// New Farm calculator
-    pub fn new(
-        current_ts: i64,
-        rate: u128,
-    ) -> Self {
+    pub fn new(current_ts: i64, rate: u128) -> Self {
         Self {
             _current_ts: current_ts,
             rate,
@@ -325,19 +319,17 @@ impl Farm {
         reward_debt: U256,
         // maybe need some other factors
     ) -> Option<U256> {
-        amount.checked_mul(acc_deltafi_per_share)?
-        .checked_div(self.rate.into())?
-        .checked_sub(reward_debt)
+        amount
+            .checked_mul(acc_deltafi_per_share)?
+            .checked_div(self.rate.into())?
+            .checked_sub(reward_debt)
     }
 
     /// Compute reward debt
-    pub fn compute_reward_debt(
-        &self,
-        acc_deltafi_per_share: U256,
-        amount: U256,
-    ) -> Option<U256> {
-        amount.checked_mul(acc_deltafi_per_share)?
-        .checked_div(self.rate.into())
+    pub fn compute_reward_debt(&self, acc_deltafi_per_share: U256, amount: U256) -> Option<U256> {
+        amount
+            .checked_mul(acc_deltafi_per_share)?
+            .checked_div(self.rate.into())
     }
 
     /// Compute account deltafi reward rate
@@ -351,12 +343,14 @@ impl Farm {
         reward_unit: U256,
     ) -> Option<U256> {
         // Update acc_deltafi_per_share through delta of time, allocation point, total allocation point, reward unit for time slot.
-        let deltafi_reward = time_delta.checked_mul(reward_unit)?
+        let deltafi_reward = time_delta
+            .checked_mul(reward_unit)?
             .checked_mul(alloc_point)?
             .checked_div(total_alloc_point)?;
         acc_deltafi_per_share.checked_add(
-            deltafi_reward.checked_mul(self.rate.into())?
-            .checked_div(supply)?
+            deltafi_reward
+                .checked_mul(self.rate.into())?
+                .checked_div(supply)?,
         )
     }
 }
@@ -847,17 +841,11 @@ mod tests {
     }
 
     #[test]
-    fn test_compute_pending_reward() {
-
-    }
+    fn test_compute_pending_reward() {}
 
     #[test]
-    fn test_compute_reward_debt() {
-
-    }
+    fn test_compute_reward_debt() {}
 
     #[test]
-    fn test_compute_acc_deltafi_per_share() {
-        
-    }
+    fn test_compute_acc_deltafi_per_share() {}
 }

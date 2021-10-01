@@ -887,7 +887,7 @@ mod tests {
         }
 
         accounts.initialize_swap().unwrap();
-        msg!("++++++++++");
+        // msg!("++++++++++");
 
         // wrong nonce for authority_key
         {
