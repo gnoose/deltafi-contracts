@@ -16,6 +16,7 @@ use crate::{
     error::SwapError,
     fees::Fees,
     instruction::{AdminInstruction, FarmData, RampAData},
+    rewards::Rewards,
     state::{FarmBaseInfo, FarmInfo, SwapInfo},
     utils,
 };
@@ -81,6 +82,10 @@ pub fn process_admin_instruction(
         AdminInstruction::ApplyNewAdminForFarm => {
             msg!("Instruction: ApplyNewAdminForFarm");
             apply_new_admin_for_farm(program_id, accounts)
+        }
+        AdminInstruction::SetNewRewards(new_rewards) => {
+            msg!("Instruction: SetRewardsInfo");
+            set_new_rewards(program_id, &new_rewards, accounts)
         }
     }
 }
@@ -340,6 +345,29 @@ fn set_new_fees(program_id: &Pubkey, new_fees: &Fees, accounts: &[AccountInfo]) 
     Ok(())
 }
 
+/// Set new rewards
+fn set_new_rewards(
+    program_id: &Pubkey,
+    new_rewards: &Rewards,
+    accounts: &[AccountInfo],
+) -> ProgramResult {
+    let account_info_iter = &mut accounts.iter();
+    let swap_info = next_account_info(account_info_iter)?;
+    let authority_info = next_account_info(account_info_iter)?;
+    let admin_info = next_account_info(account_info_iter)?;
+
+    let mut token_swap = SwapInfo::unpack(&swap_info.data.borrow())?;
+    is_admin(&token_swap.admin_key, admin_info)?;
+    if *authority_info.key != utils::authority_id(program_id, swap_info.key, token_swap.nonce)? {
+        return Err(SwapError::InvalidProgramAddress.into());
+    }
+
+    token_swap.rewards = *new_rewards;
+
+    SwapInfo::pack(token_swap, &mut swap_info.data.borrow_mut())?;
+    Ok(())
+}
+
 /// Processes an [Farm's Initialize](enum.Instruction.html).
 /// I should to consider whether something to initialize for farm is, and
 /// maybe it depends on farm structure.
@@ -449,7 +477,10 @@ mod tests {
     use solana_sdk::clock::Epoch;
 
     use super::*;
-    use crate::{curve::ZERO_TS, utils::test_utils::*};
+    use crate::{
+        curve::ZERO_TS,
+        utils::{test_utils::*, TWAP_OPENED},
+    };
 
     const DEFAULT_TOKEN_A_AMOUNT: u64 = 1_000_000_000;
     const DEFAULT_TOKEN_B_AMOUNT: u64 = 1_000_000_000;
@@ -502,6 +533,10 @@ mod tests {
             DEFAULT_TOKEN_A_AMOUNT,
             DEFAULT_TOKEN_B_AMOUNT,
             DEFAULT_TEST_FEES,
+            DEFAULT_TEST_REWARDS,
+            default_k(),
+            default_i(),
+            TWAP_OPENED,
         );
 
         // swap not initialized
@@ -613,6 +648,10 @@ mod tests {
             DEFAULT_TOKEN_A_AMOUNT,
             DEFAULT_TOKEN_B_AMOUNT,
             DEFAULT_TEST_FEES,
+            DEFAULT_TEST_REWARDS,
+            default_k(),
+            default_i(),
+            TWAP_OPENED,
         );
 
         // swap not initialized
@@ -674,6 +713,10 @@ mod tests {
             DEFAULT_TOKEN_A_AMOUNT,
             DEFAULT_TOKEN_B_AMOUNT,
             DEFAULT_TEST_FEES,
+            DEFAULT_TEST_REWARDS,
+            default_k(),
+            default_i(),
+            TWAP_OPENED,
         );
 
         // swap not initialized
@@ -729,6 +772,10 @@ mod tests {
             DEFAULT_TOKEN_A_AMOUNT,
             DEFAULT_TOKEN_B_AMOUNT,
             DEFAULT_TEST_FEES,
+            DEFAULT_TEST_REWARDS,
+            default_k(),
+            default_i(),
+            TWAP_OPENED,
         );
 
         // swap not initialized
@@ -787,6 +834,10 @@ mod tests {
             DEFAULT_TOKEN_A_AMOUNT,
             DEFAULT_TOKEN_B_AMOUNT,
             DEFAULT_TEST_FEES,
+            DEFAULT_TEST_REWARDS,
+            default_k(),
+            default_i(),
+            TWAP_OPENED,
         );
         let (
             admin_fee_key_a,
@@ -875,6 +926,10 @@ mod tests {
             DEFAULT_TOKEN_A_AMOUNT,
             DEFAULT_TOKEN_B_AMOUNT,
             DEFAULT_TEST_FEES,
+            DEFAULT_TEST_REWARDS,
+            default_k(),
+            default_i(),
+            TWAP_OPENED,
         );
 
         // swap not initialized
@@ -962,6 +1017,10 @@ mod tests {
             DEFAULT_TOKEN_A_AMOUNT,
             DEFAULT_TOKEN_B_AMOUNT,
             DEFAULT_TEST_FEES,
+            DEFAULT_TEST_REWARDS,
+            default_k(),
+            default_i(),
+            TWAP_OPENED,
         );
 
         // swap not initialized
@@ -1042,6 +1101,10 @@ mod tests {
             DEFAULT_TOKEN_A_AMOUNT,
             DEFAULT_TOKEN_B_AMOUNT,
             DEFAULT_TEST_FEES,
+            DEFAULT_TEST_REWARDS,
+            default_k(),
+            default_i(),
+            TWAP_OPENED,
         );
 
         let new_fees: Fees = Fees {
@@ -1100,6 +1163,75 @@ mod tests {
             assert_eq!(swap_info.fees, new_fees);
         }
     }
+
+    #[test]
+    fn test_set_new_rewards() {
+        let user_key = pubkey_rand();
+        let amp_factor = MIN_AMP * 100;
+        let mut accounts = SwapAccountInfo::new(
+            &user_key,
+            amp_factor,
+            DEFAULT_TOKEN_A_AMOUNT,
+            DEFAULT_TOKEN_B_AMOUNT,
+            DEFAULT_TEST_FEES,
+            DEFAULT_TEST_REWARDS,
+            default_k(),
+            default_i(),
+            TWAP_OPENED,
+        );
+
+        let new_rewards: Rewards = Rewards {
+            trade_reward_numerator: 2,
+            trade_reward_denominator: 3,
+            trade_reward_cap: 100,
+        };
+
+        // swap not initialized
+        {
+            assert_eq!(
+                Err(ProgramError::UninitializedAccount),
+                accounts.set_new_rewards(new_rewards)
+            );
+        }
+
+        accounts.initialize_swap().unwrap();
+
+        // wrong nonce for authority_key
+        {
+            let old_authority = accounts.authority_key;
+            let (bad_authority_key, _nonce) = Pubkey::find_program_address(
+                &[&accounts.swap_key.to_bytes()[..]],
+                &TOKEN_PROGRAM_ID,
+            );
+            accounts.authority_key = bad_authority_key;
+            assert_eq!(
+                Err(SwapError::InvalidProgramAddress.into()),
+                accounts.set_new_rewards(new_rewards)
+            );
+            accounts.authority_key = old_authority;
+        }
+
+        // unauthorized account
+        {
+            let old_admin_key = accounts.admin_key;
+            let fake_admin_key = pubkey_rand();
+            accounts.admin_key = fake_admin_key;
+            assert_eq!(
+                Err(SwapError::Unauthorized.into()),
+                accounts.set_new_rewards(new_rewards)
+            );
+            accounts.admin_key = old_admin_key;
+        }
+
+        // valid call
+        {
+            accounts.set_new_rewards(new_rewards).unwrap();
+
+            let swap_info = SwapInfo::unpack(&accounts.swap_account.data).unwrap();
+            assert_eq!(swap_info.rewards, new_rewards);
+        }
+    }
+
 
     #[test]
     fn test_initialize_farm() {

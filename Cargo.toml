@@ -23,7 +23,6 @@ spl-token = { version = "3.0.1", features = ["no-entrypoint"] }
 uint = { version = "0.8.3", default-features = false }
 thiserror = "1.0"
 log = "0.4"
-math = "0.1.0"
 
 [dev-dependencies]
 solana-sdk = "1.5.1"

@@ -46,6 +46,9 @@ pub enum SwapError {
     /// Address of the provided swap token account is incorrect.
     #[error("Address of the provided swap token account is incorrect")]
     IncorrectSwapAccount,
+    /// Address of the reward token account is incorrect.
+    #[error("Address of the reward token account is incorrect")]
+    IncorrectRewardAccount,
     /// Address of the provided token mint is incorrect
     #[error("Address of the provided token mint is incorrect")]
     IncorrectMint,

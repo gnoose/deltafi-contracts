@@ -5,6 +5,24 @@ use spl_token::state::Account;
 
 use crate::error::SwapError;
 
+/// swap directions - sell base
+pub const SWAP_DIRECTION_SELL_BASE: u64 = 0;
+
+/// swap directions - sell quote
+pub const SWAP_DIRECTION_SELL_QUOTE: u64 = 1;
+
+/// Default token decimals
+pub const DEFAULT_TOKEN_DECIMALS: u8 = 6;
+
+/// Default base point with default token decimals
+pub const DEFAULT_BASE_POINT: u64 = 1000000;
+
+/// Open Twap Flag
+pub const TWAP_OPENED: u64 = 1;
+
+/// Close Twap Falg
+pub const TWAP_CLOSED: u64 = 0;
+
 /// Calculates the authority id by generating a program address.
 pub fn authority_id(program_id: &Pubkey, my_info: &Pubkey, nonce: u8) -> Result<Pubkey, SwapError> {
     Pubkey::create_program_address(&[&my_info.to_bytes()[..32], &[nonce]], program_id)
@@ -18,6 +36,8 @@ pub fn unpack_token_account(data: &[u8]) -> Result<Account, SwapError> {
 
 #[cfg(test)]
 pub mod test_utils {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
     use solana_program::{
         account_info::AccountInfo, clock::Clock, entrypoint::ProgramResult,
         instruction::Instruction, msg, program_error::ProgramError, program_pack::Pack,
@@ -29,11 +49,14 @@ pub mod test_utils {
         state::{Account as SplAccount, Mint as SplMint},
     };
 
+    use super::*;
     use crate::{
+        bn::FixedU256, 
         curve::ZERO_TS,
         fees::Fees,
         instruction::*,
         processor::Processor,
+        rewards::Rewards,
         state::{FarmBaseInfo, FarmInfo, FarmingUserInfo, SwapInfo},
     };
 
@@ -54,8 +77,26 @@ pub mod test_utils {
         withdraw_fee_denominator: 100,
     };
 
-    /// Default token decimals
-    pub const DEFAULT_TOKEN_DECIMALS: u8 = 6;
+    /// Rewards for testing
+    pub const DEFAULT_TEST_REWARDS: Rewards = Rewards {
+        trade_reward_numerator: 1,
+        trade_reward_denominator: 2,
+        trade_reward_cap: 100,
+    };
+
+    /// Slope Value for testing
+    pub fn default_k() -> FixedU256 {
+        FixedU256::one()
+            .checked_mul_floor(FixedU256::new(5.into()))
+            .unwrap()
+            .checked_div_floor(FixedU256::new(10.into()))
+            .unwrap()
+    }
+
+    /// Mid Price for testing
+    pub fn default_i() -> FixedU256 {
+        FixedU256::new_from_int(100.into(), DEFAULT_TOKEN_DECIMALS).unwrap()
+    }
 
     pub fn clock_account(ts: i64) -> Account {
         let clock = Clock {
@@ -88,6 +129,10 @@ pub mod test_utils {
         pub token_b_account: Account,
         pub token_b_mint_key: Pubkey,
         pub token_b_mint_account: Account,
+        pub deltafi_token_key: Pubkey,
+        pub deltafi_token_account: Account,
+        pub deltafi_mint_key: Pubkey,
+        pub deltafi_mint_account: Account,
         pub admin_key: Pubkey,
         pub admin_account: Account,
         pub admin_fee_a_key: Pubkey,
@@ -95,6 +140,16 @@ pub mod test_utils {
         pub admin_fee_b_key: Pubkey,
         pub admin_fee_b_account: Account,
         pub fees: Fees,
+        pub rewards: Rewards,
+        pub k: FixedU256,
+        pub i: FixedU256,
+        pub base_target: FixedU256,
+        pub quote_target: FixedU256,
+        pub base_reserve: FixedU256,
+        pub quote_reserve: FixedU256,
+        pub is_open_twap: u64,
+        pub block_timestamp_last: i64,
+        pub base_price_cumulative_last: FixedU256,
     }
 
     impl SwapAccountInfo {
@@ -104,6 +159,10 @@ pub mod test_utils {
             token_a_amount: u64,
             token_b_amount: u64,
             fees: Fees,
+            rewards: Rewards,
+            k: FixedU256,
+            i: FixedU256,
+            is_open_twap: u64,
         ) -> Self {
             let swap_key = pubkey_rand();
             let swap_account = Account::new(0, SwapInfo::get_packed_len(), &SWAP_PROGRAM_ID);
@@ -120,6 +179,20 @@ pub mod test_utils {
                 &TOKEN_PROGRAM_ID,
                 &pool_mint_key,
                 &mut pool_mint_account,
+                &authority_key,
+                &user_key,
+                0,
+            );
+            let (deltafi_mint_key, mut deltafi_mint_account) = create_mint(
+                &TOKEN_PROGRAM_ID,
+                &authority_key,
+                DEFAULT_TOKEN_DECIMALS,
+                None,
+            );
+            let (deltafi_token_key, deltafi_token_account) = mint_token(
+                &TOKEN_PROGRAM_ID,
+                &deltafi_mint_key,
+                &mut deltafi_mint_account,
                 &authority_key,
                 &user_key,
                 0,
@@ -162,6 +235,15 @@ pub mod test_utils {
             );
 
             let admin_account = Account::default();
+            let base_target = FixedU256::zero();
+            let quote_target = FixedU256::zero();
+            let base_reserve = FixedU256::zero();
+            let quote_reserve = FixedU256::zero();
+            let block_timestamp_last = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i64;
+            let base_price_cumulative_last = FixedU256::zero();
 
             SwapAccountInfo {
                 nonce,
@@ -182,6 +264,10 @@ pub mod test_utils {
                 token_b_mint_account,
                 token_b_key,
                 token_b_account,
+                deltafi_mint_key,
+                deltafi_mint_account,
+                deltafi_token_key,
+                deltafi_token_account,
                 admin_key: admin_account.owner,
                 admin_account,
                 admin_fee_a_key,
@@ -189,6 +275,16 @@ pub mod test_utils {
                 admin_fee_b_key,
                 admin_fee_b_account,
                 fees,
+                rewards,
+                k,
+                i,
+                base_target,
+                quote_target,
+                base_reserve,
+                quote_reserve,
+                is_open_twap,
+                block_timestamp_last,
+                base_price_cumulative_last,
             }
         }
 
@@ -208,9 +304,15 @@ pub mod test_utils {
                     &self.token_b_key,
                     &self.pool_mint_key,
                     &self.pool_token_key,
+                    &self.deltafi_mint_key,
+                    &self.deltafi_token_key,
                     self.nonce,
                     self.initial_amp_factor,
                     self.fees,
+                    self.rewards,
+                    self.k.inner_u64()?,
+                    self.i.inner_u64()?,
+                    self.is_open_twap,
                 )
                 .unwrap(),
                 vec![
@@ -225,6 +327,8 @@ pub mod test_utils {
                     &mut self.token_b_account,
                     &mut self.pool_mint_account,
                     &mut self.pool_token_account,
+                    &mut self.deltafi_mint_account,
+                    &mut self.deltafi_token_account,
                     &mut Account::default(),
                 ],
             )
@@ -333,27 +437,61 @@ pub mod test_utils {
             mut user_destination_account: &mut Account,
             amount_in: u64,
             minimum_amount_out: u64,
+            swap_direction: u64,
         ) -> ProgramResult {
             // approve moving from user source account
-            do_process_instruction(
-                approve(
-                    &TOKEN_PROGRAM_ID,
-                    &user_source_key,
-                    &self.authority_key,
-                    &user_key,
-                    &[],
-                    amount_in,
-                )
-                .unwrap(),
-                vec![
-                    &mut user_source_account,
-                    &mut Account::default(),
-                    &mut Account::default(),
-                ],
-            )
-            .unwrap();
+            let admin_destination_key;
 
-            let admin_destination_key = self.get_admin_fee_key(swap_destination_key);
+            match swap_direction {
+                SWAP_DIRECTION_SELL_BASE => {
+                    msg!("swap: swap direction sell base");
+                    do_process_instruction(
+                        approve(
+                            &TOKEN_PROGRAM_ID,
+                            &user_source_key,
+                            &self.authority_key,
+                            &user_key,
+                            &[],
+                            amount_in,
+                        )
+                        .unwrap(),
+                        vec![
+                            &mut user_source_account,
+                            &mut Account::default(),
+                            &mut Account::default(),
+                        ],
+                    )
+                    .unwrap();
+
+                    admin_destination_key = self.get_admin_fee_key(swap_destination_key);
+                }
+                SWAP_DIRECTION_SELL_QUOTE => {
+                    msg!("swap: swap direction sell quote");
+                    do_process_instruction(
+                        approve(
+                            &TOKEN_PROGRAM_ID,
+                            &user_destination_key,
+                            &self.authority_key,
+                            &user_key,
+                            &[],
+                            amount_in,
+                        )
+                        .unwrap(),
+                        vec![
+                            &mut user_destination_account,
+                            &mut Account::default(),
+                            &mut Account::default(),
+                        ],
+                    )
+                    .unwrap();
+
+                    admin_destination_key = self.get_admin_fee_key(swap_source_key);
+                }
+                _ => {
+                    admin_destination_key = self.get_admin_fee_key(swap_destination_key);
+                }
+            }
+
             let mut admin_destination_account =
                 self.get_admin_fee_account(&admin_destination_key).clone();
             let mut swap_source_account = self.get_token_account(swap_source_key).clone();
@@ -370,9 +508,12 @@ pub mod test_utils {
                     &swap_source_key,
                     &swap_destination_key,
                     &user_destination_key,
+                    &self.deltafi_token_key,
+                    &self.deltafi_mint_key,
                     &admin_destination_key,
                     amount_in,
                     minimum_amount_out,
+                    swap_direction,
                 )
                 .unwrap(),
                 vec![
@@ -382,6 +523,8 @@ pub mod test_utils {
                     &mut swap_source_account,
                     &mut swap_destination_account,
                     &mut user_destination_account,
+                    &mut self.deltafi_token_account,
+                    &mut self.deltafi_mint_account,
                     &mut admin_destination_account,
                     &mut Account::default(),
                     &mut clock_account(ZERO_TS),
@@ -763,6 +906,24 @@ pub mod test_utils {
                     &self.authority_key,
                     &self.admin_key,
                     new_fees,
+                )
+                .unwrap(),
+                vec![
+                    &mut self.swap_account,
+                    &mut Account::default(),
+                    &mut self.admin_account,
+                ],
+            )
+        }
+
+        pub fn set_new_rewards(&mut self, new_rewards: Rewards) -> ProgramResult {
+            do_process_instruction(
+                set_rewards(
+                    &SWAP_PROGRAM_ID,
+                    &self.swap_key,
+                    &self.authority_key,
+                    &self.admin_key,
+                    new_rewards,
                 )
                 .unwrap(),
                 vec![
