@@ -35,7 +35,9 @@ use crate::{
     rewards::Rewards,
     state::{FarmBaseInfo, FarmInfo, FarmingUserInfo, SwapInfo},
     utils,
-    v2curve::{adjusted_target, get_mid_price, sell_base_token, sell_quote_token, PMMState},
+    v2curve::{
+        adjusted_target, get_mid_price, sell_base_token, sell_quote_token, PMMState, RState,
+    },
 };
 
 /// Program state handler. (and general curve params)
@@ -400,6 +402,7 @@ impl Processor {
                 )?;
             }
         }
+        let receive_amount = FixedU256::zero();
 
         let obj = SwapInfo {
             is_initialized: true,
@@ -434,6 +437,7 @@ impl Processor {
             is_open_twap,
             block_timestamp_last: new_block_timestamp_last,
             base_price_cumulative_last,
+            receive_amount,
         };
         SwapInfo::pack(obj, &mut swap_info.data.borrow_mut())?;
         Ok(())
@@ -630,6 +634,7 @@ impl Processor {
                 )?;
             }
         }
+        let receive_amount = FixedU256::zero();
 
         let obj = SwapInfo {
             is_initialized: true,
@@ -664,8 +669,154 @@ impl Processor {
             is_open_twap,
             block_timestamp_last: new_block_timestamp_last,
             base_price_cumulative_last,
+            receive_amount,
         };
         SwapInfo::pack(obj, &mut swap_info.data.borrow_mut())?;
+        Ok(())
+    }
+
+    /// Processes an [StableCalcReceiveAmount](enum.StableInstruction.html).
+    pub fn process_stable_calc_receive_amount(
+        program_id: &Pubkey,
+        amount_in: u64,
+        minimum_amount_out: u64,
+        swap_direction: u64,
+        accounts: &[AccountInfo],
+    ) -> ProgramResult {
+        let account_info_iter = &mut accounts.iter();
+        let swap_info = next_account_info(account_info_iter)?;
+        let authority_info = next_account_info(account_info_iter)?;
+        let _source_info = next_account_info(account_info_iter)?;
+        let swap_source_info = next_account_info(account_info_iter)?;
+        let swap_destination_info = next_account_info(account_info_iter)?;
+        let _destination_info = next_account_info(account_info_iter)?;
+        let reward_token_info = next_account_info(account_info_iter)?;
+        let reward_mint_info = next_account_info(account_info_iter)?;
+        let admin_destination_info = next_account_info(account_info_iter)?;
+        let _token_program_info = next_account_info(account_info_iter)?;
+        let clock_sysvar_info = next_account_info(account_info_iter)?;
+
+        let token_swap = SwapInfo::unpack(&swap_info.data.borrow())?;
+        if token_swap.is_paused {
+            return Err(SwapError::IsPaused.into());
+        }
+        if *authority_info.key != utils::authority_id(program_id, swap_info.key, token_swap.nonce)?
+        {
+            return Err(SwapError::InvalidProgramAddress.into());
+        }
+        if !(*swap_source_info.key == token_swap.token_a
+            || *swap_source_info.key == token_swap.token_b)
+        {
+            return Err(SwapError::IncorrectSwapAccount.into());
+        }
+        if !(*swap_destination_info.key == token_swap.token_a
+            || *swap_destination_info.key == token_swap.token_b)
+        {
+            return Err(SwapError::IncorrectSwapAccount.into());
+        }
+        match swap_direction {
+            utils::SWAP_DIRECTION_SELL_BASE => {
+                if *swap_destination_info.key == token_swap.token_a
+                    && *admin_destination_info.key != token_swap.admin_fee_key_a
+                {
+                    return Err(SwapError::InvalidAdmin.into());
+                }
+                if *swap_destination_info.key == token_swap.token_b
+                    && *admin_destination_info.key != token_swap.admin_fee_key_b
+                {
+                    return Err(SwapError::InvalidAdmin.into());
+                }
+            }
+            utils::SWAP_DIRECTION_SELL_QUOTE => {
+                if *swap_destination_info.key == token_swap.token_a
+                    && *admin_destination_info.key != token_swap.admin_fee_key_b
+                {
+                    return Err(SwapError::InvalidAdmin.into());
+                }
+                if *swap_destination_info.key == token_swap.token_b
+                    && *admin_destination_info.key != token_swap.admin_fee_key_a
+                {
+                    return Err(SwapError::InvalidAdmin.into());
+                }
+            }
+            _ => {
+                return Err(ProgramError::InvalidArgument);
+            }
+        }
+        if *swap_source_info.key == *swap_destination_info.key {
+            return Err(SwapError::InvalidInput.into());
+        }
+        if *reward_mint_info.key != token_swap.deltafi_mint {
+            return Err(SwapError::IncorrectMint.into());
+        }
+        if *reward_token_info.key != token_swap.deltafi_token {
+            return Err(SwapError::IncorrectRewardAccount.into());
+        }
+
+        let clock = Clock::from_account_info(clock_sysvar_info)?;
+        let swap_source_account = utils::unpack_token_account(&swap_source_info.data.borrow())?;
+        let swap_destination_account =
+            utils::unpack_token_account(&swap_destination_info.data.borrow())?;
+
+        let invariant = StableSwap::new(
+            token_swap.initial_amp_factor,
+            token_swap.target_amp_factor,
+            clock.unix_timestamp,
+            token_swap.start_ramp_ts,
+            token_swap.stop_ramp_ts,
+        );
+        let result = invariant
+            .swap_to(
+                U256::from(amount_in),
+                U256::from(swap_source_account.amount),
+                U256::from(swap_destination_account.amount),
+                &token_swap.fees,
+            )
+            .ok_or(SwapError::CalculationFailure)?;
+        let amount_swapped = U256::to_u64(result.amount_swapped)?;
+        if amount_swapped < minimum_amount_out {
+            return Err(SwapError::ExceededSlippage.into());
+        }
+
+        let dy_swap_amount = FixedU256::new_from_fixed_u64(amount_swapped)?;
+
+        let obj = SwapInfo {
+            is_initialized: token_swap.is_initialized,
+            is_paused: token_swap.is_paused,
+            nonce: token_swap.nonce,
+            initial_amp_factor: token_swap.initial_amp_factor,
+            target_amp_factor: token_swap.target_amp_factor,
+            start_ramp_ts: token_swap.start_ramp_ts,
+            stop_ramp_ts: token_swap.stop_ramp_ts,
+            future_admin_deadline: token_swap.future_admin_deadline,
+            future_admin_key: token_swap.future_admin_key,
+            admin_key: token_swap.admin_key,
+            token_a: token_swap.token_a,
+            token_b: token_swap.token_b,
+            pool_mint: token_swap.pool_mint,
+            token_a_mint: token_swap.token_a_mint,
+            token_b_mint: token_swap.token_b_mint,
+            admin_fee_key_a: token_swap.admin_fee_key_a,
+            admin_fee_key_b: token_swap.admin_fee_key_b,
+            deltafi_token: token_swap.deltafi_token,
+            deltafi_mint: token_swap.deltafi_mint,
+            fees: token_swap.fees,
+            oracle: token_swap.oracle,
+            rewards: token_swap.rewards,
+            k: token_swap.k,
+            i: token_swap.i,
+            r: token_swap.r,
+            base_target: token_swap.base_target,
+            quote_target: token_swap.quote_target,
+            base_reserve: token_swap.base_reserve,
+            quote_reserve: token_swap.quote_reserve,
+            is_open_twap: token_swap.is_open_twap,
+            block_timestamp_last: token_swap.block_timestamp_last,
+            base_price_cumulative_last: token_swap.base_price_cumulative_last,
+            receive_amount: dy_swap_amount,
+        };
+        SwapInfo::pack(obj, &mut swap_info.data.borrow_mut())?;
+
         Ok(())
     }
 
@@ -678,24 +829,6 @@ impl Processor {
         accounts: &[AccountInfo],
     ) -> ProgramResult {
         msg!("stable_swap_direction ................ {}", swap_direction);
-        match swap_direction {
-            utils::SWAP_DIRECTION_SELL_BASE => {
-                Self::sell_stable_base(program_id, amount_in, minimum_amount_out, accounts)
-            }
-            utils::SWAP_DIRECTION_SELL_QUOTE => {
-                Self::sell_stable_quote(program_id, amount_in, minimum_amount_out, accounts)
-            }
-            _ => Ok(()),
-        }
-    }
-
-    /// processor for sell base
-    pub fn sell_stable_base(
-        program_id: &Pubkey,
-        amount_in: u64,
-        minimum_amount_out: u64,
-        accounts: &[AccountInfo],
-    ) -> ProgramResult {
         let account_info_iter = &mut accounts.iter();
         let swap_info = next_account_info(account_info_iter)?;
         let authority_info = next_account_info(account_info_iter)?;
@@ -727,15 +860,34 @@ impl Processor {
         {
             return Err(SwapError::IncorrectSwapAccount.into());
         }
-        if *swap_destination_info.key == token_swap.token_a
-            && *admin_destination_info.key != token_swap.admin_fee_key_a
-        {
-            return Err(SwapError::InvalidAdmin.into());
-        }
-        if *swap_destination_info.key == token_swap.token_b
-            && *admin_destination_info.key != token_swap.admin_fee_key_b
-        {
-            return Err(SwapError::InvalidAdmin.into());
+        match swap_direction {
+            utils::SWAP_DIRECTION_SELL_BASE => {
+                if *swap_destination_info.key == token_swap.token_a
+                    && *admin_destination_info.key != token_swap.admin_fee_key_a
+                {
+                    return Err(SwapError::InvalidAdmin.into());
+                }
+                if *swap_destination_info.key == token_swap.token_b
+                    && *admin_destination_info.key != token_swap.admin_fee_key_b
+                {
+                    return Err(SwapError::InvalidAdmin.into());
+                }
+            }
+            utils::SWAP_DIRECTION_SELL_QUOTE => {
+                if *swap_destination_info.key == token_swap.token_a
+                    && *admin_destination_info.key != token_swap.admin_fee_key_b
+                {
+                    return Err(SwapError::InvalidAdmin.into());
+                }
+                if *swap_destination_info.key == token_swap.token_b
+                    && *admin_destination_info.key != token_swap.admin_fee_key_a
+                {
+                    return Err(SwapError::InvalidAdmin.into());
+                }
+            }
+            _ => {
+                return Err(ProgramError::InvalidArgument);
+            }
         }
         if *swap_source_info.key == *swap_destination_info.key {
             return Err(SwapError::InvalidInput.into());
@@ -751,6 +903,21 @@ impl Processor {
         let swap_source_account = utils::unpack_token_account(&swap_source_info.data.borrow())?;
         let swap_destination_account =
             utils::unpack_token_account(&swap_destination_info.data.borrow())?;
+        match swap_direction {
+            utils::SWAP_DIRECTION_SELL_BASE => {
+                if swap_source_account.amount < amount_in {
+                    return Err(ProgramError::InsufficientFunds);
+                }
+            }
+            utils::SWAP_DIRECTION_SELL_QUOTE => {
+                if swap_destination_account.amount < amount_in {
+                    return Err(ProgramError::InsufficientFunds);
+                }
+            }
+            _ => {
+                return Err(ProgramError::InvalidArgument);
+            }
+        }
 
         let invariant = StableSwap::new(
             token_swap.initial_amp_factor,
@@ -776,7 +943,7 @@ impl Processor {
 
         let base_balance = FixedU256::new_from_fixed_u64(token_a.amount)?;
         let quote_balance = FixedU256::new_from_fixed_u64(token_b.amount)?;
-        let pay_base_amount = FixedU256::new_from_fixed_u64(amount_in)?;
+        let pay_amount = FixedU256::new_from_fixed_u64(amount_in)?;
 
         let base_reserve = token_swap.base_reserve;
         let quote_reserve = token_swap.quote_reserve;
@@ -793,56 +960,122 @@ impl Processor {
             token_swap.r,
         );
         adjusted_target(&mut state)?;
-        let (_receive_quote_amount, new_r) = sell_base_token(state, pay_base_amount)?;
+        let mut _new_r = RState::One;
+        match swap_direction {
+            utils::SWAP_DIRECTION_SELL_BASE => {
+                let (_, n_r) = sell_base_token(state, pay_amount)?;
+                _new_r = n_r;
+            }
+            utils::SWAP_DIRECTION_SELL_QUOTE => {
+                let (_, n_r) = sell_quote_token(state, pay_amount)?;
+                _new_r = n_r;
+            }
+            _ => {
+                return Err(ProgramError::InvalidArgument);
+            }
+        }
         let mid_price = get_mid_price(state).unwrap();
         let rewards = &token_swap.rewards;
         let amount_to_reward = rewards
-            .trade_reward_fixed_u256(pay_base_amount.checked_mul_floor(mid_price)?)
+            .trade_reward_fixed_u256(pay_amount.checked_mul_floor(mid_price)?)
             .unwrap();
 
         let dy_swap_amount = FixedU256::new_from_fixed_u64(amount_swapped)?;
-        let new_base_target = state.b_0;
-        let new_quote_target = quote_target;
+        let mut new_base_target = base_target;
+        let mut new_quote_target = quote_target;
+        let mut _new_base_reserve = FixedU256::zero();
+        let mut _new_quote_reserve = FixedU256::zero();
+        match swap_direction {
+            utils::SWAP_DIRECTION_SELL_BASE => {
+                new_base_target = state.b_0;
 
-        Self::token_transfer(
-            swap_info.key,
-            token_program_info.clone(),
-            source_info.clone(),
-            swap_source_info.clone(),
-            authority_info.clone(),
-            token_swap.nonce,
-            amount_in,
-        )?;
-        Self::token_transfer(
-            swap_info.key,
-            token_program_info.clone(),
-            swap_destination_info.clone(),
-            destination_info.clone(),
-            authority_info.clone(),
-            token_swap.nonce,
-            dy_swap_amount.inner_u64()?,
-        )?;
-        Self::token_transfer(
-            swap_info.key,
-            token_program_info.clone(),
-            swap_destination_info.clone(),
-            admin_destination_info.clone(),
-            authority_info.clone(),
-            token_swap.nonce,
-            U256::to_u64(result.admin_fee)?,
-        )?;
-        Self::token_mint_to(
-            swap_info.key,
-            token_program_info.clone(),
-            reward_mint_info.clone(),
-            reward_token_info.clone(),
-            authority_info.clone(),
-            token_swap.nonce,
-            amount_to_reward.inner_u64()?,
-        )?;
+                Self::token_transfer(
+                    swap_info.key,
+                    token_program_info.clone(),
+                    source_info.clone(),
+                    swap_source_info.clone(),
+                    authority_info.clone(),
+                    token_swap.nonce,
+                    amount_in,
+                )?;
+                Self::token_transfer(
+                    swap_info.key,
+                    token_program_info.clone(),
+                    swap_destination_info.clone(),
+                    destination_info.clone(),
+                    authority_info.clone(),
+                    token_swap.nonce,
+                    dy_swap_amount.inner_u64()?,
+                )?;
+                Self::token_transfer(
+                    swap_info.key,
+                    token_program_info.clone(),
+                    swap_destination_info.clone(),
+                    admin_destination_info.clone(),
+                    authority_info.clone(),
+                    token_swap.nonce,
+                    U256::to_u64(result.admin_fee)?,
+                )?;
+                Self::token_mint_to(
+                    swap_info.key,
+                    token_program_info.clone(),
+                    reward_mint_info.clone(),
+                    reward_token_info.clone(),
+                    authority_info.clone(),
+                    token_swap.nonce,
+                    amount_to_reward.inner_u64()?,
+                )?;
 
-        let new_base_reserve = base_balance.checked_add(pay_base_amount)?;
-        let new_quote_reserve = quote_balance.checked_sub(dy_swap_amount)?;
+                _new_base_reserve = base_balance.checked_add(pay_amount)?;
+                _new_quote_reserve = quote_balance.checked_sub(dy_swap_amount)?;
+            }
+            utils::SWAP_DIRECTION_SELL_QUOTE => {
+                new_quote_target = state.q_0;
+
+                Self::token_transfer(
+                    swap_info.key,
+                    token_program_info.clone(),
+                    destination_info.clone(),
+                    swap_destination_info.clone(),
+                    authority_info.clone(),
+                    token_swap.nonce,
+                    amount_in,
+                )?;
+                Self::token_transfer(
+                    swap_info.key,
+                    token_program_info.clone(),
+                    swap_source_info.clone(),
+                    source_info.clone(),
+                    authority_info.clone(),
+                    token_swap.nonce,
+                    dy_swap_amount.inner_u64()?,
+                )?;
+                Self::token_transfer(
+                    swap_info.key,
+                    token_program_info.clone(),
+                    swap_source_info.clone(),
+                    admin_destination_info.clone(),
+                    authority_info.clone(),
+                    token_swap.nonce,
+                    U256::to_u64(result.admin_fee)?,
+                )?;
+                Self::token_mint_to(
+                    swap_info.key,
+                    token_program_info.clone(),
+                    reward_mint_info.clone(),
+                    reward_token_info.clone(),
+                    authority_info.clone(),
+                    token_swap.nonce,
+                    amount_to_reward.inner_u64()?,
+                )?;
+
+                _new_base_reserve = base_balance.checked_sub(dy_swap_amount)?;
+                _new_quote_reserve = quote_balance.checked_add(pay_amount)?;
+            }
+            _ => {
+                return Err(ProgramError::InvalidArgument);
+            }
+        }
 
         let block_timestamp_last: i64 = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -852,14 +1085,14 @@ impl Processor {
         if token_swap.is_open_twap == utils::TWAP_OPENED {
             let time_elapsed = block_timestamp_last - token_swap.block_timestamp_last;
             if time_elapsed > 0
-                && new_base_reserve.inner_u64()? != 0
-                && new_quote_reserve.inner_u64()? != 0
+                && _new_base_reserve.inner_u64()? != 0
+                && _new_quote_reserve.inner_u64()? != 0
             {
                 let state = PMMState::new(
                     token_swap.i,
                     token_swap.k,
-                    new_base_reserve,
-                    new_quote_reserve,
+                    _new_base_reserve,
+                    _new_quote_reserve,
                     new_base_target,
                     new_quote_target,
                     token_swap.r,
@@ -871,6 +1104,7 @@ impl Processor {
                 )?;
             }
         }
+        let receive_amount = dy_swap_amount;
 
         let obj = SwapInfo {
             is_initialized: token_swap.is_initialized,
@@ -897,39 +1131,41 @@ impl Processor {
             rewards: token_swap.rewards,
             k: token_swap.k,
             i: token_swap.i,
-            r: new_r,
+            r: _new_r,
             base_target: new_base_target,
             quote_target: new_quote_target,
-            base_reserve: new_base_reserve,
-            quote_reserve: new_quote_reserve,
+            base_reserve: _new_base_reserve,
+            quote_reserve: _new_quote_reserve,
             is_open_twap: token_swap.is_open_twap,
             block_timestamp_last,
             base_price_cumulative_last,
+            receive_amount,
         };
         SwapInfo::pack(obj, &mut swap_info.data.borrow_mut())?;
 
         Ok(())
     }
 
-    /// processor for sell quote
-    pub fn sell_stable_quote(
+    /// Processes an [CalcReceiveAmount](enum.Instruction.html).
+    pub fn process_calc_receive_amount(
         program_id: &Pubkey,
         amount_in: u64,
         minimum_amount_out: u64,
+        swap_direction: u64,
         accounts: &[AccountInfo],
     ) -> ProgramResult {
         let account_info_iter = &mut accounts.iter();
         let swap_info = next_account_info(account_info_iter)?;
         let authority_info = next_account_info(account_info_iter)?;
-        let source_info = next_account_info(account_info_iter)?;
+        let _source_info = next_account_info(account_info_iter)?;
         let swap_source_info = next_account_info(account_info_iter)?;
         let swap_destination_info = next_account_info(account_info_iter)?;
-        let destination_info = next_account_info(account_info_iter)?;
+        let _destination_info = next_account_info(account_info_iter)?;
         let reward_token_info = next_account_info(account_info_iter)?;
         let reward_mint_info = next_account_info(account_info_iter)?;
         let admin_destination_info = next_account_info(account_info_iter)?;
-        let token_program_info = next_account_info(account_info_iter)?;
-        let clock_sysvar_info = next_account_info(account_info_iter)?;
+        let _token_program_info = next_account_info(account_info_iter)?;
+        let _clock_sysvar_info = next_account_info(account_info_iter)?;
 
         let token_swap = SwapInfo::unpack(&swap_info.data.borrow())?;
         if token_swap.is_paused {
@@ -949,15 +1185,34 @@ impl Processor {
         {
             return Err(SwapError::IncorrectSwapAccount.into());
         }
-        if *swap_destination_info.key == token_swap.token_a
-            && *admin_destination_info.key != token_swap.admin_fee_key_b
-        {
-            return Err(SwapError::InvalidAdmin.into());
-        }
-        if *swap_destination_info.key == token_swap.token_b
-            && *admin_destination_info.key != token_swap.admin_fee_key_a
-        {
-            return Err(SwapError::InvalidAdmin.into());
+        match swap_direction {
+            utils::SWAP_DIRECTION_SELL_BASE => {
+                if *swap_destination_info.key == token_swap.token_a
+                    && *admin_destination_info.key != token_swap.admin_fee_key_a
+                {
+                    return Err(SwapError::InvalidAdmin.into());
+                }
+                if *swap_destination_info.key == token_swap.token_b
+                    && *admin_destination_info.key != token_swap.admin_fee_key_b
+                {
+                    return Err(SwapError::InvalidAdmin.into());
+                }
+            }
+            utils::SWAP_DIRECTION_SELL_QUOTE => {
+                if *swap_destination_info.key == token_swap.token_a
+                    && *admin_destination_info.key != token_swap.admin_fee_key_b
+                {
+                    return Err(SwapError::InvalidAdmin.into());
+                }
+                if *swap_destination_info.key == token_swap.token_b
+                    && *admin_destination_info.key != token_swap.admin_fee_key_a
+                {
+                    return Err(SwapError::InvalidAdmin.into());
+                }
+            }
+            _ => {
+                return Err(ProgramError::InvalidArgument);
+            }
         }
         if *swap_source_info.key == *swap_destination_info.key {
             return Err(SwapError::InvalidInput.into());
@@ -968,39 +1223,29 @@ impl Processor {
         if *reward_token_info.key != token_swap.deltafi_token {
             return Err(SwapError::IncorrectRewardAccount.into());
         }
-
-        let clock = Clock::from_account_info(clock_sysvar_info)?;
-        let swap_source_account = utils::unpack_token_account(&swap_source_info.data.borrow())?;
-        let swap_destination_account =
-            utils::unpack_token_account(&swap_destination_info.data.borrow())?;
-
-        let invariant = StableSwap::new(
-            token_swap.initial_amp_factor,
-            token_swap.target_amp_factor,
-            clock.unix_timestamp,
-            token_swap.start_ramp_ts,
-            token_swap.stop_ramp_ts,
-        );
-        let result = invariant
-            .swap_to(
-                U256::from(amount_in),
-                U256::from(swap_source_account.amount),
-                U256::from(swap_destination_account.amount),
-                &token_swap.fees,
-            )
-            .ok_or(SwapError::CalculationFailure)?;
-        let amount_swapped = U256::to_u64(result.amount_swapped)?;
-        if amount_swapped < minimum_amount_out {
-            return Err(SwapError::ExceededSlippage.into());
-        }
-
         let token_a = utils::unpack_token_account(&swap_source_info.data.borrow())?;
         let token_b = utils::unpack_token_account(&swap_destination_info.data.borrow())?;
+
+        // calculate swap amount with pmm
+
         let base_balance = FixedU256::new_from_fixed_u64(token_a.amount)?;
         let quote_balance = FixedU256::new_from_fixed_u64(token_b.amount)?;
-        let pay_quote_amount = FixedU256::new_from_fixed_u64(amount_in)?;
-        if quote_balance.inner_u64()? < pay_quote_amount.inner_u64()? {
-            return Err(ProgramError::InsufficientFunds);
+        let pay_amount = FixedU256::new_from_fixed_u64(amount_in)?;
+
+        match swap_direction {
+            utils::SWAP_DIRECTION_SELL_BASE => {
+                if base_balance.inner_u64()? < pay_amount.inner_u64()? {
+                    return Err(ProgramError::InsufficientFunds);
+                }
+            }
+            utils::SWAP_DIRECTION_SELL_QUOTE => {
+                if quote_balance.inner_u64()? < pay_amount.inner_u64()? {
+                    return Err(ProgramError::InsufficientFunds);
+                }
+            }
+            _ => {
+                return Err(ProgramError::InvalidArgument);
+            }
         }
 
         let base_reserve = token_swap.base_reserve;
@@ -1018,82 +1263,38 @@ impl Processor {
             token_swap.r,
         );
         adjusted_target(&mut state)?;
-        let (_, new_r) = sell_quote_token(state, pay_quote_amount)?;
-        let mid_price = get_mid_price(state).unwrap();
-        let rewards = &token_swap.rewards;
-        let amount_to_reward = rewards
-            .trade_reward_fixed_u256(pay_quote_amount.checked_mul_floor(mid_price)?)
-            .unwrap();
-        let dy_swap_amount = FixedU256::new_from_fixed_u64(amount_swapped)?;
-        let new_base_target = base_target;
-        let new_quote_target = state.q_0;
 
-        Self::token_transfer(
-            swap_info.key,
-            token_program_info.clone(),
-            destination_info.clone(),
-            swap_destination_info.clone(),
-            authority_info.clone(),
-            token_swap.nonce,
-            amount_in,
-        )?;
-        Self::token_transfer(
-            swap_info.key,
-            token_program_info.clone(),
-            swap_source_info.clone(),
-            source_info.clone(),
-            authority_info.clone(),
-            token_swap.nonce,
-            dy_swap_amount.inner_u64()?,
-        )?;
-        Self::token_transfer(
-            swap_info.key,
-            token_program_info.clone(),
-            swap_source_info.clone(),
-            admin_destination_info.clone(),
-            authority_info.clone(),
-            token_swap.nonce,
-            U256::to_u64(result.admin_fee)?,
-        )?;
-        Self::token_mint_to(
-            swap_info.key,
-            token_program_info.clone(),
-            reward_mint_info.clone(),
-            reward_token_info.clone(),
-            authority_info.clone(),
-            token_swap.nonce,
-            amount_to_reward.inner_u64()?,
-        )?;
-
-        let new_base_reserve = base_balance.checked_sub(dy_swap_amount)?;
-        let new_quote_reserve = quote_balance.checked_add(pay_quote_amount)?;
-
-        let block_timestamp_last: i64 = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i64;
-        let mut base_price_cumulative_last = token_swap.base_price_cumulative_last;
-        if token_swap.is_open_twap == utils::TWAP_OPENED {
-            let time_elapsed = block_timestamp_last - token_swap.block_timestamp_last;
-            if time_elapsed > 0
-                && new_base_reserve.inner_u64()? != 0
-                && new_quote_reserve.inner_u64()? != 0
-            {
-                let state = PMMState::new(
-                    token_swap.i,
-                    token_swap.k,
-                    new_base_reserve,
-                    new_quote_reserve,
-                    new_base_target,
-                    new_quote_target,
-                    token_swap.r,
-                );
-
-                base_price_cumulative_last = base_price_cumulative_last.checked_add(
-                    get_mid_price(state)?
-                        .checked_mul_floor(FixedU256::new_from_u64(time_elapsed as u64)?)?,
-                )?;
+        let (mut _receive_amount, mut _new_r) = (FixedU256::zero(), RState::One);
+        match swap_direction {
+            utils::SWAP_DIRECTION_SELL_BASE => {
+                let (r_a, n_r) = sell_base_token(state, pay_amount)?;
+                _receive_amount = r_a;
+                _new_r = n_r;
             }
+            utils::SWAP_DIRECTION_SELL_QUOTE => {
+                let (r_a, n_r) = sell_quote_token(state, pay_amount)?;
+                _receive_amount = r_a;
+                _new_r = n_r;
+            }
+            _ => {
+                return Err(ProgramError::InvalidArgument);
+            }
+        }
+
+        let fees = &token_swap.fees;
+        let dy_fee;
+        match fees.trade_fee(_receive_amount.inner()) {
+            Some(v) => {
+                dy_fee = FixedU256::new_from_fixed_u256(v)?;
+            }
+            None => {
+                return Err(ProgramError::InvalidArgument);
+            }
+        }
+        let dy_swap_amount = _receive_amount.checked_sub(dy_fee)?;
+
+        if dy_swap_amount.inner_u64()? < minimum_amount_out {
+            return Err(SwapError::ExceededSlippage.into());
         }
 
         let obj = SwapInfo {
@@ -1121,14 +1322,15 @@ impl Processor {
             rewards: token_swap.rewards,
             k: token_swap.k,
             i: token_swap.i,
-            r: new_r,
-            base_target: new_base_target,
-            quote_target: new_quote_target,
-            base_reserve: new_base_reserve,
-            quote_reserve: new_quote_reserve,
+            r: token_swap.r,
+            base_target: token_swap.base_target,
+            quote_target: token_swap.quote_target,
+            base_reserve: token_swap.base_reserve,
+            quote_reserve: token_swap.quote_reserve,
             is_open_twap: token_swap.is_open_twap,
-            block_timestamp_last,
-            base_price_cumulative_last,
+            block_timestamp_last: token_swap.block_timestamp_last,
+            base_price_cumulative_last: token_swap.base_price_cumulative_last,
+            receive_amount: dy_swap_amount,
         };
         SwapInfo::pack(obj, &mut swap_info.data.borrow_mut())?;
 
@@ -1144,64 +1346,65 @@ impl Processor {
         accounts: &[AccountInfo],
     ) -> ProgramResult {
         msg!("pmm_swap_direction ................ {}", swap_direction);
+        let account_info_iter = &mut accounts.iter();
+        let swap_info = next_account_info(account_info_iter)?;
+        let authority_info = next_account_info(account_info_iter)?;
+        let source_info = next_account_info(account_info_iter)?;
+        let swap_source_info = next_account_info(account_info_iter)?;
+        let swap_destination_info = next_account_info(account_info_iter)?;
+        let destination_info = next_account_info(account_info_iter)?;
+        let reward_token_info = next_account_info(account_info_iter)?;
+        let reward_mint_info = next_account_info(account_info_iter)?;
+        let admin_destination_info = next_account_info(account_info_iter)?;
+        let token_program_info = next_account_info(account_info_iter)?;
+        let _clock_sysvar_info = next_account_info(account_info_iter)?;
+
+        let token_swap = SwapInfo::unpack(&swap_info.data.borrow())?;
+        if token_swap.is_paused {
+            return Err(SwapError::IsPaused.into());
+        }
+        if *authority_info.key != utils::authority_id(program_id, swap_info.key, token_swap.nonce)?
+        {
+            return Err(SwapError::InvalidProgramAddress.into());
+        }
+        if !(*swap_source_info.key == token_swap.token_a
+            || *swap_source_info.key == token_swap.token_b)
+        {
+            return Err(SwapError::IncorrectSwapAccount.into());
+        }
+        if !(*swap_destination_info.key == token_swap.token_a
+            || *swap_destination_info.key == token_swap.token_b)
+        {
+            return Err(SwapError::IncorrectSwapAccount.into());
+        }
         match swap_direction {
             utils::SWAP_DIRECTION_SELL_BASE => {
-                Self::sell_base(program_id, amount_in, minimum_amount_out, accounts)
+                if *swap_destination_info.key == token_swap.token_a
+                    && *admin_destination_info.key != token_swap.admin_fee_key_a
+                {
+                    return Err(SwapError::InvalidAdmin.into());
+                }
+                if *swap_destination_info.key == token_swap.token_b
+                    && *admin_destination_info.key != token_swap.admin_fee_key_b
+                {
+                    return Err(SwapError::InvalidAdmin.into());
+                }
             }
             utils::SWAP_DIRECTION_SELL_QUOTE => {
-                Self::sell_quote(program_id, amount_in, minimum_amount_out, accounts)
+                if *swap_destination_info.key == token_swap.token_a
+                    && *admin_destination_info.key != token_swap.admin_fee_key_b
+                {
+                    return Err(SwapError::InvalidAdmin.into());
+                }
+                if *swap_destination_info.key == token_swap.token_b
+                    && *admin_destination_info.key != token_swap.admin_fee_key_a
+                {
+                    return Err(SwapError::InvalidAdmin.into());
+                }
             }
-            _ => Ok(()),
-        }
-    }
-
-    /// processor for sell base
-    pub fn sell_base(
-        program_id: &Pubkey,
-        amount_in: u64,
-        minimum_amount_out: u64,
-        accounts: &[AccountInfo],
-    ) -> ProgramResult {
-        let account_info_iter = &mut accounts.iter();
-        let swap_info = next_account_info(account_info_iter)?;
-        let authority_info = next_account_info(account_info_iter)?;
-        let source_info = next_account_info(account_info_iter)?;
-        let swap_source_info = next_account_info(account_info_iter)?;
-        let swap_destination_info = next_account_info(account_info_iter)?;
-        let destination_info = next_account_info(account_info_iter)?;
-        let reward_token_info = next_account_info(account_info_iter)?;
-        let reward_mint_info = next_account_info(account_info_iter)?;
-        let admin_destination_info = next_account_info(account_info_iter)?;
-        let token_program_info = next_account_info(account_info_iter)?;
-        let _clock_sysvar_info = next_account_info(account_info_iter)?;
-
-        let token_swap = SwapInfo::unpack(&swap_info.data.borrow())?;
-        if token_swap.is_paused {
-            return Err(SwapError::IsPaused.into());
-        }
-        if *authority_info.key != utils::authority_id(program_id, swap_info.key, token_swap.nonce)?
-        {
-            return Err(SwapError::InvalidProgramAddress.into());
-        }
-        if !(*swap_source_info.key == token_swap.token_a
-            || *swap_source_info.key == token_swap.token_b)
-        {
-            return Err(SwapError::IncorrectSwapAccount.into());
-        }
-        if !(*swap_destination_info.key == token_swap.token_a
-            || *swap_destination_info.key == token_swap.token_b)
-        {
-            return Err(SwapError::IncorrectSwapAccount.into());
-        }
-        if *swap_destination_info.key == token_swap.token_a
-            && *admin_destination_info.key != token_swap.admin_fee_key_a
-        {
-            return Err(SwapError::InvalidAdmin.into());
-        }
-        if *swap_destination_info.key == token_swap.token_b
-            && *admin_destination_info.key != token_swap.admin_fee_key_b
-        {
-            return Err(SwapError::InvalidAdmin.into());
+            _ => {
+                return Err(ProgramError::InvalidArgument);
+            }
         }
         if *swap_source_info.key == *swap_destination_info.key {
             return Err(SwapError::InvalidInput.into());
@@ -1212,18 +1415,44 @@ impl Processor {
         if *reward_token_info.key != token_swap.deltafi_token {
             return Err(SwapError::IncorrectRewardAccount.into());
         }
-
         let token_a = utils::unpack_token_account(&swap_source_info.data.borrow())?;
         let token_b = utils::unpack_token_account(&swap_destination_info.data.borrow())?;
 
+        match swap_direction {
+            utils::SWAP_DIRECTION_SELL_BASE => {
+                if token_a.amount < amount_in {
+                    return Err(ProgramError::InsufficientFunds);
+                }
+            }
+            utils::SWAP_DIRECTION_SELL_QUOTE => {
+                if token_b.amount < amount_in {
+                    return Err(ProgramError::InsufficientFunds);
+                }
+            }
+            _ => {
+                return Err(ProgramError::InvalidArgument);
+            }
+        }
         // calculate swap amount with pmm
 
         let base_balance = FixedU256::new_from_fixed_u64(token_a.amount)?;
         let quote_balance = FixedU256::new_from_fixed_u64(token_b.amount)?;
-        let pay_base_amount = FixedU256::new_from_fixed_u64(amount_in)?;
+        let pay_amount = FixedU256::new_from_fixed_u64(amount_in)?;
 
-        if base_balance.inner_u64()? < pay_base_amount.inner_u64()? {
-            return Err(ProgramError::InsufficientFunds);
+        match swap_direction {
+            utils::SWAP_DIRECTION_SELL_BASE => {
+                if base_balance.inner_u64()? < pay_amount.inner_u64()? {
+                    return Err(ProgramError::InsufficientFunds);
+                }
+            }
+            utils::SWAP_DIRECTION_SELL_QUOTE => {
+                if quote_balance.inner_u64()? < pay_amount.inner_u64()? {
+                    return Err(ProgramError::InsufficientFunds);
+                }
+            }
+            _ => {
+                return Err(ProgramError::InvalidArgument);
+            }
         }
 
         let base_reserve = token_swap.base_reserve;
@@ -1242,238 +1471,26 @@ impl Processor {
         );
         adjusted_target(&mut state)?;
 
-        let (receive_quote_amount, new_r) = sell_base_token(state, pay_base_amount)?;
-
-        let fees = &token_swap.fees;
-        let dy_fee;
-        match fees.trade_fee(receive_quote_amount.inner()) {
-            Some(v) => {
-                dy_fee = FixedU256::new_from_fixed_u256(v)?;
+        let (mut _receive_amount, mut _new_r) = (FixedU256::zero(), RState::One);
+        match swap_direction {
+            utils::SWAP_DIRECTION_SELL_BASE => {
+                let (r_a, n_r) = sell_base_token(state, pay_amount)?;
+                _receive_amount = r_a;
+                _new_r = n_r;
             }
-            None => {
+            utils::SWAP_DIRECTION_SELL_QUOTE => {
+                let (r_a, n_r) = sell_quote_token(state, pay_amount)?;
+                _receive_amount = r_a;
+                _new_r = n_r;
+            }
+            _ => {
                 return Err(ProgramError::InvalidArgument);
             }
         }
-        let admin_fee;
-        match fees.admin_trade_fee(dy_fee.into_u256_ceil()) {
-            Some(v) => {
-                admin_fee = FixedU256::new_from_fixed_u256(v)?;
-            }
-            None => {
-                return Err(ProgramError::InvalidArgument);
-            }
-        }
-        let mid_price = get_mid_price(state).unwrap();
-        let rewards = &token_swap.rewards;
-        let amount_to_reward = rewards
-            .trade_reward_fixed_u256(pay_base_amount.checked_mul_floor(mid_price)?)
-            .unwrap();
-        let dy_swap_amount = receive_quote_amount.checked_sub(dy_fee)?;
-        let new_base_target = state.b_0;
-        let new_quote_target = quote_target;
-
-        if dy_swap_amount.inner_u64()? < minimum_amount_out {
-            return Err(SwapError::ExceededSlippage.into());
-        }
-
-        Self::token_transfer(
-            swap_info.key,
-            token_program_info.clone(),
-            source_info.clone(),
-            swap_source_info.clone(),
-            authority_info.clone(),
-            token_swap.nonce,
-            amount_in,
-        )?;
-        Self::token_transfer(
-            swap_info.key,
-            token_program_info.clone(),
-            swap_destination_info.clone(),
-            destination_info.clone(),
-            authority_info.clone(),
-            token_swap.nonce,
-            dy_swap_amount.inner_u64()?,
-        )?;
-        Self::token_transfer(
-            swap_info.key,
-            token_program_info.clone(),
-            swap_destination_info.clone(),
-            admin_destination_info.clone(),
-            authority_info.clone(),
-            token_swap.nonce,
-            admin_fee.inner_u64()?,
-        )?;
-        Self::token_mint_to(
-            swap_info.key,
-            token_program_info.clone(),
-            reward_mint_info.clone(),
-            reward_token_info.clone(),
-            authority_info.clone(),
-            token_swap.nonce,
-            amount_to_reward.inner_u64()?,
-        )?;
-
-        let new_base_reserve = base_balance.checked_add(pay_base_amount)?;
-        let new_quote_reserve = quote_balance.checked_sub(dy_swap_amount)?;
-
-        let block_timestamp_last: i64 = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i64;
-        let mut base_price_cumulative_last = token_swap.base_price_cumulative_last;
-        if token_swap.is_open_twap == utils::TWAP_OPENED {
-            let time_elapsed = block_timestamp_last - token_swap.block_timestamp_last;
-            if time_elapsed > 0
-                && new_base_reserve.inner_u64()? != 0
-                && new_quote_reserve.inner_u64()? != 0
-            {
-                let state = PMMState::new(
-                    token_swap.i,
-                    token_swap.k,
-                    new_base_reserve,
-                    new_quote_reserve,
-                    new_base_target,
-                    new_quote_target,
-                    token_swap.r,
-                );
-
-                base_price_cumulative_last = base_price_cumulative_last.checked_add(
-                    get_mid_price(state)?
-                        .checked_mul_floor(FixedU256::new_from_u64(time_elapsed as u64)?)?,
-                )?;
-            }
-        }
-
-        let obj = SwapInfo {
-            is_initialized: token_swap.is_initialized,
-            is_paused: token_swap.is_paused,
-            nonce: token_swap.nonce,
-            initial_amp_factor: token_swap.initial_amp_factor,
-            target_amp_factor: token_swap.target_amp_factor,
-            start_ramp_ts: token_swap.start_ramp_ts,
-            stop_ramp_ts: token_swap.stop_ramp_ts,
-            future_admin_deadline: token_swap.future_admin_deadline,
-            future_admin_key: token_swap.future_admin_key,
-            admin_key: token_swap.admin_key,
-            token_a: token_swap.token_a,
-            token_b: token_swap.token_b,
-            pool_mint: token_swap.pool_mint,
-            token_a_mint: token_swap.token_a_mint,
-            token_b_mint: token_swap.token_b_mint,
-            admin_fee_key_a: token_swap.admin_fee_key_a,
-            admin_fee_key_b: token_swap.admin_fee_key_b,
-            deltafi_token: token_swap.deltafi_token,
-            deltafi_mint: token_swap.deltafi_mint,
-            fees: token_swap.fees,
-            oracle: token_swap.oracle,
-            rewards: token_swap.rewards,
-            k: token_swap.k,
-            i: token_swap.i,
-            r: new_r,
-            base_target: new_base_target,
-            quote_target: new_quote_target,
-            base_reserve: new_base_reserve,
-            quote_reserve: new_quote_reserve,
-            is_open_twap: token_swap.is_open_twap,
-            block_timestamp_last,
-            base_price_cumulative_last,
-        };
-        SwapInfo::pack(obj, &mut swap_info.data.borrow_mut())?;
-
-        Ok(())
-    }
-
-    /// processor for sell quote
-    pub fn sell_quote(
-        program_id: &Pubkey,
-        amount_in: u64,
-        minimum_amount_out: u64,
-        accounts: &[AccountInfo],
-    ) -> ProgramResult {
-        let account_info_iter = &mut accounts.iter();
-        let swap_info = next_account_info(account_info_iter)?;
-        let authority_info = next_account_info(account_info_iter)?;
-        let source_info = next_account_info(account_info_iter)?;
-        let swap_source_info = next_account_info(account_info_iter)?;
-        let swap_destination_info = next_account_info(account_info_iter)?;
-        let destination_info = next_account_info(account_info_iter)?;
-        let reward_token_info = next_account_info(account_info_iter)?;
-        let reward_mint_info = next_account_info(account_info_iter)?;
-        let admin_destination_info = next_account_info(account_info_iter)?;
-        let token_program_info = next_account_info(account_info_iter)?;
-        let _clock_sysvar_info = next_account_info(account_info_iter)?;
-
-        let token_swap = SwapInfo::unpack(&swap_info.data.borrow())?;
-        if token_swap.is_paused {
-            return Err(SwapError::IsPaused.into());
-        }
-        if *authority_info.key != utils::authority_id(program_id, swap_info.key, token_swap.nonce)?
-        {
-            return Err(SwapError::InvalidProgramAddress.into());
-        }
-        if !(*swap_source_info.key == token_swap.token_a
-            || *swap_source_info.key == token_swap.token_b)
-        {
-            return Err(SwapError::IncorrectSwapAccount.into());
-        }
-        if !(*swap_destination_info.key == token_swap.token_a
-            || *swap_destination_info.key == token_swap.token_b)
-        {
-            return Err(SwapError::IncorrectSwapAccount.into());
-        }
-        if *swap_destination_info.key == token_swap.token_a
-            && *admin_destination_info.key != token_swap.admin_fee_key_b
-        {
-            return Err(SwapError::InvalidAdmin.into());
-        }
-        if *swap_destination_info.key == token_swap.token_b
-            && *admin_destination_info.key != token_swap.admin_fee_key_a
-        {
-            return Err(SwapError::InvalidAdmin.into());
-        }
-        if *swap_source_info.key == *swap_destination_info.key {
-            return Err(SwapError::InvalidInput.into());
-        }
-        if *reward_mint_info.key != token_swap.deltafi_mint {
-            return Err(SwapError::IncorrectMint.into());
-        }
-        if *reward_token_info.key != token_swap.deltafi_token {
-            return Err(SwapError::IncorrectRewardAccount.into());
-        }
-        let token_a = utils::unpack_token_account(&swap_source_info.data.borrow())?;
-        let token_b = utils::unpack_token_account(&swap_destination_info.data.borrow())?;
-
-        // calculate swap amount with pmm
-
-        let base_balance = FixedU256::new_from_fixed_u64(token_a.amount)?;
-        let quote_balance = FixedU256::new_from_fixed_u64(token_b.amount)?;
-        let pay_quote_amount = FixedU256::new_from_fixed_u64(amount_in)?;
-
-        if quote_balance.inner_u64()? < pay_quote_amount.inner_u64()? {
-            return Err(ProgramError::InsufficientFunds);
-        }
-
-        let base_reserve = token_swap.base_reserve;
-        let quote_reserve = token_swap.quote_reserve;
-        let base_target = token_swap.base_target;
-        let quote_target = token_swap.quote_target;
-
-        let mut state = PMMState::new(
-            token_swap.i,
-            token_swap.k,
-            base_reserve,
-            quote_reserve,
-            base_target,
-            quote_target,
-            token_swap.r,
-        );
-        adjusted_target(&mut state)?;
-
-        let (receive_base_amount, new_r) = sell_quote_token(state, pay_quote_amount)?;
 
         let fees = &token_swap.fees;
         let dy_fee;
-        match fees.trade_fee(receive_base_amount.inner()) {
+        match fees.trade_fee(_receive_amount.inner()) {
             Some(v) => {
                 dy_fee = FixedU256::new_from_fixed_u256(v)?;
             }
@@ -1493,55 +1510,117 @@ impl Processor {
         let mid_price = get_mid_price(state).unwrap();
         let rewards = &token_swap.rewards;
         let amount_to_reward = rewards
-            .trade_reward_fixed_u256(pay_quote_amount.checked_mul_floor(mid_price)?)
+            .trade_reward_fixed_u256(pay_amount.checked_mul_floor(mid_price)?)
             .unwrap();
-        let dy_swap_amount = receive_base_amount.checked_sub(dy_fee)?;
-        let new_base_target = base_target;
-        let new_quote_target = state.q_0;
+        let dy_swap_amount = _receive_amount.checked_sub(dy_fee)?;
+
+        let mut new_base_target = base_target;
+        let mut new_quote_target = quote_target;
+        match swap_direction {
+            utils::SWAP_DIRECTION_SELL_BASE => {
+                new_base_target = state.b_0;
+            }
+            utils::SWAP_DIRECTION_SELL_QUOTE => {
+                new_quote_target = state.q_0;
+            }
+            _ => {
+                return Err(ProgramError::InvalidArgument);
+            }
+        }
 
         if dy_swap_amount.inner_u64()? < minimum_amount_out {
             return Err(SwapError::ExceededSlippage.into());
         }
 
-        Self::token_transfer(
-            swap_info.key,
-            token_program_info.clone(),
-            destination_info.clone(),
-            swap_destination_info.clone(),
-            authority_info.clone(),
-            token_swap.nonce,
-            amount_in,
-        )?;
-        Self::token_transfer(
-            swap_info.key,
-            token_program_info.clone(),
-            swap_source_info.clone(),
-            source_info.clone(),
-            authority_info.clone(),
-            token_swap.nonce,
-            dy_swap_amount.inner_u64()?,
-        )?;
-        Self::token_transfer(
-            swap_info.key,
-            token_program_info.clone(),
-            swap_source_info.clone(),
-            admin_destination_info.clone(),
-            authority_info.clone(),
-            token_swap.nonce,
-            admin_fee.inner_u64()?,
-        )?;
-        Self::token_mint_to(
-            swap_info.key,
-            token_program_info.clone(),
-            reward_mint_info.clone(),
-            reward_token_info.clone(),
-            authority_info.clone(),
-            token_swap.nonce,
-            amount_to_reward.inner_u64()?,
-        )?;
+        let mut _new_base_reserve = FixedU256::zero();
+        let mut _new_quote_reserve = FixedU256::zero();
+        match swap_direction {
+            utils::SWAP_DIRECTION_SELL_BASE => {
+                Self::token_transfer(
+                    swap_info.key,
+                    token_program_info.clone(),
+                    source_info.clone(),
+                    swap_source_info.clone(),
+                    authority_info.clone(),
+                    token_swap.nonce,
+                    amount_in,
+                )?;
+                Self::token_transfer(
+                    swap_info.key,
+                    token_program_info.clone(),
+                    swap_destination_info.clone(),
+                    destination_info.clone(),
+                    authority_info.clone(),
+                    token_swap.nonce,
+                    dy_swap_amount.inner_u64()?,
+                )?;
+                Self::token_transfer(
+                    swap_info.key,
+                    token_program_info.clone(),
+                    swap_destination_info.clone(),
+                    admin_destination_info.clone(),
+                    authority_info.clone(),
+                    token_swap.nonce,
+                    admin_fee.inner_u64()?,
+                )?;
+                Self::token_mint_to(
+                    swap_info.key,
+                    token_program_info.clone(),
+                    reward_mint_info.clone(),
+                    reward_token_info.clone(),
+                    authority_info.clone(),
+                    token_swap.nonce,
+                    amount_to_reward.inner_u64()?,
+                )?;
 
-        let new_base_reserve = base_balance.checked_sub(dy_swap_amount)?;
-        let new_quote_reserve = quote_balance.checked_add(pay_quote_amount)?;
+                _new_base_reserve = base_balance.checked_add(pay_amount)?;
+                _new_quote_reserve = quote_balance.checked_sub(dy_swap_amount)?;
+            }
+            utils::SWAP_DIRECTION_SELL_QUOTE => {
+                Self::token_transfer(
+                    swap_info.key,
+                    token_program_info.clone(),
+                    destination_info.clone(),
+                    swap_destination_info.clone(),
+                    authority_info.clone(),
+                    token_swap.nonce,
+                    amount_in,
+                )?;
+                Self::token_transfer(
+                    swap_info.key,
+                    token_program_info.clone(),
+                    swap_source_info.clone(),
+                    source_info.clone(),
+                    authority_info.clone(),
+                    token_swap.nonce,
+                    dy_swap_amount.inner_u64()?,
+                )?;
+                Self::token_transfer(
+                    swap_info.key,
+                    token_program_info.clone(),
+                    swap_source_info.clone(),
+                    admin_destination_info.clone(),
+                    authority_info.clone(),
+                    token_swap.nonce,
+                    admin_fee.inner_u64()?,
+                )?;
+                Self::token_mint_to(
+                    swap_info.key,
+                    token_program_info.clone(),
+                    reward_mint_info.clone(),
+                    reward_token_info.clone(),
+                    authority_info.clone(),
+                    token_swap.nonce,
+                    amount_to_reward.inner_u64()?,
+                )?;
+
+                _new_base_reserve = base_balance.checked_sub(dy_swap_amount)?;
+                _new_quote_reserve = quote_balance.checked_add(pay_amount)?;
+            }
+            _ => {
+                return Err(ProgramError::InvalidArgument);
+            }
+        }
 
         let block_timestamp_last: i64 = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -1551,14 +1630,14 @@ impl Processor {
         if token_swap.is_open_twap == utils::TWAP_OPENED {
             let time_elapsed = block_timestamp_last - token_swap.block_timestamp_last;
             if time_elapsed > 0
-                && new_base_reserve.inner_u64()? != 0
-                && new_quote_reserve.inner_u64()? != 0
+                && _new_base_reserve.inner_u64()? != 0
+                && _new_quote_reserve.inner_u64()? != 0
             {
                 let state = PMMState::new(
                     token_swap.i,
                     token_swap.k,
-                    new_base_reserve,
-                    new_quote_reserve,
+                    _new_base_reserve,
+                    _new_quote_reserve,
                     new_base_target,
                     new_quote_target,
                     token_swap.r,
@@ -1570,6 +1649,7 @@ impl Processor {
                 )?;
             }
         }
+        let receive_amount = dy_swap_amount;
 
         let obj = SwapInfo {
             is_initialized: token_swap.is_initialized,
@@ -1596,14 +1676,15 @@ impl Processor {
             rewards: token_swap.rewards,
             k: token_swap.k,
             i: token_swap.i,
-            r: new_r,
+            r: _new_r,
             base_target: new_base_target,
             quote_target: new_quote_target,
-            base_reserve: new_base_reserve,
-            quote_reserve: new_quote_reserve,
+            base_reserve: _new_base_reserve,
+            quote_reserve: _new_quote_reserve,
             is_open_twap: token_swap.is_open_twap,
             block_timestamp_last,
             base_price_cumulative_last,
+            receive_amount,
         };
         SwapInfo::pack(obj, &mut swap_info.data.borrow_mut())?;
 
@@ -1763,6 +1844,7 @@ impl Processor {
                 )?;
             }
         }
+        let receive_amount = FixedU256::zero();
 
         let obj = SwapInfo {
             is_initialized: token_swap.is_initialized,
@@ -1797,6 +1879,7 @@ impl Processor {
             is_open_twap: token_swap.is_open_twap,
             block_timestamp_last,
             base_price_cumulative_last,
+            receive_amount,
         };
         SwapInfo::pack(obj, &mut swap_info.data.borrow_mut())?;
 
@@ -1938,6 +2021,7 @@ impl Processor {
                 )?;
             }
         }
+        let receive_amount = FixedU256::zero();
 
         let obj = SwapInfo {
             is_initialized: token_swap.is_initialized,
@@ -1972,6 +2056,7 @@ impl Processor {
             is_open_twap: token_swap.is_open_twap,
             block_timestamp_last,
             base_price_cumulative_last,
+            receive_amount,
         };
         SwapInfo::pack(obj, &mut swap_info.data.borrow_mut())?;
 
@@ -2610,7 +2695,6 @@ impl Processor {
         match instruction {
             None => {
                 let result = SwapInstruction::unpack(input)?;
-                // let result = Self::process_swap_instruction(program_id, accounts, input);
                 match result {
                     Some(instruction) => {
                         Self::process_swap_instruction(&instruction, program_id, accounts)
@@ -2715,6 +2799,20 @@ impl Processor {
                     accounts,
                 )
             }
+            StableInstruction::StableCalcReceiveAmount(SwapData {
+                amount_in,
+                minimum_amount_out,
+                swap_direction,
+            }) => {
+                msg!("StableInstruction: StableCalcReceiveAmount");
+                Self::process_stable_calc_receive_amount(
+                    program_id,
+                    amount_in,
+                    minimum_amount_out,
+                    swap_direction,
+                    accounts,
+                )
+            }
         }
     }
 
@@ -2798,6 +2896,20 @@ impl Processor {
                     program_id,
                     pool_token_amount,
                     minimum_token_amount,
+                    accounts,
+                )
+            }
+            SwapInstruction::CalcReceiveAmount(SwapData {
+                amount_in,
+                minimum_amount_out,
+                swap_direction,
+            }) => {
+                msg!("Instruction: CalcReceiveAmount");
+                Self::process_calc_receive_amount(
+                    program_id,
+                    amount_in,
+                    minimum_amount_out,
+                    swap_direction,
                     accounts,
                 )
             }
@@ -4750,8 +4862,8 @@ mod tests {
             );
             assert_eq!(swap_token_a.amount, 110);
             assert_eq!(swap_token_b.amount, 11000);
-            assert_eq!(pool_mint.supply, 110);
-            assert_eq!(swap_pool_account.amount, 100);
+            assert_eq!(pool_mint.supply, 4416);
+            assert_eq!(swap_pool_account.amount, 4015);
         }
 
         // Pool is paused
@@ -6078,20 +6190,20 @@ mod tests {
         );
         assert_eq!(
             user_token_b_amount.checked_div(DEFAULT_BASE_POINT).unwrap(),
-            589
+            599
         );
         assert_eq!(
             token_a_amount.checked_div(DEFAULT_BASE_POINT).unwrap(),
             1100
         );
-        assert_eq!(token_b_amount.checked_div(DEFAULT_BASE_POINT).unwrap(), 910);
+        assert_eq!(token_b_amount.checked_div(DEFAULT_BASE_POINT).unwrap(), 900);
         assert_eq!(token_admin_fee_a_amount, 0);
-        assert_eq!(token_admin_fee_b_amount, 0);
+        assert_eq!(token_admin_fee_b_amount, 49);
         assert_eq!(deltafi_reward_amount, 10000);
         assert_eq!(swap_info.base_target.into_u64_ceil().unwrap(), 1000);
         assert_eq!(swap_info.quote_target.into_u64_ceil().unwrap(), 1000);
         assert_eq!(swap_info.base_reserve.into_u64_ceil().unwrap(), 1100);
-        assert_eq!(swap_info.quote_reserve.into_u64_ceil().unwrap(), 911);
+        assert_eq!(swap_info.quote_reserve.into_u64_ceil().unwrap(), 901);
 
         swap_direction = SWAP_DIRECTION_SELL_QUOTE;
 
@@ -6136,24 +6248,27 @@ mod tests {
 
         assert_eq!(
             user_token_a_amount.checked_div(DEFAULT_BASE_POINT).unwrap(),
-            503
+            499
         );
         assert_eq!(
             user_token_b_amount.checked_div(DEFAULT_BASE_POINT).unwrap(),
-            489
+            499
         );
-        assert_eq!(token_a_amount.checked_div(DEFAULT_BASE_POINT).unwrap(), 996);
+        assert_eq!(
+            token_a_amount.checked_div(DEFAULT_BASE_POINT).unwrap(),
+            1000
+        );
         assert_eq!(
             token_b_amount.checked_div(DEFAULT_BASE_POINT).unwrap(),
-            1010
+            1000
         );
-        assert_eq!(token_admin_fee_a_amount, 52);
-        assert_eq!(token_admin_fee_b_amount, 0);
+        assert_eq!(token_admin_fee_a_amount, 49);
+        assert_eq!(token_admin_fee_b_amount, 49);
         assert_eq!(deltafi_reward_amount, 20000);
         assert_eq!(swap_info.base_target.into_u64_ceil().unwrap(), 1000);
-        assert_eq!(swap_info.quote_target.into_u64_ceil().unwrap(), 1006);
-        assert_eq!(swap_info.base_reserve.into_u64_ceil().unwrap(), 997);
-        assert_eq!(swap_info.quote_reserve.into_u64_ceil().unwrap(), 1011);
+        assert_eq!(swap_info.quote_target.into_u64_ceil().unwrap(), 995);
+        assert_eq!(swap_info.base_reserve.into_u64_ceil().unwrap(), 1001);
+        assert_eq!(swap_info.quote_reserve.into_u64_ceil().unwrap(), 1001);
     }
 
     #[test]
@@ -6315,7 +6430,7 @@ mod tests {
         );
         assert_eq!(token_b_amount.checked_div(DEFAULT_BASE_POINT).unwrap(), 910);
         assert_eq!(token_admin_fee_a_amount, 0);
-        assert_eq!(token_admin_fee_b_amount, 0);
+        assert_eq!(token_admin_fee_b_amount, 45);
         assert_eq!(deltafi_reward_amount, 10000);
         assert_eq!(swap_info.base_target.into_u64_ceil().unwrap(), 1000);
         assert_eq!(swap_info.quote_target.into_u64_ceil().unwrap(), 1000);
@@ -6377,7 +6492,7 @@ mod tests {
             1010
         );
         assert_eq!(token_admin_fee_a_amount, 52);
-        assert_eq!(token_admin_fee_b_amount, 0);
+        assert_eq!(token_admin_fee_b_amount, 45);
         assert_eq!(deltafi_reward_amount, 20000);
         assert_eq!(swap_info.base_target.into_u64_ceil().unwrap(), 1000);
         assert_eq!(swap_info.quote_target.into_u64_ceil().unwrap(), 1006);

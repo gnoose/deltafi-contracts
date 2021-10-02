@@ -91,6 +91,8 @@ pub struct SwapInfo {
     pub block_timestamp_last: i64,
     /// base price cumulative last - twap
     pub base_price_cumulative_last: FixedU256,
+    /// receive amount on swap
+    pub receive_amount: FixedU256,
 }
 
 impl Sealed for SwapInfo {}
@@ -100,11 +102,11 @@ impl IsInitialized for SwapInfo {
     }
 }
 impl Pack for SwapInfo {
-    const LEN: usize = 1152;
+    const LEN: usize = 1216;
 
     /// Unpacks a byte buffer into a [SwapInfo](struct.SwapInfo.html).
     fn unpack_from_slice(input: &[u8]) -> Result<Self, ProgramError> {
-        let input = array_ref![input, 0, 1152];
+        let input = array_ref![input, 0, 1216];
         #[allow(clippy::ptr_offset_with_cast)]
         let (
             is_initialized,
@@ -139,9 +141,10 @@ impl Pack for SwapInfo {
             is_open_twap,
             block_timestamp_last,
             base_price_cumulative_last,
+            receive_amount,
         ) = array_refs![
             input, 1, 1, 1, 8, 8, 8, 8, 8, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 64, 204, 24,
-            64, 64, 1, 64, 64, 64, 64, 8, 8, 64
+            64, 64, 1, 64, 64, 64, 64, 8, 8, 64, 64
         ];
         Ok(Self {
             is_initialized: match is_initialized {
@@ -184,11 +187,12 @@ impl Pack for SwapInfo {
             is_open_twap: u64::from_le_bytes(*is_open_twap),
             block_timestamp_last: i64::from_le_bytes(*block_timestamp_last),
             base_price_cumulative_last: FixedU256::unpack_from_slice(base_price_cumulative_last)?,
+            receive_amount: FixedU256::unpack_from_slice(receive_amount)?,
         })
     }
 
     fn pack_into_slice(&self, output: &mut [u8]) {
-        let output = array_mut_ref![output, 0, 1152];
+        let output = array_mut_ref![output, 0, 1216];
         let (
             is_initialized,
             is_paused,
@@ -222,9 +226,10 @@ impl Pack for SwapInfo {
             is_open_twap,
             block_timestamp_last,
             base_price_cumulative_last,
+            receive_amount,
         ) = mut_array_refs![
             output, 1, 1, 1, 8, 8, 8, 8, 8, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 64, 204,
-            24, 64, 64, 1, 64, 64, 64, 64, 8, 8, 64
+            24, 64, 64, 1, 64, 64, 64, 64, 8, 8, 64, 64
         ];
         is_initialized[0] = self.is_initialized as u8;
         is_paused[0] = self.is_paused as u8;
@@ -259,6 +264,7 @@ impl Pack for SwapInfo {
         *block_timestamp_last = self.block_timestamp_last.to_le_bytes();
         self.base_price_cumulative_last
             .pack_into_slice(&mut base_price_cumulative_last[..]);
+        self.receive_amount.pack_into_slice(&mut receive_amount[..]);
     }
 }
 
@@ -569,6 +575,7 @@ mod tests {
             .unwrap()
             .as_secs() as i64;
         let base_price_cumulative_last = FixedU256::zero();
+        let receive_amount = FixedU256::zero();
 
         let swap_info = SwapInfo {
             is_initialized,
@@ -603,6 +610,7 @@ mod tests {
             is_open_twap,
             block_timestamp_last,
             base_price_cumulative_last,
+            receive_amount,
         };
 
         let mut packed = [0u8; SwapInfo::LEN];
@@ -670,6 +678,9 @@ mod tests {
         let mut packed_base_price_cumulative_last = [0u8; FixedU256::LEN];
         base_price_cumulative_last.pack_into_slice(&mut packed_base_price_cumulative_last);
         packed.extend_from_slice(&packed_base_price_cumulative_last);
+        let mut packed_receive_amount = [0u8; FixedU256::LEN];
+        receive_amount.pack_into_slice(&mut packed_receive_amount);
+        packed.extend_from_slice(&packed_receive_amount);
 
         let unpacked = SwapInfo::unpack(&packed).unwrap();
         assert_eq!(swap_info, unpacked);

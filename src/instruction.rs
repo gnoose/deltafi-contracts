@@ -643,6 +643,19 @@ pub enum StableInstruction {
     ///   8. `[]` Token program id
     ///   9. `[]` Clock sysvar
     StableWithdrawOne(WithdrawOneData),
+
+    ///   Calc the receive amount in the pool - stable.
+    ///
+    ///   0. `[]` Token-swap
+    ///   1. `[]` $authority
+    ///   2. `[writable]` token_(A|B) SOURCE Account, amount is transferable by $authority,
+    ///   3. `[writable]` token_(A|B) Base Account to swap INTO.  Must be the SOURCE token.
+    ///   4. `[writable]` token_(A|B) Base Account to swap FROM.  Must be the DESTINATION token.
+    ///   5. `[writable]` token_(A|B) DESTINATION Account assigned to USER as the owner.
+    ///   6. `[writable]` token_(A|B) admin fee Account. Must have same mint as DESTINATION token.
+    ///   7. `[]` Token program id
+    ///   8. `[]` Clock sysvar
+    StableCalcReceiveAmount(SwapData),
 }
 
 impl StableInstruction {
@@ -708,6 +721,16 @@ impl StableInstruction {
                     minimum_token_amount,
                 }))
             }
+            15 => {
+                let (amount_in, rest) = unpack_u64(rest)?;
+                let (minimum_amount_out, rest) = unpack_u64(rest)?;
+                let (swap_direction, _rest) = unpack_u64(rest)?;
+                Some(Self::StableCalcReceiveAmount(SwapData {
+                    amount_in,
+                    minimum_amount_out,
+                    swap_direction,
+                }))
+            }
             _ => None,
         })
     }
@@ -725,7 +748,7 @@ impl StableInstruction {
                 i,
                 is_open_twap,
             }) => {
-                buf.push(0);
+                buf.push(10);
                 buf.push(nonce);
                 buf.extend_from_slice(&amp_factor.to_le_bytes());
                 let mut fees_slice = [0u8; Fees::LEN];
@@ -743,7 +766,7 @@ impl StableInstruction {
                 minimum_amount_out,
                 swap_direction,
             }) => {
-                buf.push(1);
+                buf.push(11);
                 buf.extend_from_slice(&amount_in.to_le_bytes());
                 buf.extend_from_slice(&minimum_amount_out.to_le_bytes());
                 buf.extend_from_slice(&swap_direction.to_le_bytes());
@@ -753,7 +776,7 @@ impl StableInstruction {
                 token_b_amount,
                 min_mint_amount,
             }) => {
-                buf.push(2);
+                buf.push(12);
                 buf.extend_from_slice(&token_a_amount.to_le_bytes());
                 buf.extend_from_slice(&token_b_amount.to_le_bytes());
                 buf.extend_from_slice(&min_mint_amount.to_le_bytes());
@@ -763,7 +786,7 @@ impl StableInstruction {
                 minimum_token_a_amount,
                 minimum_token_b_amount,
             }) => {
-                buf.push(3);
+                buf.push(13);
                 buf.extend_from_slice(&pool_token_amount.to_le_bytes());
                 buf.extend_from_slice(&minimum_token_a_amount.to_le_bytes());
                 buf.extend_from_slice(&minimum_token_b_amount.to_le_bytes());
@@ -772,9 +795,19 @@ impl StableInstruction {
                 pool_token_amount,
                 minimum_token_amount,
             }) => {
-                buf.push(4);
+                buf.push(14);
                 buf.extend_from_slice(&pool_token_amount.to_le_bytes());
                 buf.extend_from_slice(&minimum_token_amount.to_le_bytes());
+            }
+            Self::StableCalcReceiveAmount(SwapData {
+                amount_in,
+                minimum_amount_out,
+                swap_direction,
+            }) => {
+                buf.push(15);
+                buf.extend_from_slice(&amount_in.to_le_bytes());
+                buf.extend_from_slice(&minimum_amount_out.to_le_bytes());
+                buf.extend_from_slice(&swap_direction.to_le_bytes());
             }
         }
         buf
@@ -853,6 +886,19 @@ pub enum SwapInstruction {
     ///   8. `[]` Token program id
     ///   9. `[]` Clock sysvar
     WithdrawOne(WithdrawOneData),
+
+    ///   Calc the receive amount in the pool - pmm.
+    ///
+    ///   0. `[]` Token-swap
+    ///   1. `[]` $authority
+    ///   2. `[writable]` token_(A|B) SOURCE Account, amount is transferable by $authority,
+    ///   3. `[writable]` token_(A|B) Base Account to swap INTO.  Must be the SOURCE token.
+    ///   4. `[writable]` token_(A|B) Base Account to swap FROM.  Must be the DESTINATION token.
+    ///   5. `[writable]` token_(A|B) DESTINATION Account assigned to USER as the owner.
+    ///   6. `[writable]` token_(A|B) admin fee Account. Must have same mint as DESTINATION token.
+    ///   7. `[]` Token program id
+    ///   8. `[]` Clock sysvar
+    CalcReceiveAmount(SwapData),
 }
 
 impl SwapInstruction {
@@ -916,6 +962,16 @@ impl SwapInstruction {
                 Some(Self::WithdrawOne(WithdrawOneData {
                     pool_token_amount,
                     minimum_token_amount,
+                }))
+            }
+            0x5 => {
+                let (amount_in, rest) = unpack_u64(rest)?;
+                let (minimum_amount_out, rest) = unpack_u64(rest)?;
+                let (swap_direction, _rest) = unpack_u64(rest)?;
+                Some(Self::CalcReceiveAmount(SwapData {
+                    amount_in,
+                    minimum_amount_out,
+                    swap_direction,
                 }))
             }
             _ => None,
@@ -985,6 +1041,16 @@ impl SwapInstruction {
                 buf.push(0x4);
                 buf.extend_from_slice(&pool_token_amount.to_le_bytes());
                 buf.extend_from_slice(&minimum_token_amount.to_le_bytes());
+            }
+            Self::CalcReceiveAmount(SwapData {
+                amount_in,
+                minimum_amount_out,
+                swap_direction,
+            }) => {
+                buf.push(0x5);
+                buf.extend_from_slice(&amount_in.to_le_bytes());
+                buf.extend_from_slice(&minimum_amount_out.to_le_bytes());
+                buf.extend_from_slice(&swap_direction.to_le_bytes());
             }
         }
         buf
