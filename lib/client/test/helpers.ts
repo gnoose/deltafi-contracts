@@ -1,6 +1,5 @@
 import fs from "fs";
-import { Account, PublicKey } from "@solana/web3.js";
-import type { Connection } from "@solana/web3.js";
+import { Account, PublicKey, Connection } from "@solana/web3.js";
 
 export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));

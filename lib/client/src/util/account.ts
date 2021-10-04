@@ -1,5 +1,4 @@
-import type { Connection } from "@solana/web3.js";
-import { PublicKey } from "@solana/web3.js";
+import { PublicKey, Connection } from "@solana/web3.js";
 
 export const loadAccount = async (
   connection: Connection,

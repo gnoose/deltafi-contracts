@@ -8,8 +8,13 @@ import {
 } from "@solana/web3.js";
 import { AccountLayout, MintLayout } from "@solana/spl-token";
 
-import { TOKEN_PROGRAM_ID, ZERO_TS } from "./constants";
-import { DEFAULT_FEES, Fees } from "./fees";
+import {
+  TOKEN_PROGRAM_ID,
+  ZERO_TS,
+  DEFAULT_FEES,
+  DEFAULT_REWARDS,
+} from "./constants";
+import { Fees, Rewards } from "./struct";
 import * as instructions from "./instructions";
 import * as layout from "./layout";
 import { loadAccount } from "./util/account";
@@ -87,6 +92,16 @@ export class StableSwap {
   mintB: PublicKey;
 
   /**
+   * The public key for the deltafi token account
+   */
+  deltafiTokenAccount: PublicKey;
+
+  /**
+   * The public key for the mint of the deltafi token when trading
+   */
+  deltafiTokenMiint: PublicKey;
+
+  /**
    * Initial amplification coefficient (A)
    */
   initialAmpFactor: number;
@@ -112,6 +127,26 @@ export class StableSwap {
   fees: Fees;
 
   /**
+   * Rewards
+   */
+  rewards: Rewards;
+
+  /**
+   * Slope value - 0 < k < 1
+   */
+  k: NumberU64;
+
+  /**
+   * Mid price
+   */
+  i: NumberU64;
+
+  /**
+   * twap open flag
+   */
+  isOpenTwap: NumberU64;
+
+  /**
    * Constructor for new StableSwap client object
    * @param connection
    * @param stableSwap
@@ -126,11 +161,17 @@ export class StableSwap {
    * @param tokenAccountB
    * @param mintA
    * @param mintB
+   * @param deltafiTokenAccount
+   * @param deltafiTokenMint
    * @param initialAmpFactor
    * @param targetAmpFactor
    * @param startRampTimestamp
    * @param stopRampTimeStamp
    * @param fees
+   * @param rewards
+   * @param k
+   * @param i
+   * @param isOpenTwap
    */
   constructor(
     connection: Connection,
@@ -146,11 +187,17 @@ export class StableSwap {
     tokenAccountB: PublicKey,
     mintA: PublicKey,
     mintB: PublicKey,
+    deltafiTokenAccount: PublicKey,
+    deltafiTokenMint: PublicKey,
     initialAmpFactor: number,
     targetAmpFactor: number,
     startRampTimestamp: number,
     stopRampTimeStamp: number,
-    fees: Fees = DEFAULT_FEES
+    fees: Fees = new Fees(DEFAULT_FEES),
+    rewards: Rewards = new Rewards(DEFAULT_REWARDS),
+    k: number | NumberU64,
+    i: number | NumberU64,
+    isOpenTwap: number | NumberU64
   ) {
     this.connection = connection;
     this.stableSwap = stableSwap;
@@ -165,11 +212,17 @@ export class StableSwap {
     this.tokenAccountB = tokenAccountB;
     this.mintA = mintA;
     this.mintB = mintB;
+    this.deltafiTokenAccount = deltafiTokenAccount;
+    this.deltafiTokenMiint = deltafiTokenMint;
     this.initialAmpFactor = initialAmpFactor;
     this.targetAmpFactor = targetAmpFactor;
     this.startRampTimestamp = startRampTimestamp;
     this.stopRampTimestamp = stopRampTimeStamp;
     this.fees = fees;
+    this.rewards = rewards;
+    this.k = new NumberU64(k);
+    this.i = new NumberU64(i);
+    this.isOpenTwap = new NumberU64(isOpenTwap);
   }
 
   /**
@@ -215,21 +268,20 @@ export class StableSwap {
     const poolTokenMint = new PublicKey(stableSwapData.tokenPool);
     const mintA = new PublicKey(stableSwapData.mintA);
     const mintB = new PublicKey(stableSwapData.mintB);
+    const deltafiTokenAccount = new PublicKey(
+      stableSwapData.deltafiTokenAccount
+    );
+    const dletafiTokenMint = new PublicKey(stableSwapData.deltafiTokenMint);
     const tokenProgramId = TOKEN_PROGRAM_ID;
     const initialAmpFactor = stableSwapData.initialAmpFactor;
     const targetAmpFactor = stableSwapData.targetAmpFactor;
     const startRampTimestamp = stableSwapData.startRampTs;
     const stopRampTimeStamp = stableSwapData.stopRampTs;
-    const fees = {
-      adminTradeFeeNumerator: stableSwapData.adminTradeFeeNumerator as number,
-      adminTradeFeeDenominator: stableSwapData.adminTradeFeeDenominator as number,
-      adminWithdrawFeeNumerator: stableSwapData.adminWithdrawFeeNumerator as number,
-      adminWithdrawFeeDenominator: stableSwapData.adminWithdrawFeeDenominator as number,
-      tradeFeeNumerator: stableSwapData.tradeFeeNumerator as number,
-      tradeFeeDenominator: stableSwapData.tradeFeeDenominator as number,
-      withdrawFeeNumerator: stableSwapData.withdrawFeeNumerator as number,
-      withdrawFeeDenominator: stableSwapData.withdrawFeeDenominator as number,
-    };
+    const fees = Fees.fromBuffer(stableSwapData.fees);
+    const rewards = Rewards.fromBuffer(stableSwapData.rewards);
+    const k = NumberU64.fromBuffer(stableSwapData.k);
+    const i = NumberU64.fromBuffer(stableSwapData.i);
+    const isOpenTwap = NumberU64.fromBuffer(stableSwapData.isOpenTwap);
 
     return new StableSwap(
       connection,
@@ -245,11 +297,17 @@ export class StableSwap {
       tokenAccountB,
       mintA,
       mintB,
+      deltafiTokenAccount,
+      dletafiTokenMint,
       initialAmpFactor,
       targetAmpFactor,
       startRampTimestamp,
       stopRampTimeStamp,
-      fees
+      new Fees(fees),
+      new Rewards(rewards),
+      k,
+      i,
+      isOpenTwap
     );
   }
 
@@ -268,11 +326,17 @@ export class StableSwap {
    * @param poolTokenAccount
    * @param mintA
    * @param mintB
+   * @param deltafiTokenAccount
+   * @param deltafiTokenMint
    * @param swapProgramId
    * @param tokenProgramId
    * @param nonce
    * @param ampFactor
    * @param fees
+   * @param rewards
+   * @param k
+   * @param i
+   * @param isOpenTwap
    */
   static async createStableSwap(
     connection: Connection,
@@ -288,13 +352,17 @@ export class StableSwap {
     tokenAccountB: PublicKey,
     poolTokenMint: PublicKey,
     poolTokenAccount: PublicKey,
-    mintA: PublicKey,
-    mintB: PublicKey,
+    deltafiTokenAccount: PublicKey,
+    deltafiTokenMint: PublicKey,
     swapProgramId: PublicKey,
     tokenProgramId: PublicKey,
     nonce: number,
     ampFactor: number,
-    fees: Fees = DEFAULT_FEES
+    k: number | NumberU64,
+    i: number | NumberU64,
+    isOpenTwap: number | NumberU64,
+    fees: Fees = new Fees(DEFAULT_FEES),
+    rewards: Rewards = new Rewards(DEFAULT_REWARDS)
   ): Promise<StableSwap> {
     // Allocate memory for the account
     const balanceNeeded = await StableSwap.getMinBalanceRentForExemptStableSwap(
@@ -311,7 +379,7 @@ export class StableSwap {
     );
 
     const instruction = instructions.createInitSwapInstruction(
-      stableSwapAccount,
+      stableSwapAccount.publicKey,
       authority,
       adminAccount,
       adminFeeAccountA,
@@ -322,11 +390,17 @@ export class StableSwap {
       tokenAccountB,
       poolTokenMint,
       poolTokenAccount,
-      swapProgramId,
+      deltafiTokenAccount,
+      deltafiTokenMint,
       tokenProgramId,
       nonce,
-      ampFactor,
-      fees
+      new NumberU64(ampFactor),
+      fees,
+      rewards,
+      new NumberU64(k),
+      new NumberU64(i),
+      new NumberU64(isOpenTwap),
+      swapProgramId
     );
     transaction.add(instruction);
 
@@ -350,13 +424,19 @@ export class StableSwap {
       adminFeeAccountB,
       tokenAccountA,
       tokenAccountB,
-      mintA,
-      mintB,
+      tokenMintA,
+      tokenMintB,
+      deltafiTokenAccount,
+      deltafiTokenMint,
       ampFactor,
       ampFactor,
       ZERO_TS,
       ZERO_TS,
-      fees
+      fees,
+      rewards,
+      k,
+      i,
+      isOpenTwap
     );
   }
 
@@ -367,25 +447,22 @@ export class StableSwap {
     let tokenAData;
     let tokenBData;
     let poolMintData;
-    try {
-      tokenAData = await loadAccount(
-        this.connection,
-        this.tokenAccountA,
-        this.tokenProgramId
-      );
-      tokenBData = await loadAccount(
-        this.connection,
-        this.tokenAccountB,
-        this.tokenProgramId
-      );
-      poolMintData = await loadAccount(
-        this.connection,
-        this.poolTokenMint,
-        this.tokenProgramId
-      );
-    } catch (e) {
-      throw new Error(e);
-    }
+
+    tokenAData = await loadAccount(
+      this.connection,
+      this.tokenAccountA,
+      this.tokenProgramId
+    );
+    tokenBData = await loadAccount(
+      this.connection,
+      this.tokenAccountB,
+      this.tokenProgramId
+    );
+    poolMintData = await loadAccount(
+      this.connection,
+      this.poolTokenMint,
+      this.tokenProgramId
+    );
 
     const tokenA = AccountLayout.decode(tokenAData);
     const tokenB = AccountLayout.decode(tokenBData);
@@ -405,23 +482,29 @@ export class StableSwap {
    * @param poolSource
    * @param poolDestination
    * @param userDestination
+   * @param rewardDestination
+   * @param rewardMint
    * @param amountIn
    * @param minimumAmountOut
+   * @param swapDirection
    */
   swap(
     userSource: PublicKey,
     poolSource: PublicKey,
     poolDestination: PublicKey,
     userDestination: PublicKey,
+    rewardDestination: PublicKey,
+    rewardMint: PublicKey,
     amountIn: number,
-    minimumAmountOut: number
+    minimumAmountOut: number,
+    swapDirection: number
   ): Transaction {
     const adminDestination =
       poolDestination === this.tokenAccountA
         ? this.adminFeeAccountA
         : this.adminFeeAccountB;
     return new Transaction().add(
-      instructions.swapInstruction(
+      instructions.createSwapInstruction(
         this.stableSwap,
         this.authority,
         userSource,
@@ -429,10 +512,13 @@ export class StableSwap {
         poolDestination,
         userDestination,
         adminDestination,
-        this.swapProgramId,
+        rewardDestination,
+        rewardMint,
         this.tokenProgramId,
-        amountIn,
-        minimumAmountOut
+        new NumberU64(amountIn),
+        new NumberU64(minimumAmountOut),
+        new NumberU64(swapDirection),
+        this.swapProgramId
       )
     );
   }
@@ -455,7 +541,7 @@ export class StableSwap {
     minimumPoolTokenAmount: number
   ): Transaction {
     return new Transaction().add(
-      instructions.depositInstruction(
+      instructions.createDepositInstruction(
         this.stableSwap,
         this.authority,
         userAccountA,
@@ -464,11 +550,11 @@ export class StableSwap {
         this.tokenAccountB,
         this.poolTokenMint,
         poolTokenAccount,
-        this.swapProgramId,
         this.tokenProgramId,
-        tokenAmountA,
-        tokenAmountB,
-        minimumPoolTokenAmount
+        new NumberU64(tokenAmountA),
+        new NumberU64(tokenAmountB),
+        new NumberU64(minimumPoolTokenAmount),
+        this.swapProgramId
       )
     );
   }
@@ -491,7 +577,7 @@ export class StableSwap {
     minimumTokenB: number
   ): Transaction {
     return new Transaction().add(
-      instructions.withdrawInstruction(
+      instructions.createWithdrawInstruction(
         this.stableSwap,
         this.authority,
         this.poolTokenMint,
@@ -502,11 +588,11 @@ export class StableSwap {
         userAccountB,
         this.adminFeeAccountA,
         this.adminFeeAccountB,
-        this.swapProgramId,
         this.tokenProgramId,
-        poolTokenAmount,
-        minimumTokenA,
-        minimumTokenB
+        new NumberU64(poolTokenAmount),
+        new NumberU64(minimumTokenA),
+        new NumberU64(minimumTokenB),
+        this.swapProgramId
       )
     );
   }
