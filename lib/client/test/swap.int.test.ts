@@ -142,8 +142,8 @@ describe("e2e test for admin instructions", () => {
       TOKEN_PROGRAM_ID,
       nonce,
       AMP_FACTOR,
-      0,
-      0,
+      0.5,
+      10,
       TWAP_OPEN
     );
 

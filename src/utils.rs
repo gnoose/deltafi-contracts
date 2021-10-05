@@ -43,7 +43,7 @@ pub mod test_utils {
         instruction::Instruction, msg, program_error::ProgramError, program_pack::Pack,
         program_stubs, pubkey::Pubkey, rent::Rent, sysvar::id,
     };
-    use solana_sdk::account::{create_account, create_is_signer_account_infos, Account};
+    use solana_sdk::account::{create_account_for_test, create_is_signer_account_infos, Account};
     use spl_token::{
         instruction::{approve, initialize_account, initialize_mint, mint_to},
         state::{Account as SplAccount, Mint as SplMint},
@@ -170,13 +170,13 @@ pub mod test_utils {
                 Pubkey::find_program_address(&[&swap_key.to_bytes()[..]], &SWAP_PROGRAM_ID);
 
             let (pool_mint_key, mut pool_mint_account) = create_mint(
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
                 &authority_key,
                 DEFAULT_TOKEN_DECIMALS,
                 None,
             );
             let (pool_token_key, pool_token_account) = mint_token(
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
                 &pool_mint_key,
                 &mut pool_mint_account,
                 &authority_key,
@@ -184,13 +184,13 @@ pub mod test_utils {
                 0,
             );
             let (deltafi_mint_key, mut deltafi_mint_account) = create_mint(
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
                 &authority_key,
                 DEFAULT_TOKEN_DECIMALS,
                 None,
             );
             let (deltafi_token_key, deltafi_token_account) = mint_token(
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
                 &deltafi_mint_key,
                 &mut deltafi_mint_account,
                 &authority_key,
@@ -198,9 +198,9 @@ pub mod test_utils {
                 0,
             );
             let (token_a_mint_key, mut token_a_mint_account) =
-                create_mint(&TOKEN_PROGRAM_ID, &user_key, DEFAULT_TOKEN_DECIMALS, None);
+                create_mint(&spl_token::id(), &user_key, DEFAULT_TOKEN_DECIMALS, None);
             let (token_a_key, token_a_account) = mint_token(
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
                 &token_a_mint_key,
                 &mut token_a_mint_account,
                 &user_key,
@@ -208,7 +208,7 @@ pub mod test_utils {
                 token_a_amount,
             );
             let (admin_fee_a_key, admin_fee_a_account) = mint_token(
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
                 &token_a_mint_key,
                 &mut token_a_mint_account,
                 &user_key,
@@ -216,9 +216,9 @@ pub mod test_utils {
                 0,
             );
             let (token_b_mint_key, mut token_b_mint_account) =
-                create_mint(&TOKEN_PROGRAM_ID, &user_key, DEFAULT_TOKEN_DECIMALS, None);
+                create_mint(&spl_token::id(), &user_key, DEFAULT_TOKEN_DECIMALS, None);
             let (token_b_key, token_b_account) = mint_token(
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
                 &token_b_mint_key,
                 &mut token_b_mint_account,
                 &user_key,
@@ -226,7 +226,7 @@ pub mod test_utils {
                 token_b_amount,
             );
             let (admin_fee_b_key, admin_fee_b_account) = mint_token(
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
                 &token_b_mint_key,
                 &mut token_b_mint_account,
                 &user_key,
@@ -292,7 +292,7 @@ pub mod test_utils {
             do_process_stable_instruction(
                 stable_initialize(
                     &SWAP_PROGRAM_ID,
-                    &TOKEN_PROGRAM_ID,
+                    &spl_token::id(),
                     &self.swap_key,
                     &self.authority_key,
                     &self.admin_key,
@@ -338,7 +338,7 @@ pub mod test_utils {
             do_process_instruction(
                 initialize(
                     &SWAP_PROGRAM_ID,
-                    &TOKEN_PROGRAM_ID,
+                    &spl_token::id(),
                     &self.swap_key,
                     &self.authority_key,
                     &self.admin_key,
@@ -389,7 +389,7 @@ pub mod test_utils {
             pool_amount: u64,
         ) -> (Pubkey, Account, Pubkey, Account, Pubkey, Account) {
             let (token_a_key, token_a_account) = mint_token(
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
                 &self.token_a_mint_key,
                 &mut self.token_a_mint_account,
                 &mint_owner,
@@ -397,7 +397,7 @@ pub mod test_utils {
                 a_amount,
             );
             let (token_b_key, token_b_account) = mint_token(
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
                 &self.token_b_mint_key,
                 &mut self.token_b_mint_account,
                 &mint_owner,
@@ -405,7 +405,7 @@ pub mod test_utils {
                 b_amount,
             );
             let (pool_key, pool_account) = mint_token(
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
                 &self.pool_mint_key,
                 &mut self.pool_mint_account,
                 &self.authority_key,
@@ -493,7 +493,7 @@ pub mod test_utils {
                     msg!("swap: swap direction sell base");
                     do_process_stable_instruction(
                         approve(
-                            &TOKEN_PROGRAM_ID,
+                            &spl_token::id(),
                             &user_source_key,
                             &self.authority_key,
                             &user_key,
@@ -515,7 +515,7 @@ pub mod test_utils {
                     msg!("swap: swap direction sell quote");
                     do_process_stable_instruction(
                         approve(
-                            &TOKEN_PROGRAM_ID,
+                            &spl_token::id(),
                             &user_destination_key,
                             &self.authority_key,
                             &user_key,
@@ -547,7 +547,7 @@ pub mod test_utils {
             do_process_stable_instruction(
                 stable_swap(
                     &SWAP_PROGRAM_ID,
-                    &TOKEN_PROGRAM_ID,
+                    &spl_token::id(),
                     &self.swap_key,
                     &self.authority_key,
                     &user_source_key,
@@ -606,7 +606,7 @@ pub mod test_utils {
                     msg!("swap: swap direction sell base");
                     do_process_instruction(
                         approve(
-                            &TOKEN_PROGRAM_ID,
+                            &spl_token::id(),
                             &user_source_key,
                             &self.authority_key,
                             &user_key,
@@ -628,7 +628,7 @@ pub mod test_utils {
                     msg!("swap: swap direction sell quote");
                     do_process_instruction(
                         approve(
-                            &TOKEN_PROGRAM_ID,
+                            &spl_token::id(),
                             &user_destination_key,
                             &self.authority_key,
                             &user_key,
@@ -660,7 +660,7 @@ pub mod test_utils {
             do_process_instruction(
                 swap(
                     &SWAP_PROGRAM_ID,
-                    &TOKEN_PROGRAM_ID,
+                    &spl_token::id(),
                     &self.swap_key,
                     &self.authority_key,
                     &user_source_key,
@@ -713,7 +713,7 @@ pub mod test_utils {
         ) -> ProgramResult {
             do_process_stable_instruction(
                 approve(
-                    &TOKEN_PROGRAM_ID,
+                    &spl_token::id(),
                     &depositor_token_a_key,
                     &self.authority_key,
                     &depositor_key,
@@ -731,7 +731,7 @@ pub mod test_utils {
 
             do_process_stable_instruction(
                 approve(
-                    &TOKEN_PROGRAM_ID,
+                    &spl_token::id(),
                     &depositor_token_b_key,
                     &self.authority_key,
                     &depositor_key,
@@ -751,7 +751,7 @@ pub mod test_utils {
             do_process_stable_instruction(
                 stable_deposit(
                     &SWAP_PROGRAM_ID,
-                    &TOKEN_PROGRAM_ID,
+                    &spl_token::id(),
                     &self.swap_key,
                     &self.authority_key,
                     &depositor_token_a_key,
@@ -796,7 +796,7 @@ pub mod test_utils {
         ) -> ProgramResult {
             do_process_instruction(
                 approve(
-                    &TOKEN_PROGRAM_ID,
+                    &spl_token::id(),
                     &depositor_token_a_key,
                     &self.authority_key,
                     &depositor_key,
@@ -814,7 +814,7 @@ pub mod test_utils {
 
             do_process_instruction(
                 approve(
-                    &TOKEN_PROGRAM_ID,
+                    &spl_token::id(),
                     &depositor_token_b_key,
                     &self.authority_key,
                     &depositor_key,
@@ -834,7 +834,7 @@ pub mod test_utils {
             do_process_instruction(
                 deposit(
                     &SWAP_PROGRAM_ID,
-                    &TOKEN_PROGRAM_ID,
+                    &spl_token::id(),
                     &self.swap_key,
                     &self.authority_key,
                     &depositor_token_a_key,
@@ -880,7 +880,7 @@ pub mod test_utils {
             // approve swap program to take out pool tokens
             do_process_instruction(
                 approve(
-                    &TOKEN_PROGRAM_ID,
+                    &spl_token::id(),
                     &pool_key,
                     &self.authority_key,
                     &user_key,
@@ -900,7 +900,7 @@ pub mod test_utils {
             do_process_instruction(
                 withdraw(
                     &SWAP_PROGRAM_ID,
-                    &TOKEN_PROGRAM_ID,
+                    &spl_token::id(),
                     &self.swap_key,
                     &self.authority_key,
                     &self.pool_mint_key,
@@ -948,7 +948,7 @@ pub mod test_utils {
             // approve swap program to take out pool tokens
             do_process_instruction(
                 approve(
-                    &TOKEN_PROGRAM_ID,
+                    &spl_token::id(),
                     &pool_key,
                     &self.authority_key,
                     &user_key,
@@ -968,7 +968,7 @@ pub mod test_utils {
             do_process_instruction(
                 withdraw_one(
                     &SWAP_PROGRAM_ID,
-                    &TOKEN_PROGRAM_ID,
+                    &spl_token::id(),
                     &self.swap_key,
                     &self.authority_key,
                     &self.pool_mint_key,
@@ -1220,13 +1220,13 @@ pub mod test_utils {
 
             // !! need to fix with real pool account from token swap.
             let (pool_mint_key, mut pool_mint_account) = create_mint(
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
                 &mint_owner_key,
                 DEFAULT_TOKEN_DECIMALS,
                 None,
             );
             let (pool_token_key, pool_token_account) = mint_token(
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
                 &pool_mint_key,
                 &mut pool_mint_account,
                 &mint_owner_key,
@@ -1234,13 +1234,13 @@ pub mod test_utils {
                 token_pool_amount,
             );
             let (token_deltafi_mint_key, mut token_deltafi_mint_account) = create_mint(
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
                 &mint_owner_key,
                 DEFAULT_TOKEN_DECIMALS,
                 None,
             );
             let (token_deltafi_key, token_deltafi_account) = mint_token(
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
                 &token_deltafi_mint_key,
                 &mut token_deltafi_mint_account,
                 &mint_owner_key,
@@ -1248,7 +1248,7 @@ pub mod test_utils {
                 0,
             );
             let (admin_fee_deltafi_key, admin_fee_deltafi_account) = mint_token(
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
                 &token_deltafi_mint_key,
                 &mut token_deltafi_mint_account,
                 &mint_owner_key,
@@ -1342,7 +1342,7 @@ pub mod test_utils {
                 Account::new(0, FarmingUserInfo::get_packed_len(), &SWAP_PROGRAM_ID);
 
             let (pool_key, pool_account) = mint_token(
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
                 &self.pool_mint_key,
                 &mut self.pool_mint_account,
                 &mint_owner,
@@ -1350,7 +1350,7 @@ pub mod test_utils {
                 lp_amount,
             );
             let (deltafi_key, deltafi_account) = mint_token(
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
                 &self.token_deltafi_mint_key,
                 &mut self.token_deltafi_mint_account,
                 &mint_owner,
@@ -1402,7 +1402,7 @@ pub mod test_utils {
         ) -> ProgramResult {
             do_process_instruction(
                 approve(
-                    &TOKEN_PROGRAM_ID,
+                    &spl_token::id(),
                     &depositor_pool_key,
                     &self.authority_key,
                     &depositor_key,
@@ -1422,7 +1422,7 @@ pub mod test_utils {
             do_process_instruction(
                 farm_deposit(
                     &SWAP_PROGRAM_ID,
-                    &TOKEN_PROGRAM_ID,
+                    &spl_token::id(),
                     &self.farm_base_key,
                     &self.farm_key,
                     &self.authority_key,
@@ -1468,7 +1468,7 @@ pub mod test_utils {
         ) -> ProgramResult {
             do_process_instruction(
                 approve(
-                    &TOKEN_PROGRAM_ID,
+                    &spl_token::id(),
                     &pool_key,
                     &self.authority_key,
                     &user_key,
@@ -1488,7 +1488,7 @@ pub mod test_utils {
             do_process_instruction(
                 farm_withdraw(
                     &SWAP_PROGRAM_ID,
-                    &TOKEN_PROGRAM_ID,
+                    &spl_token::id(),
                     &self.farm_base_key,
                     &self.farm_key,
                     &self.authority_key,
@@ -1532,7 +1532,7 @@ pub mod test_utils {
         ) -> ProgramResult {
             do_process_instruction(
                 approve(
-                    &TOKEN_PROGRAM_ID,
+                    &spl_token::id(),
                     &pool_key,
                     &self.authority_key,
                     &user_key,
@@ -1552,7 +1552,7 @@ pub mod test_utils {
             do_process_instruction(
                 farm_emergency_withdraw(
                     &SWAP_PROGRAM_ID,
-                    &TOKEN_PROGRAM_ID,
+                    &spl_token::id(),
                     &self.farm_key,
                     &self.authority_key,
                     &pool_key,
@@ -1586,7 +1586,7 @@ pub mod test_utils {
         ) -> ProgramResult {
             do_process_instruction(
                 approve(
-                    &TOKEN_PROGRAM_ID,
+                    &spl_token::id(),
                     &pool_key,
                     &self.authority_key,
                     &user_key,
@@ -1638,7 +1638,7 @@ pub mod test_utils {
             let mut new_account_infos = vec![];
 
             // mimic check for token program in accounts
-            if !account_infos.iter().any(|x| *x.key == TOKEN_PROGRAM_ID) {
+            if !account_infos.iter().any(|x| *x.key == spl_token::id()) {
                 return Err(ProgramError::InvalidAccountData);
             }
 
@@ -1791,7 +1791,7 @@ pub mod test_utils {
             &program_id,
         );
         let mut mint_authority_account = Account::default();
-        let mut rent_sysvar_account = create_account(&Rent::free(), 1);
+        let mut rent_sysvar_account = create_account_for_test(&Rent::free());
 
         do_process_instruction(
             initialize_account(&program_id, &account_key, &mint_key, account_owner_key).unwrap(),
@@ -1839,7 +1839,7 @@ pub mod test_utils {
             SplMint::get_packed_len(),
             &program_id,
         );
-        let mut rent_sysvar_account = create_account(&Rent::free(), 1);
+        let mut rent_sysvar_account = create_account_for_test(&Rent::free());
 
         do_process_instruction(
             initialize_mint(

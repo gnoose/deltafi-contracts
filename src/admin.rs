@@ -569,7 +569,7 @@ mod tests {
             let old_authority = accounts.authority_key;
             let (bad_authority_key, _nonce) = Pubkey::find_program_address(
                 &[&accounts.swap_key.to_bytes()[..]],
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
             );
             accounts.authority_key = bad_authority_key;
             assert_eq!(
@@ -669,7 +669,7 @@ mod tests {
             let old_authority = accounts.authority_key;
             let (bad_authority_key, _nonce) = Pubkey::find_program_address(
                 &[&accounts.swap_key.to_bytes()[..]],
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
             );
             accounts.authority_key = bad_authority_key;
             assert_eq!(
@@ -735,7 +735,7 @@ mod tests {
             let old_authority = accounts.authority_key;
             let (bad_authority_key, _nonce) = Pubkey::find_program_address(
                 &[&accounts.swap_key.to_bytes()[..]],
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
             );
             accounts.authority_key = bad_authority_key;
             assert_eq!(
@@ -790,7 +790,7 @@ mod tests {
             let old_authority = accounts.authority_key;
             let (bad_authority_key, _nonce) = Pubkey::find_program_address(
                 &[&accounts.swap_key.to_bytes()[..]],
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
             );
             accounts.authority_key = bad_authority_key;
             assert_eq!(
@@ -869,7 +869,7 @@ mod tests {
             let old_authority = accounts.authority_key;
             let (bad_authority_key, _nonce) = Pubkey::find_program_address(
                 &[&accounts.swap_key.to_bytes()[..]],
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
             );
             accounts.authority_key = bad_authority_key;
             assert_eq!(
@@ -949,7 +949,7 @@ mod tests {
             let old_authority = accounts.authority_key;
             let (bad_authority_key, _nonce) = Pubkey::find_program_address(
                 &[&accounts.swap_key.to_bytes()[..]],
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
             );
             accounts.authority_key = bad_authority_key;
             assert_eq!(
@@ -1038,7 +1038,7 @@ mod tests {
             let old_authority = accounts.authority_key;
             let (bad_authority_key, _nonce) = Pubkey::find_program_address(
                 &[&accounts.swap_key.to_bytes()[..]],
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
             );
             accounts.authority_key = bad_authority_key;
             assert_eq!(
@@ -1133,7 +1133,7 @@ mod tests {
             let old_authority = accounts.authority_key;
             let (bad_authority_key, _nonce) = Pubkey::find_program_address(
                 &[&accounts.swap_key.to_bytes()[..]],
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
             );
             accounts.authority_key = bad_authority_key;
             assert_eq!(
@@ -1201,7 +1201,7 @@ mod tests {
             let old_authority = accounts.authority_key;
             let (bad_authority_key, _nonce) = Pubkey::find_program_address(
                 &[&accounts.swap_key.to_bytes()[..]],
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
             );
             accounts.authority_key = bad_authority_key;
             assert_eq!(
@@ -1257,7 +1257,7 @@ mod tests {
             let old_authority = accounts.authority_key;
             let (bad_authority_key, _nonce) = Pubkey::find_program_address(
                 &[&accounts.farm_key.to_bytes()[..]],
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
             );
             accounts.authority_key = bad_authority_key;
             assert_eq!(
@@ -1311,7 +1311,7 @@ mod tests {
             let old_authority = accounts.authority_key;
             let (bad_authority_key, _nonce) = Pubkey::find_program_address(
                 &[&accounts.farm_key.to_bytes()[..]],
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
             );
             accounts.authority_key = bad_authority_key;
             assert_eq!(

@@ -1154,20 +1154,20 @@ pub fn initialize(
     .pack();
 
     let accounts = vec![
-        AccountMeta::new(*swap_pubkey, true),
-        AccountMeta::new(*authority_pubkey, false),
-        AccountMeta::new(*admin_pubkey, false),
-        AccountMeta::new(*admin_fee_a_pubkey, false),
-        AccountMeta::new(*admin_fee_b_pubkey, false),
-        AccountMeta::new(*token_a_mint_pubkey, false),
-        AccountMeta::new(*token_a_pubkey, false),
-        AccountMeta::new(*token_b_mint_pubkey, false),
-        AccountMeta::new(*token_b_pubkey, false),
-        AccountMeta::new(*pool_mint_pubkey, false),
+        AccountMeta::new_readonly(*swap_pubkey, true),
+        AccountMeta::new_readonly(*authority_pubkey, false),
+        AccountMeta::new_readonly(*admin_pubkey, false),
+        AccountMeta::new_readonly(*admin_fee_a_pubkey, false),
+        AccountMeta::new_readonly(*admin_fee_b_pubkey, false),
+        AccountMeta::new_readonly(*token_a_mint_pubkey, false),
+        AccountMeta::new_readonly(*token_a_pubkey, false),
+        AccountMeta::new_readonly(*token_b_mint_pubkey, false),
+        AccountMeta::new_readonly(*token_b_pubkey, false),
+        AccountMeta::new_readonly(*pool_mint_pubkey, false),
         AccountMeta::new(*destination_pubkey, false),
-        AccountMeta::new(*deltafi_mint_pubkey, false),
-        AccountMeta::new(*deltafi_token_pubkey, false),
-        AccountMeta::new(*pool_token_program_id, false),
+        AccountMeta::new_readonly(*deltafi_mint_pubkey, false),
+        AccountMeta::new_readonly(*deltafi_token_pubkey, false),
+        AccountMeta::new_readonly(*pool_token_program_id, false),
     ];
 
     Ok(Instruction {

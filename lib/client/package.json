@@ -17,8 +17,8 @@
   "devDependencies": {
     "@babel/preset-env": "^7.12.1",
     "@babel/preset-typescript": "^7.12.1",
-    "@solana/spl-token": "^0.0.13",
-    "@solana/web3.js": "^0.86.2",
+    "@solana/spl-token": "^0.1.0",
+    "@solana/web3.js": "^1.29.0",
     "@types/bn.js": "^4.11.6",
     "@types/jest": "^26.0.15",
     "@types/node": "^14.14.6",
@@ -35,8 +35,8 @@
     "buffer-layout": "^1.2.0"
   },
   "peerDependencies": {
-    "@solana/spl-token": "^0.0.13",
-    "@solana/web3.js": "^0.86.2"
+    "@solana/spl-token": "^0.1.0",
+    "@solana/web3.js": "^1.29.0"
   },
   "husky": {
     "hooks": {
@@ -47,7 +47,7 @@
     "*.{js,css,md,ts,tsx}": "prettier --write"
   },
   "resolutions": {
-    "@solana/web3.js": "^0.86.2"
+    "@solana/web3.js": "^1.29.0"
   },
   "prettier": {}
 }

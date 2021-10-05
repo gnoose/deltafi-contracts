@@ -5,7 +5,7 @@ if [ ! -d "./target/deploy" ]; then
     ./do.sh build
 fi
 
-solana_version="1.5.1"
+solana_version="1.7.11"
 
 if ! hash solana 2>/dev/null; then
     echo Installing Solana tool suite ...
@@ -34,7 +34,7 @@ fi
 solana config set --url $CLUSTER_URL
 sleep 1
 solana airdrop 10
-STABLE_SWAP_ID="$(solana deploy target/deploy/stable_swap.so | jq .programId -r)"
+STABLE_SWAP_ID="$(solana deploy --output json target/deploy/stable_swap.so  | jq .programId -r)"
 echo "StableSwap ProgramID:" $STABLE_SWAP_ID
 jq -n --arg CLUSTER_URL ${CLUSTER_URL} --arg STABLE_SWAP_ID ${STABLE_SWAP_ID} \
     '{clusterUrl: $CLUSTER_URL, "swapProgramId": $STABLE_SWAP_ID}' > last-deploy.json

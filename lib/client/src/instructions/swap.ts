@@ -8,7 +8,7 @@ import {
 import { NumberU64 } from "../util/u64";
 import { Fees } from "../struct/fees";
 import { Rewards } from "../struct";
-import { FeesLayout } from "../layout";
+import { FeesLayout, RewardsLayout } from "../layout";
 
 export enum SwapInstruction {
   Initialize = 0,
@@ -63,6 +63,7 @@ export const createInitSwapInstruction = (
     BufferLayout.u8("nonce"),
     BufferLayout.nu64("ampFactor"),
     FeesLayout("fees"),
+    RewardsLayout("rewards"),
     BufferLayout.nu64("k"),
     BufferLayout.nu64("i"),
     BufferLayout.nu64("isOpenTwap"),

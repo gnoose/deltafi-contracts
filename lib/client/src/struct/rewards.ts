@@ -1,5 +1,5 @@
-import { RewardsLayout } from "src/layout";
-import { NumberU64 } from "src/util/u64";
+import { RewardsLayout } from "../layout";
+import { NumberU64 } from "../util/u64";
 import { Struct } from "./struct";
 
 export interface IRewards {

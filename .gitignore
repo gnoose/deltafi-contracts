@@ -21,3 +21,6 @@ tmp*
 
 .vscode
 **/node_modules/
+
+# deploy json file
+last-deploy.json

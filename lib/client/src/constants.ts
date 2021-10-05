@@ -33,7 +33,7 @@ export const DEFAULT_REWARDS: IRewards = {
 };
 
 export const CLUSTER_URL = "http://localhost:8899";
-export const BOOTSTRAP_TIMEOUT = 300000;
+export const BOOTSTRAP_TIMEOUT = 10000;
 export const AMP_FACTOR = 100;
 
 export const TWAP_OPEN = 1;

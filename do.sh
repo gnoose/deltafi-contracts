@@ -3,7 +3,7 @@
 set -ex
 cd "$(dirname "$0")"
 
-solana_version="1.5.1"
+solana_version="1.7.11"
 export PATH="$HOME"/.local/share/solana/install/active_release/bin:"$PATH"
 
 usage() {
@@ -53,9 +53,11 @@ perform_action() {
     e2e-test)
         (
             docker-compose up -d
-            ./scripts/deploy-stable-swap.sh localnet
-            yarn --cwd lib/client install
-            yarn --cwd lib/client test-int ${@:2}
+            {
+                ./scripts/deploy-stable-swap.sh localnet \
+                && yarn --cwd lib/client install \
+                && yarn --cwd lib/client test-int ${@:2}
+            } || docker-compose down
             docker-compose down
         )
     ;;

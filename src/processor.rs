@@ -471,6 +471,7 @@ impl Processor {
         let deltafi_mint_info = next_account_info(account_info_iter)?;
         let deltafi_token_info = next_account_info(account_info_iter)?;
         let token_program_info = next_account_info(account_info_iter)?;
+        msg!("Account gathered");
         let k = FixedU256::new_from_fixed_u64(k_v)?;
         let i = FixedU256::new_from_fixed_u64(i_v)?;
 
@@ -3049,7 +3050,7 @@ mod tests {
         let swap_key = pubkey_rand();
         let mut mint = (pubkey_rand(), Account::default());
         let mut destination = (pubkey_rand(), Account::default());
-        let token_program = (TOKEN_PROGRAM_ID, Account::default());
+        let token_program = (spl_token::id(), Account::default());
         let (authority_key, nonce) =
             Pubkey::find_program_address(&[&swap_key.to_bytes()[..]], &SWAP_PROGRAM_ID);
         let mut authority = (authority_key, Account::default());
@@ -3168,7 +3169,7 @@ mod tests {
         // token A account owner is not swap authority
         {
             let (_token_a_key, token_a_account) = mint_token(
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
                 &accounts.token_a_mint_key,
                 &mut accounts.token_a_mint_account,
                 &user_key,
@@ -3187,7 +3188,7 @@ mod tests {
         // token B account owner is not swap authority
         {
             let (_token_b_key, token_b_account) = mint_token(
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
                 &accounts.token_b_mint_key,
                 &mut accounts.token_b_mint_account,
                 &user_key,
@@ -3206,7 +3207,7 @@ mod tests {
         // pool token account owner is swap authority
         {
             let (_pool_token_key, pool_token_account) = mint_token(
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
                 &accounts.pool_mint_key,
                 &mut accounts.pool_mint_account,
                 &accounts.authority_key,
@@ -3225,7 +3226,7 @@ mod tests {
         // deltafi token account owner is swap authority
         {
             let (_deltafi_token_key, deltafi_token_account) = mint_token(
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
                 &accounts.deltafi_mint_key,
                 &mut accounts.deltafi_mint_account,
                 &accounts.authority_key,
@@ -3244,7 +3245,7 @@ mod tests {
         // pool mint authority is not swap authority
         {
             let (_pool_mint_key, pool_mint_account) =
-                create_mint(&TOKEN_PROGRAM_ID, &user_key, DEFAULT_TOKEN_DECIMALS, None);
+                create_mint(&spl_token::id(), &user_key, DEFAULT_TOKEN_DECIMALS, None);
             let old_mint = accounts.pool_mint_account;
             accounts.pool_mint_account = pool_mint_account;
             assert_eq!(
@@ -3257,7 +3258,7 @@ mod tests {
         // deltafi mint authority is not swap authority
         {
             let (_deltafi_mint_key, deltafi_mint_account) =
-                create_mint(&TOKEN_PROGRAM_ID, &user_key, DEFAULT_TOKEN_DECIMALS, None);
+                create_mint(&spl_token::id(), &user_key, DEFAULT_TOKEN_DECIMALS, None);
             let old_account = accounts.deltafi_mint_account;
             accounts.deltafi_mint_account = deltafi_mint_account;
             assert_eq!(
@@ -3270,7 +3271,7 @@ mod tests {
         // pool mint token has freeze authority
         {
             let (_pool_mint_key, pool_mint_account) = create_mint(
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
                 &accounts.authority_key,
                 DEFAULT_TOKEN_DECIMALS,
                 Some(&user_key),
@@ -3287,7 +3288,7 @@ mod tests {
         // deltafi mint token has freeze authority
         {
             let (_deltafi_mint_key, deltafi_mint_account) = create_mint(
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
                 &accounts.authority_key,
                 DEFAULT_TOKEN_DECIMALS,
                 Some(&user_key),
@@ -3304,7 +3305,7 @@ mod tests {
         // empty token A account
         {
             let (_token_a_key, token_a_account) = mint_token(
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
                 &accounts.token_a_mint_key,
                 &mut accounts.token_a_mint_account,
                 &user_key,
@@ -3323,7 +3324,7 @@ mod tests {
         // empty token B account
         {
             let (_token_b_key, token_b_account) = mint_token(
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
                 &accounts.token_b_mint_key,
                 &mut accounts.token_b_mint_account,
                 &user_key,
@@ -3345,7 +3346,7 @@ mod tests {
             let old_pool_account = accounts.pool_token_account;
 
             let (_pool_mint_key, pool_mint_account) = create_mint(
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
                 &accounts.authority_key,
                 DEFAULT_TOKEN_DECIMALS,
                 None,
@@ -3353,7 +3354,7 @@ mod tests {
             accounts.pool_mint_account = pool_mint_account;
 
             let (_empty_pool_token_key, empty_pool_token_account) = mint_token(
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
                 &accounts.pool_mint_key,
                 &mut accounts.pool_mint_account,
                 &accounts.authority_key,
@@ -3362,7 +3363,7 @@ mod tests {
             );
 
             let (_pool_token_key, pool_token_account) = mint_token(
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
                 &accounts.pool_mint_key,
                 &mut accounts.pool_mint_account,
                 &accounts.authority_key,
@@ -3392,7 +3393,7 @@ mod tests {
         {
             do_process_stable_instruction(
                 approve(
-                    &TOKEN_PROGRAM_ID,
+                    &spl_token::id(),
                     &accounts.token_a_key,
                     &user_key,
                     &accounts.authority_key,
@@ -3414,7 +3415,7 @@ mod tests {
 
             do_process_instruction(
                 revoke(
-                    &TOKEN_PROGRAM_ID,
+                    &spl_token::id(),
                     &accounts.token_a_key,
                     &accounts.authority_key,
                     &[],
@@ -3429,7 +3430,7 @@ mod tests {
         {
             do_process_instruction(
                 approve(
-                    &TOKEN_PROGRAM_ID,
+                    &spl_token::id(),
                     &accounts.token_b_key,
                     &user_key,
                     &accounts.authority_key,
@@ -3451,7 +3452,7 @@ mod tests {
 
             do_process_stable_instruction(
                 revoke(
-                    &TOKEN_PROGRAM_ID,
+                    &spl_token::id(),
                     &accounts.token_b_key,
                     &accounts.authority_key,
                     &[],
@@ -3466,7 +3467,7 @@ mod tests {
         {
             do_process_stable_instruction(
                 set_authority(
-                    &TOKEN_PROGRAM_ID,
+                    &spl_token::id(),
                     &accounts.token_a_key,
                     Some(&user_key),
                     AuthorityType::CloseAccount,
@@ -3484,7 +3485,7 @@ mod tests {
 
             do_process_instruction(
                 set_authority(
-                    &TOKEN_PROGRAM_ID,
+                    &spl_token::id(),
                     &accounts.token_a_key,
                     None,
                     AuthorityType::CloseAccount,
@@ -3501,7 +3502,7 @@ mod tests {
         {
             do_process_stable_instruction(
                 set_authority(
-                    &TOKEN_PROGRAM_ID,
+                    &spl_token::id(),
                     &accounts.token_b_key,
                     Some(&user_key),
                     AuthorityType::CloseAccount,
@@ -3519,7 +3520,7 @@ mod tests {
 
             do_process_instruction(
                 set_authority(
-                    &TOKEN_PROGRAM_ID,
+                    &spl_token::id(),
                     &accounts.token_b_key,
                     None,
                     AuthorityType::CloseAccount,
@@ -3535,7 +3536,7 @@ mod tests {
         // mismatched admin mints
         {
             let (wrong_admin_fee_key, wrong_admin_fee_account) = mint_token(
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
                 &accounts.pool_mint_key,
                 &mut accounts.pool_mint_account,
                 &accounts.authority_key,
@@ -3575,9 +3576,9 @@ mod tests {
         // mismatched mint decimals
         {
             let (bad_mint_key, mut bad_mint_account) =
-                create_mint(&TOKEN_PROGRAM_ID, &accounts.authority_key, 2, None);
+                create_mint(&spl_token::id(), &accounts.authority_key, 2, None);
             let (bad_deltafi_mint_key, mut bad_deltafi_mint_account) =
-                create_mint(&TOKEN_PROGRAM_ID, &accounts.authority_key, 2, None);
+                create_mint(&spl_token::id(), &accounts.authority_key, 2, None);
 
             // Pool mint decimal does not match
             let old_pool_mint_key = accounts.pool_mint_key;
@@ -3608,7 +3609,7 @@ mod tests {
 
             // Token a mint decimal does not match token b decimals
             let (bad_token_key, bad_token_account) = mint_token(
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
                 &bad_mint_key,
                 &mut bad_mint_account,
                 &accounts.authority_key,
@@ -3637,7 +3638,7 @@ mod tests {
 
             // Deltafi token does not match with token a decimals
             let (bad_deltafi_token_key, bad_deltafi_token_account) = mint_token(
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
                 &bad_deltafi_mint_key,
                 &mut bad_deltafi_mint_account,
                 &accounts.authority_key,
@@ -3668,7 +3669,7 @@ mod tests {
         // create swap with same token A and B
         {
             let (_token_a_repeat_key, token_a_repeat_account) = mint_token(
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
                 &accounts.token_a_mint_key,
                 &mut accounts.token_a_mint_account,
                 &user_key,
@@ -3821,7 +3822,7 @@ mod tests {
         // token A account owner is not swap authority
         {
             let (_token_a_key, token_a_account) = mint_token(
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
                 &accounts.token_a_mint_key,
                 &mut accounts.token_a_mint_account,
                 &user_key,
@@ -3840,7 +3841,7 @@ mod tests {
         // token B account owner is not swap authority
         {
             let (_token_b_key, token_b_account) = mint_token(
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
                 &accounts.token_b_mint_key,
                 &mut accounts.token_b_mint_account,
                 &user_key,
@@ -3859,7 +3860,7 @@ mod tests {
         // pool token account owner is swap authority
         {
             let (_pool_token_key, pool_token_account) = mint_token(
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
                 &accounts.pool_mint_key,
                 &mut accounts.pool_mint_account,
                 &accounts.authority_key,
@@ -3878,7 +3879,7 @@ mod tests {
         // deltafi token account owner is swap authority
         {
             let (_deltafi_token_key, deltafi_token_account) = mint_token(
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
                 &accounts.deltafi_mint_key,
                 &mut accounts.deltafi_mint_account,
                 &accounts.authority_key,
@@ -3897,7 +3898,7 @@ mod tests {
         // pool mint authority is not swap authority
         {
             let (_pool_mint_key, pool_mint_account) =
-                create_mint(&TOKEN_PROGRAM_ID, &user_key, DEFAULT_TOKEN_DECIMALS, None);
+                create_mint(&spl_token::id(), &user_key, DEFAULT_TOKEN_DECIMALS, None);
             let old_mint = accounts.pool_mint_account;
             accounts.pool_mint_account = pool_mint_account;
             assert_eq!(
@@ -3910,7 +3911,7 @@ mod tests {
         // deltafi mint authority is not swap authority
         {
             let (_deltafi_mint_key, deltafi_mint_account) =
-                create_mint(&TOKEN_PROGRAM_ID, &user_key, DEFAULT_TOKEN_DECIMALS, None);
+                create_mint(&spl_token::id(), &user_key, DEFAULT_TOKEN_DECIMALS, None);
             let old_account = accounts.deltafi_mint_account;
             accounts.deltafi_mint_account = deltafi_mint_account;
             assert_eq!(
@@ -3923,7 +3924,7 @@ mod tests {
         // pool mint token has freeze authority
         {
             let (_pool_mint_key, pool_mint_account) = create_mint(
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
                 &accounts.authority_key,
                 DEFAULT_TOKEN_DECIMALS,
                 Some(&user_key),
@@ -3940,7 +3941,7 @@ mod tests {
         // deltafi mint token has freeze authority
         {
             let (_deltafi_mint_key, deltafi_mint_account) = create_mint(
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
                 &accounts.authority_key,
                 DEFAULT_TOKEN_DECIMALS,
                 Some(&user_key),
@@ -3957,7 +3958,7 @@ mod tests {
         // empty token A account
         {
             let (_token_a_key, token_a_account) = mint_token(
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
                 &accounts.token_a_mint_key,
                 &mut accounts.token_a_mint_account,
                 &user_key,
@@ -3976,7 +3977,7 @@ mod tests {
         // empty token B account
         {
             let (_token_b_key, token_b_account) = mint_token(
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
                 &accounts.token_b_mint_key,
                 &mut accounts.token_b_mint_account,
                 &user_key,
@@ -3998,7 +3999,7 @@ mod tests {
             let old_pool_account = accounts.pool_token_account;
 
             let (_pool_mint_key, pool_mint_account) = create_mint(
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
                 &accounts.authority_key,
                 DEFAULT_TOKEN_DECIMALS,
                 None,
@@ -4006,7 +4007,7 @@ mod tests {
             accounts.pool_mint_account = pool_mint_account;
 
             let (_empty_pool_token_key, empty_pool_token_account) = mint_token(
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
                 &accounts.pool_mint_key,
                 &mut accounts.pool_mint_account,
                 &accounts.authority_key,
@@ -4015,7 +4016,7 @@ mod tests {
             );
 
             let (_pool_token_key, pool_token_account) = mint_token(
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
                 &accounts.pool_mint_key,
                 &mut accounts.pool_mint_account,
                 &accounts.authority_key,
@@ -4045,7 +4046,7 @@ mod tests {
         {
             do_process_instruction(
                 approve(
-                    &TOKEN_PROGRAM_ID,
+                    &spl_token::id(),
                     &accounts.token_a_key,
                     &user_key,
                     &accounts.authority_key,
@@ -4067,7 +4068,7 @@ mod tests {
 
             do_process_instruction(
                 revoke(
-                    &TOKEN_PROGRAM_ID,
+                    &spl_token::id(),
                     &accounts.token_a_key,
                     &accounts.authority_key,
                     &[],
@@ -4082,7 +4083,7 @@ mod tests {
         {
             do_process_instruction(
                 approve(
-                    &TOKEN_PROGRAM_ID,
+                    &spl_token::id(),
                     &accounts.token_b_key,
                     &user_key,
                     &accounts.authority_key,
@@ -4104,7 +4105,7 @@ mod tests {
 
             do_process_instruction(
                 revoke(
-                    &TOKEN_PROGRAM_ID,
+                    &spl_token::id(),
                     &accounts.token_b_key,
                     &accounts.authority_key,
                     &[],
@@ -4119,7 +4120,7 @@ mod tests {
         {
             do_process_instruction(
                 set_authority(
-                    &TOKEN_PROGRAM_ID,
+                    &spl_token::id(),
                     &accounts.token_a_key,
                     Some(&user_key),
                     AuthorityType::CloseAccount,
@@ -4137,7 +4138,7 @@ mod tests {
 
             do_process_instruction(
                 set_authority(
-                    &TOKEN_PROGRAM_ID,
+                    &spl_token::id(),
                     &accounts.token_a_key,
                     None,
                     AuthorityType::CloseAccount,
@@ -4154,7 +4155,7 @@ mod tests {
         {
             do_process_instruction(
                 set_authority(
-                    &TOKEN_PROGRAM_ID,
+                    &spl_token::id(),
                     &accounts.token_b_key,
                     Some(&user_key),
                     AuthorityType::CloseAccount,
@@ -4172,7 +4173,7 @@ mod tests {
 
             do_process_instruction(
                 set_authority(
-                    &TOKEN_PROGRAM_ID,
+                    &spl_token::id(),
                     &accounts.token_b_key,
                     None,
                     AuthorityType::CloseAccount,
@@ -4188,7 +4189,7 @@ mod tests {
         // mismatched admin mints
         {
             let (wrong_admin_fee_key, wrong_admin_fee_account) = mint_token(
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
                 &accounts.pool_mint_key,
                 &mut accounts.pool_mint_account,
                 &accounts.authority_key,
@@ -4228,9 +4229,9 @@ mod tests {
         // mismatched mint decimals
         {
             let (bad_mint_key, mut bad_mint_account) =
-                create_mint(&TOKEN_PROGRAM_ID, &accounts.authority_key, 2, None);
+                create_mint(&spl_token::id(), &accounts.authority_key, 2, None);
             let (bad_deltafi_mint_key, mut bad_deltafi_mint_account) =
-                create_mint(&TOKEN_PROGRAM_ID, &accounts.authority_key, 2, None);
+                create_mint(&spl_token::id(), &accounts.authority_key, 2, None);
 
             // Pool mint decimal does not match
             let old_pool_mint_key = accounts.pool_mint_key;
@@ -4261,7 +4262,7 @@ mod tests {
 
             // Token a mint decimal does not match token b decimals
             let (bad_token_key, bad_token_account) = mint_token(
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
                 &bad_mint_key,
                 &mut bad_mint_account,
                 &accounts.authority_key,
@@ -4290,7 +4291,7 @@ mod tests {
 
             // Deltafi token does not match with token a decimals
             let (bad_deltafi_token_key, bad_deltafi_token_account) = mint_token(
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
                 &bad_deltafi_mint_key,
                 &mut bad_deltafi_mint_account,
                 &accounts.authority_key,
@@ -4321,7 +4322,7 @@ mod tests {
         // create swap with same token A and B
         {
             let (_token_a_repeat_key, token_a_repeat_account) = mint_token(
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
                 &accounts.token_a_mint_key,
                 &mut accounts.token_a_mint_account,
                 &user_key,
@@ -4444,7 +4445,7 @@ mod tests {
             let old_authority = accounts.authority_key;
             let (bad_authority_key, _nonce) = Pubkey::find_program_address(
                 &[&accounts.swap_key.to_bytes()[..]],
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
             );
             accounts.authority_key = bad_authority_key;
             assert_eq!(
@@ -4608,7 +4609,7 @@ mod tests {
                 do_process_instruction(
                     deposit(
                         &SWAP_PROGRAM_ID,
-                        &TOKEN_PROGRAM_ID,
+                        &spl_token::id(),
                         &accounts.swap_key,
                         &accounts.authority_key,
                         &token_a_key,
@@ -4650,7 +4651,7 @@ mod tests {
             ) = accounts.setup_token_accounts(&user_key, &depositor_key, deposit_a, deposit_b, 0);
             let wrong_key = pubkey_rand();
             assert_eq!(
-                Err(ProgramError::InvalidAccountData),
+                Err(ProgramError::IncorrectProgramId),
                 do_process_instruction(
                     deposit(
                         &SWAP_PROGRAM_ID,
@@ -4759,7 +4760,7 @@ mod tests {
                 mut pool_account,
             ) = accounts.setup_token_accounts(&user_key, &depositor_key, deposit_a, deposit_b, 0);
             let (pool_mint_key, pool_mint_account) = create_mint(
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
                 &accounts.authority_key,
                 DEFAULT_TOKEN_DECIMALS,
                 None,
@@ -4962,7 +4963,7 @@ mod tests {
             let old_authority = accounts.authority_key;
             let (bad_authority_key, _nonce) = Pubkey::find_program_address(
                 &[&accounts.swap_key.to_bytes()[..]],
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
             );
             accounts.authority_key = bad_authority_key;
             assert_eq!(
@@ -5126,7 +5127,7 @@ mod tests {
                 do_process_instruction(
                     deposit(
                         &SWAP_PROGRAM_ID,
-                        &TOKEN_PROGRAM_ID,
+                        &spl_token::id(),
                         &accounts.swap_key,
                         &accounts.authority_key,
                         &token_a_key,
@@ -5168,7 +5169,7 @@ mod tests {
             ) = accounts.setup_token_accounts(&user_key, &depositor_key, deposit_a, deposit_b, 0);
             let wrong_key = pubkey_rand();
             assert_eq!(
-                Err(ProgramError::InvalidAccountData),
+                Err(ProgramError::IncorrectProgramId),
                 do_process_instruction(
                     deposit(
                         &SWAP_PROGRAM_ID,
@@ -5277,7 +5278,7 @@ mod tests {
                 mut pool_account,
             ) = accounts.setup_token_accounts(&user_key, &depositor_key, deposit_a, deposit_b, 0);
             let (pool_mint_key, pool_mint_account) = create_mint(
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
                 &accounts.authority_key,
                 DEFAULT_TOKEN_DECIMALS,
                 None,
@@ -5482,7 +5483,7 @@ mod tests {
             let old_authority = accounts.authority_key;
             let (bad_authority_key, _nonce) = Pubkey::find_program_address(
                 &[&accounts.swap_key.to_bytes()[..]],
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
             );
             accounts.authority_key = bad_authority_key;
             assert_eq!(
@@ -5711,7 +5712,7 @@ mod tests {
                 do_process_instruction(
                     withdraw(
                         &SWAP_PROGRAM_ID,
-                        &TOKEN_PROGRAM_ID,
+                        &spl_token::id(),
                         &accounts.swap_key,
                         &accounts.authority_key,
                         &accounts.pool_mint_key,
@@ -5762,7 +5763,7 @@ mod tests {
             );
             let wrong_key = pubkey_rand();
             assert_eq!(
-                Err(ProgramError::InvalidAccountData),
+                Err(ProgramError::IncorrectProgramId),
                 do_process_instruction(
                     withdraw(
                         &SWAP_PROGRAM_ID,
@@ -5886,7 +5887,7 @@ mod tests {
                 initial_pool,
             );
             let (pool_mint_key, pool_mint_account) = create_mint(
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
                 &accounts.authority_key,
                 DEFAULT_TOKEN_DECIMALS,
                 None,
@@ -6568,7 +6569,7 @@ mod tests {
             let old_authority = accounts.authority_key;
             let (bad_authority_key, _nonce) = Pubkey::find_program_address(
                 &[&accounts.swap_key.to_bytes()[..]],
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
             );
             accounts.authority_key = bad_authority_key;
             assert_eq!(
@@ -6601,7 +6602,7 @@ mod tests {
             ) = accounts.setup_token_accounts(&user_key, &swapper_key, initial_a, initial_b, 0);
             let wrong_program_id = pubkey_rand();
             assert_eq!(
-                Err(ProgramError::InvalidAccountData),
+                Err(ProgramError::IncorrectProgramId),
                 do_process_instruction(
                     swap(
                         &SWAP_PROGRAM_ID,
@@ -6679,7 +6680,7 @@ mod tests {
                 do_process_instruction(
                     swap(
                         &SWAP_PROGRAM_ID,
-                        &TOKEN_PROGRAM_ID,
+                        &spl_token::id(),
                         &accounts.swap_key,
                         &accounts.authority_key,
                         &token_a_key,
@@ -6726,7 +6727,7 @@ mod tests {
                 do_process_instruction(
                     swap(
                         &SWAP_PROGRAM_ID,
-                        &TOKEN_PROGRAM_ID,
+                        &spl_token::id(),
                         &accounts.swap_key,
                         &accounts.authority_key,
                         &token_a_key,
@@ -6827,7 +6828,7 @@ mod tests {
                 do_process_instruction(
                     swap(
                         &SWAP_PROGRAM_ID,
-                        &TOKEN_PROGRAM_ID,
+                        &spl_token::id(),
                         &accounts.swap_key,
                         &accounts.authority_key,
                         &token_a_key,
@@ -6985,7 +6986,7 @@ mod tests {
             let old_authority = accounts.authority_key;
             let (bad_authority_key, _nonce) = Pubkey::find_program_address(
                 &[&accounts.swap_key.to_bytes()[..]],
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
             );
             accounts.authority_key = bad_authority_key;
             assert_eq!(
@@ -7018,7 +7019,7 @@ mod tests {
             ) = accounts.setup_token_accounts(&user_key, &swapper_key, initial_a, initial_b, 0);
             let wrong_program_id = pubkey_rand();
             assert_eq!(
-                Err(ProgramError::InvalidAccountData),
+                Err(ProgramError::IncorrectProgramId),
                 do_process_instruction(
                     swap(
                         &SWAP_PROGRAM_ID,
@@ -7096,7 +7097,7 @@ mod tests {
                 do_process_instruction(
                     swap(
                         &SWAP_PROGRAM_ID,
-                        &TOKEN_PROGRAM_ID,
+                        &spl_token::id(),
                         &accounts.swap_key,
                         &accounts.authority_key,
                         &token_a_key,
@@ -7143,7 +7144,7 @@ mod tests {
                 do_process_instruction(
                     swap(
                         &SWAP_PROGRAM_ID,
-                        &TOKEN_PROGRAM_ID,
+                        &spl_token::id(),
                         &accounts.swap_key,
                         &accounts.authority_key,
                         &token_a_key,
@@ -7244,7 +7245,7 @@ mod tests {
                 do_process_instruction(
                     swap(
                         &SWAP_PROGRAM_ID,
-                        &TOKEN_PROGRAM_ID,
+                        &spl_token::id(),
                         &accounts.swap_key,
                         &accounts.authority_key,
                         &token_a_key,
@@ -7398,7 +7399,7 @@ mod tests {
             let old_authority = accounts.authority_key;
             let (bad_authority_key, _nonce) = Pubkey::find_program_address(
                 &[&accounts.swap_key.to_bytes()[..]],
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
             );
             accounts.authority_key = bad_authority_key;
             assert_eq!(
@@ -7503,13 +7504,13 @@ mod tests {
             );
             let foreign_authority = pubkey_rand();
             let (foreign_mint_key, mut foreign_mint_account) = create_mint(
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
                 &foreign_authority,
                 DEFAULT_TOKEN_DECIMALS,
                 None,
             );
             let (foreign_token_key, foreign_token_account) = mint_token(
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
                 &foreign_mint_key,
                 &mut foreign_mint_account,
                 &foreign_authority,
@@ -7605,7 +7606,7 @@ mod tests {
                 do_process_instruction(
                     withdraw_one(
                         &SWAP_PROGRAM_ID,
-                        &TOKEN_PROGRAM_ID,
+                        &spl_token::id(),
                         &accounts.swap_key,
                         &accounts.authority_key,
                         &accounts.pool_mint_key,
@@ -7652,7 +7653,7 @@ mod tests {
             );
             let wrong_key = pubkey_rand();
             assert_eq!(
-                Err(ProgramError::InvalidAccountData),
+                Err(ProgramError::IncorrectProgramId),
                 do_process_instruction(
                     withdraw_one(
                         &SWAP_PROGRAM_ID,
@@ -7702,7 +7703,7 @@ mod tests {
                 initial_pool,
             );
             let (pool_mint_key, pool_mint_account) = create_mint(
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
                 &accounts.authority_key,
                 DEFAULT_TOKEN_DECIMALS,
                 None,
@@ -8006,7 +8007,7 @@ mod tests {
             let old_authority = accounts.authority_key;
             let (bad_authority_key, _nonce) = Pubkey::find_program_address(
                 &[&accounts.farm_key.to_bytes()[..]],
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
             );
             accounts.authority_key = bad_authority_key;
             assert_eq!(
@@ -8075,7 +8076,7 @@ mod tests {
                 do_process_instruction(
                     farm_deposit(
                         &SWAP_PROGRAM_ID,
-                        &TOKEN_PROGRAM_ID,
+                        &spl_token::id(),
                         &accounts.farm_base_key,
                         &accounts.farm_key,
                         &accounts.authority_key,
@@ -8122,7 +8123,7 @@ mod tests {
                 .unwrap();
             let wrong_key = pubkey_rand();
             assert_eq!(
-                Err(ProgramError::InvalidAccountData),
+                Err(ProgramError::IncorrectProgramId),
                 do_process_instruction(
                     farm_deposit(
                         &SWAP_PROGRAM_ID,
@@ -8172,7 +8173,7 @@ mod tests {
                 .enable_user(&depositor_farming_key, &mut depositor_farming_account)
                 .unwrap();
             let (deltafi_mint_key, deltafi_mint_account) = create_mint(
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
                 &accounts.authority_key,
                 DEFAULT_TOKEN_DECIMALS,
                 None,
@@ -8302,7 +8303,7 @@ mod tests {
             let old_authority = accounts.authority_key;
             let (bad_authority_key, _nonce) = Pubkey::find_program_address(
                 &[&accounts.farm_key.to_bytes()[..]],
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
             );
             accounts.authority_key = bad_authority_key;
             assert_eq!(
@@ -8461,7 +8462,7 @@ mod tests {
 
             let wrong_key = pubkey_rand();
             assert_eq!(
-                Err(ProgramError::InvalidAccountData),
+                Err(ProgramError::IncorrectProgramId),
                 do_process_instruction(
                     farm_withdraw(
                         &SWAP_PROGRAM_ID,
@@ -8525,7 +8526,7 @@ mod tests {
                 .unwrap();
 
             let (deltafi_mint_key, deltafi_mint_account) = create_mint(
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
                 &accounts.authority_key,
                 DEFAULT_TOKEN_DECIMALS,
                 None,
@@ -8667,7 +8668,7 @@ mod tests {
             let old_authority = accounts.authority_key;
             let (bad_authority_key, _nonce) = Pubkey::find_program_address(
                 &[&accounts.farm_key.to_bytes()[..]],
-                &TOKEN_PROGRAM_ID,
+                &spl_token::id(),
             );
             accounts.authority_key = bad_authority_key;
             assert_eq!(
@@ -8793,7 +8794,7 @@ mod tests {
                 .unwrap();
             let wrong_key = pubkey_rand();
             assert_eq!(
-                Err(ProgramError::InvalidAccountData),
+                Err(ProgramError::IncorrectProgramId),
                 do_process_instruction(
                     farm_emergency_withdraw(
                         &SWAP_PROGRAM_ID,
