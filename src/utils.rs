@@ -698,6 +698,133 @@ pub mod test_utils {
         }
 
         #[allow(clippy::too_many_arguments)]
+        pub fn update_balance(
+            &mut self,
+            user_source_key: &Pubkey,
+            mut user_source_account: &mut Account,
+            swap_source_key: &Pubkey,
+            swap_destination_key: &Pubkey,
+            user_destination_key: &Pubkey,
+            mut user_destination_account: &mut Account,
+        ) -> ProgramResult {
+            let admin_destination_key = self.get_admin_fee_key(swap_destination_key);
+            let mut admin_destination_account =
+                self.get_admin_fee_account(&admin_destination_key).clone();
+            let mut swap_source_account = self.get_token_account(swap_source_key).clone();
+            let mut swap_destination_account = self.get_token_account(swap_destination_key).clone();
+
+            // perform the swap
+            do_process_instruction(
+                update_balance(
+                    &SWAP_PROGRAM_ID,
+                    &TOKEN_PROGRAM_ID,
+                    &self.swap_key,
+                    &self.authority_key,
+                    &user_source_key,
+                    &swap_source_key,
+                    &swap_destination_key,
+                    &user_destination_key,
+                    &self.deltafi_token_key,
+                    &self.deltafi_mint_key,
+                    &admin_destination_key,
+                )
+                .unwrap(),
+                vec![
+                    &mut self.swap_account,
+                    &mut Account::default(),
+                    &mut user_source_account,
+                    &mut swap_source_account,
+                    &mut swap_destination_account,
+                    &mut user_destination_account,
+                    &mut self.deltafi_token_account,
+                    &mut self.deltafi_mint_account,
+                    &mut admin_destination_account,
+                    &mut Account::default(),
+                    &mut clock_account(ZERO_TS),
+                ],
+            )?;
+
+            self.set_admin_fee_account_(&admin_destination_key, admin_destination_account);
+            self.set_token_account(swap_source_key, swap_source_account);
+            self.set_token_account(swap_destination_key, swap_destination_account);
+
+            Ok(())
+        }
+
+        #[allow(clippy::too_many_arguments)]
+        pub fn calc_receive_amount(
+            &mut self,
+            user_source_key: &Pubkey,
+            mut user_source_account: &mut Account,
+            swap_source_key: &Pubkey,
+            swap_destination_key: &Pubkey,
+            user_destination_key: &Pubkey,
+            mut user_destination_account: &mut Account,
+            amount_in: u64,
+            minimum_amount_out: u64,
+            swap_direction: u64,
+        ) -> ProgramResult {
+            let admin_destination_key;
+            match swap_direction {
+                SWAP_DIRECTION_SELL_BASE => {
+                    msg!("calc_receive_amount: swap direction sell base");
+                    admin_destination_key = self.get_admin_fee_key(swap_destination_key);
+                }
+                SWAP_DIRECTION_SELL_QUOTE => {
+                    msg!("calc_receive_amount: swap direction sell quote");
+                    admin_destination_key = self.get_admin_fee_key(swap_source_key);
+                }
+                _ => {
+                    admin_destination_key = self.get_admin_fee_key(swap_destination_key);
+                }
+            }
+            let mut admin_destination_account =
+                self.get_admin_fee_account(&admin_destination_key).clone();
+            let mut swap_source_account = self.get_token_account(swap_source_key).clone();
+            let mut swap_destination_account = self.get_token_account(swap_destination_key).clone();
+
+            // perform the swap
+            do_process_instruction(
+                calc_receive_amount(
+                    &SWAP_PROGRAM_ID,
+                    &TOKEN_PROGRAM_ID,
+                    &self.swap_key,
+                    &self.authority_key,
+                    &user_source_key,
+                    &swap_source_key,
+                    &swap_destination_key,
+                    &user_destination_key,
+                    &self.deltafi_token_key,
+                    &self.deltafi_mint_key,
+                    &admin_destination_key,
+                    amount_in,
+                    minimum_amount_out,
+                    swap_direction,
+                )
+                .unwrap(),
+                vec![
+                    &mut self.swap_account,
+                    &mut Account::default(),
+                    &mut user_source_account,
+                    &mut swap_source_account,
+                    &mut swap_destination_account,
+                    &mut user_destination_account,
+                    &mut self.deltafi_token_account,
+                    &mut self.deltafi_mint_account,
+                    &mut admin_destination_account,
+                    &mut Account::default(),
+                    &mut clock_account(ZERO_TS),
+                ],
+            )?;
+
+            self.set_admin_fee_account_(&admin_destination_key, admin_destination_account);
+            self.set_token_account(swap_source_key, swap_source_account);
+            self.set_token_account(swap_destination_key, swap_destination_account);
+
+            Ok(())
+        }
+
+        #[allow(clippy::too_many_arguments)]
         pub fn stable_deposit(
             &mut self,
             depositor_key: &Pubkey,

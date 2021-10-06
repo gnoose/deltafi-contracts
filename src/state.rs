@@ -93,6 +93,10 @@ pub struct SwapInfo {
     pub base_price_cumulative_last: FixedU256,
     /// receive amount on swap
     pub receive_amount: FixedU256,
+    /// base token amount
+    pub base_balance: FixedU256,
+    /// quote token amount
+    pub quote_balance: FixedU256,
 }
 
 impl Sealed for SwapInfo {}
@@ -102,11 +106,11 @@ impl IsInitialized for SwapInfo {
     }
 }
 impl Pack for SwapInfo {
-    const LEN: usize = 1216;
+    const LEN: usize = 1344;
 
     /// Unpacks a byte buffer into a [SwapInfo](struct.SwapInfo.html).
     fn unpack_from_slice(input: &[u8]) -> Result<Self, ProgramError> {
-        let input = array_ref![input, 0, 1216];
+        let input = array_ref![input, 0, 1344];
         #[allow(clippy::ptr_offset_with_cast)]
         let (
             is_initialized,
@@ -142,9 +146,11 @@ impl Pack for SwapInfo {
             block_timestamp_last,
             base_price_cumulative_last,
             receive_amount,
+            base_balance,
+            quote_balance,
         ) = array_refs![
             input, 1, 1, 1, 8, 8, 8, 8, 8, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 64, 204, 24,
-            64, 64, 1, 64, 64, 64, 64, 8, 8, 64, 64
+            64, 64, 1, 64, 64, 64, 64, 8, 8, 64, 64, 64, 64
         ];
         Ok(Self {
             is_initialized: match is_initialized {
@@ -188,11 +194,13 @@ impl Pack for SwapInfo {
             block_timestamp_last: i64::from_le_bytes(*block_timestamp_last),
             base_price_cumulative_last: FixedU256::unpack_from_slice(base_price_cumulative_last)?,
             receive_amount: FixedU256::unpack_from_slice(receive_amount)?,
+            base_balance: FixedU256::unpack_from_slice(base_balance)?,
+            quote_balance: FixedU256::unpack_from_slice(quote_balance)?,
         })
     }
 
     fn pack_into_slice(&self, output: &mut [u8]) {
-        let output = array_mut_ref![output, 0, 1216];
+        let output = array_mut_ref![output, 0, 1344];
         let (
             is_initialized,
             is_paused,
@@ -227,9 +235,11 @@ impl Pack for SwapInfo {
             block_timestamp_last,
             base_price_cumulative_last,
             receive_amount,
+            base_balance,
+            quote_balance,
         ) = mut_array_refs![
             output, 1, 1, 1, 8, 8, 8, 8, 8, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 64, 204,
-            24, 64, 64, 1, 64, 64, 64, 64, 8, 8, 64, 64
+            24, 64, 64, 1, 64, 64, 64, 64, 8, 8, 64, 64, 64, 64
         ];
         is_initialized[0] = self.is_initialized as u8;
         is_paused[0] = self.is_paused as u8;
@@ -265,6 +275,8 @@ impl Pack for SwapInfo {
         self.base_price_cumulative_last
             .pack_into_slice(&mut base_price_cumulative_last[..]);
         self.receive_amount.pack_into_slice(&mut receive_amount[..]);
+        self.base_balance.pack_into_slice(&mut base_balance[..]);
+        self.quote_balance.pack_into_slice(&mut quote_balance[..]);
     }
 }
 
@@ -576,6 +588,8 @@ mod tests {
             .as_secs() as i64;
         let base_price_cumulative_last = FixedU256::zero();
         let receive_amount = FixedU256::zero();
+        let base_balance = FixedU256::zero();
+        let quote_balance = FixedU256::zero();
 
         let swap_info = SwapInfo {
             is_initialized,
@@ -611,6 +625,8 @@ mod tests {
             block_timestamp_last,
             base_price_cumulative_last,
             receive_amount,
+            base_balance,
+            quote_balance,
         };
 
         let mut packed = [0u8; SwapInfo::LEN];
@@ -681,6 +697,12 @@ mod tests {
         let mut packed_receive_amount = [0u8; FixedU256::LEN];
         receive_amount.pack_into_slice(&mut packed_receive_amount);
         packed.extend_from_slice(&packed_receive_amount);
+        let mut packed_base_balance = [0u8; FixedU256::LEN];
+        base_balance.pack_into_slice(&mut packed_base_balance);
+        packed.extend_from_slice(&packed_base_balance);
+        let mut packed_quote_balance = [0u8; FixedU256::LEN];
+        quote_balance.pack_into_slice(&mut packed_quote_balance);
+        packed.extend_from_slice(&packed_quote_balance);
 
         let unpacked = SwapInfo::unpack(&packed).unwrap();
         assert_eq!(swap_info, unpacked);

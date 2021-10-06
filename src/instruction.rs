@@ -899,6 +899,18 @@ pub enum SwapInstruction {
     ///   7. `[]` Token program id
     ///   8. `[]` Clock sysvar
     CalcReceiveAmount(SwapData),
+
+    ///   Updating base/quote balance of SwapInfo.
+    ///
+    ///   0. `[writable, signer]` New Token-swap to create.
+    ///   1. `[]` $authority derived from `create_program_address(&[Token-swap account])`
+    ///   2. `[]` admin Account.
+    ///   3. `[]` admin_fee_a admin fee Account for token_a.
+    ///   4. `[]` admin_fee_b admin fee Account for token_b.
+    ///   5. `[]` token_a Account. Must be non zero, owned by $authority.
+    ///   6. `[]` token_b Account. Must be non zero, owned by $authority.
+    ///   7. `[writable]` Pool Token Mint. Must be empty, owned by $authority.
+    UpdateBalance(),
 }
 
 impl SwapInstruction {
@@ -974,6 +986,7 @@ impl SwapInstruction {
                     swap_direction,
                 }))
             }
+            0x6 => Some(Self::UpdateBalance()),
             _ => None,
         })
     }
@@ -1051,6 +1064,9 @@ impl SwapInstruction {
                 buf.extend_from_slice(&amount_in.to_le_bytes());
                 buf.extend_from_slice(&minimum_amount_out.to_le_bytes());
                 buf.extend_from_slice(&swap_direction.to_le_bytes());
+            }
+            Self::UpdateBalance() => {
+                buf.push(0x6);
             }
         }
         buf
@@ -1327,6 +1343,88 @@ pub fn stable_swap(
     swap_direction: u64,
 ) -> Result<Instruction, ProgramError> {
     let data = StableInstruction::StableSwap(SwapData {
+        amount_in,
+        minimum_amount_out,
+        swap_direction,
+    })
+    .pack();
+
+    let accounts = vec![
+        AccountMeta::new(*swap_pubkey, false),
+        AccountMeta::new(*authority_pubkey, false),
+        AccountMeta::new(*source_pubkey, false),
+        AccountMeta::new(*swap_source_pubkey, false),
+        AccountMeta::new(*swap_destination_pubkey, false),
+        AccountMeta::new(*destination_pubkey, false),
+        AccountMeta::new(*reward_token_pubkey, false),
+        AccountMeta::new(*reward_mint_pubkey, false),
+        AccountMeta::new(*admin_fee_destination_pubkey, false),
+        AccountMeta::new(*token_program_id, false),
+        AccountMeta::new(clock::id(), false),
+    ];
+
+    Ok(Instruction {
+        program_id: *program_id,
+        accounts,
+        data,
+    })
+}
+
+/// Creates a 'update_balance' instruction.
+pub fn update_balance(
+    program_id: &Pubkey,
+    token_program_id: &Pubkey,
+    swap_pubkey: &Pubkey,
+    authority_pubkey: &Pubkey,
+    source_pubkey: &Pubkey,
+    swap_source_pubkey: &Pubkey,
+    swap_destination_pubkey: &Pubkey,
+    destination_pubkey: &Pubkey,
+    reward_token_pubkey: &Pubkey,
+    reward_mint_pubkey: &Pubkey,
+    admin_fee_destination_pubkey: &Pubkey,
+) -> Result<Instruction, ProgramError> {
+    let data = SwapInstruction::UpdateBalance().pack();
+
+    let accounts = vec![
+        AccountMeta::new(*swap_pubkey, false),
+        AccountMeta::new(*authority_pubkey, false),
+        AccountMeta::new(*source_pubkey, false),
+        AccountMeta::new(*swap_source_pubkey, false),
+        AccountMeta::new(*swap_destination_pubkey, false),
+        AccountMeta::new(*destination_pubkey, false),
+        AccountMeta::new(*reward_token_pubkey, false),
+        AccountMeta::new(*reward_mint_pubkey, false),
+        AccountMeta::new(*admin_fee_destination_pubkey, false),
+        AccountMeta::new(*token_program_id, false),
+        AccountMeta::new(clock::id(), false),
+    ];
+
+    Ok(Instruction {
+        program_id: *program_id,
+        accounts,
+        data,
+    })
+}
+
+/// Creates a 'calc_receive_amount' instruction.
+pub fn calc_receive_amount(
+    program_id: &Pubkey,
+    token_program_id: &Pubkey,
+    swap_pubkey: &Pubkey,
+    authority_pubkey: &Pubkey,
+    source_pubkey: &Pubkey,
+    swap_source_pubkey: &Pubkey,
+    swap_destination_pubkey: &Pubkey,
+    destination_pubkey: &Pubkey,
+    reward_token_pubkey: &Pubkey,
+    reward_mint_pubkey: &Pubkey,
+    admin_fee_destination_pubkey: &Pubkey,
+    amount_in: u64,
+    minimum_amount_out: u64,
+    swap_direction: u64,
+) -> Result<Instruction, ProgramError> {
+    let data = SwapInstruction::CalcReceiveAmount(SwapData {
         amount_in,
         minimum_amount_out,
         swap_direction,
