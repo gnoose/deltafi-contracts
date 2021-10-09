@@ -57,7 +57,7 @@ pub mod test_utils {
         instruction::*,
         processor::Processor,
         rewards::Rewards,
-        state::{FarmBaseInfo, FarmInfo, FarmingUserInfo, SwapInfo},
+        state::{ConfigInfo, FarmBaseInfo, FarmInfo, FarmingUserInfo, SwapInfo},
     };
 
     /// Test program id for the swap program.
@@ -115,6 +115,8 @@ pub mod test_utils {
         pub authority_key: Pubkey,
         pub initial_amp_factor: u64,
         pub target_amp_factor: u64,
+        pub config_key: Pubkey,
+        pub config_account: Account,
         pub swap_key: Pubkey,
         pub swap_account: Account,
         pub pool_mint_key: Pubkey,
@@ -155,6 +157,7 @@ pub mod test_utils {
     impl SwapAccountInfo {
         pub fn new(
             user_key: &Pubkey,
+            config: &ConfigAccountInfo,
             amp_factor: u64,
             token_a_amount: u64,
             token_b_amount: u64,
@@ -234,7 +237,6 @@ pub mod test_utils {
                 0,
             );
 
-            let admin_account = Account::default();
             let base_target = FixedU256::zero();
             let quote_target = FixedU256::zero();
             let base_reserve = FixedU256::zero();
@@ -250,6 +252,8 @@ pub mod test_utils {
                 authority_key,
                 initial_amp_factor: amp_factor,
                 target_amp_factor: amp_factor,
+                config_key: config.config_key.clone(),
+                config_account: config.config_account.clone(),
                 swap_key,
                 swap_account,
                 pool_mint_key,
@@ -268,8 +272,8 @@ pub mod test_utils {
                 deltafi_mint_account,
                 deltafi_token_key,
                 deltafi_token_account,
-                admin_key: admin_account.owner,
-                admin_account,
+                admin_key: config.admin_key.clone(),
+                admin_account: config.admin_account.clone(),
                 admin_fee_a_key,
                 admin_fee_a_account,
                 admin_fee_b_key,
@@ -293,9 +297,9 @@ pub mod test_utils {
                 stable_initialize(
                     &SWAP_PROGRAM_ID,
                     &spl_token::id(),
+                    &self.config_key,
                     &self.swap_key,
                     &self.authority_key,
-                    &self.admin_key,
                     &self.admin_fee_a_key,
                     &self.admin_fee_b_key,
                     &self.token_a_mint_key,
@@ -307,18 +311,15 @@ pub mod test_utils {
                     &self.deltafi_mint_key,
                     &self.deltafi_token_key,
                     self.nonce,
-                    self.initial_amp_factor,
-                    self.fees,
-                    self.rewards,
                     self.k.inner_u64()?,
                     self.i.inner_u64()?,
                     self.is_open_twap,
                 )
                 .unwrap(),
                 vec![
+                    &mut self.config_account,
                     &mut self.swap_account,
                     &mut Account::default(),
-                    &mut self.admin_account,
                     &mut self.admin_fee_a_account,
                     &mut self.admin_fee_b_account,
                     &mut self.token_a_mint_account,
@@ -339,9 +340,9 @@ pub mod test_utils {
                 initialize(
                     &SWAP_PROGRAM_ID,
                     &spl_token::id(),
+                    &self.config_key,
                     &self.swap_key,
                     &self.authority_key,
-                    &self.admin_key,
                     &self.admin_fee_a_key,
                     &self.admin_fee_b_key,
                     &self.token_a_mint_key,
@@ -353,18 +354,15 @@ pub mod test_utils {
                     &self.deltafi_mint_key,
                     &self.deltafi_token_key,
                     self.nonce,
-                    self.initial_amp_factor,
-                    self.fees,
-                    self.rewards,
                     self.k.inner_u64()?,
                     self.i.inner_u64()?,
                     self.is_open_twap,
                 )
                 .unwrap(),
                 vec![
+                    &mut self.config_account,
                     &mut self.swap_account,
                     &mut Account::default(),
-                    &mut self.admin_account,
                     &mut self.admin_fee_a_account,
                     &mut self.admin_fee_b_account,
                     &mut self.token_a_mint_account,
@@ -1134,16 +1132,16 @@ pub mod test_utils {
             do_process_instruction(
                 ramp_a(
                     &SWAP_PROGRAM_ID,
+                    &self.config_key,
                     &self.swap_key,
-                    &self.authority_key,
                     &self.admin_key,
                     target_amp,
                     stop_ramp_ts,
                 )
                 .unwrap(),
                 vec![
+                    &mut self.config_account,
                     &mut self.swap_account,
-                    &mut Account::default(),
                     &mut self.admin_account,
                     &mut clock_account(current_ts),
                 ],
@@ -1154,14 +1152,14 @@ pub mod test_utils {
             do_process_instruction(
                 stop_ramp_a(
                     &SWAP_PROGRAM_ID,
+                    &self.config_key,
                     &self.swap_key,
-                    &self.authority_key,
                     &self.admin_key,
                 )
                 .unwrap(),
                 vec![
+                    &mut self.config_account,
                     &mut self.swap_account,
-                    &mut Account::default(),
                     &mut self.admin_account,
                     &mut clock_account(current_ts),
                 ],
@@ -1172,14 +1170,14 @@ pub mod test_utils {
             do_process_instruction(
                 pause(
                     &SWAP_PROGRAM_ID,
+                    &self.config_key,
                     &self.swap_key,
-                    &self.authority_key,
                     &self.admin_key,
                 )
                 .unwrap(),
                 vec![
+                    &mut self.config_account,
                     &mut self.swap_account,
-                    &mut Account::default(),
                     &mut self.admin_account,
                 ],
             )
@@ -1189,14 +1187,14 @@ pub mod test_utils {
             do_process_instruction(
                 unpause(
                     &SWAP_PROGRAM_ID,
+                    &self.config_key,
                     &self.swap_key,
-                    &self.authority_key,
                     &self.admin_key,
                 )
                 .unwrap(),
                 vec![
+                    &mut self.config_account,
                     &mut self.swap_account,
-                    &mut Account::default(),
                     &mut self.admin_account,
                 ],
             )
@@ -1210,6 +1208,7 @@ pub mod test_utils {
             do_process_instruction(
                 set_fee_account(
                     &SWAP_PROGRAM_ID,
+                    &self.config_key,
                     &self.swap_key,
                     &self.authority_key,
                     &self.admin_key,
@@ -1217,6 +1216,7 @@ pub mod test_utils {
                 )
                 .unwrap(),
                 vec![
+                    &mut self.config_account,
                     &mut self.swap_account,
                     &mut Account::default(),
                     &mut self.admin_account,
@@ -1225,61 +1225,19 @@ pub mod test_utils {
             )
         }
 
-        pub fn apply_new_admin(&mut self, current_ts: i64) -> ProgramResult {
-            do_process_instruction(
-                apply_new_admin(
-                    &SWAP_PROGRAM_ID,
-                    &self.swap_key,
-                    &self.authority_key,
-                    &self.admin_key,
-                )
-                .unwrap(),
-                vec![
-                    &mut self.swap_account,
-                    &mut Account::default(),
-                    &mut self.admin_account,
-                    &mut clock_account(current_ts),
-                ],
-            )
-        }
-
-        pub fn commit_new_admin(
-            &mut self,
-            new_admin_key: &Pubkey,
-            current_ts: i64,
-        ) -> ProgramResult {
-            do_process_instruction(
-                commit_new_admin(
-                    &SWAP_PROGRAM_ID,
-                    &self.swap_key,
-                    &self.authority_key,
-                    &self.admin_key,
-                    new_admin_key,
-                )
-                .unwrap(),
-                vec![
-                    &mut self.swap_account,
-                    &mut Account::default(),
-                    &mut self.admin_account,
-                    &mut Account::default(),
-                    &mut clock_account(current_ts),
-                ],
-            )
-        }
-
         pub fn set_new_fees(&mut self, new_fees: Fees) -> ProgramResult {
             do_process_instruction(
                 set_new_fees(
                     &SWAP_PROGRAM_ID,
+                    &self.config_key,
                     &self.swap_key,
-                    &self.authority_key,
                     &self.admin_key,
                     new_fees,
                 )
                 .unwrap(),
                 vec![
+                    &mut self.config_account,
                     &mut self.swap_account,
-                    &mut Account::default(),
                     &mut self.admin_account,
                 ],
             )
@@ -1289,15 +1247,15 @@ pub mod test_utils {
             do_process_instruction(
                 set_rewards(
                     &SWAP_PROGRAM_ID,
+                    &self.config_key,
                     &self.swap_key,
-                    &self.authority_key,
                     &self.admin_key,
                     new_rewards,
                 )
                 .unwrap(),
                 vec![
+                    &mut self.config_account,
                     &mut self.swap_account,
-                    &mut Account::default(),
                     &mut self.admin_account,
                 ],
             )
@@ -1747,6 +1705,105 @@ pub mod test_utils {
                     &mut pool_account,
                     &mut self.pool_mint_account,
                     &mut clock_account(ZERO_TS),
+                ],
+            )
+        }
+    }
+
+    pub struct ConfigAccountInfo {
+        pub authority_key: Pubkey,
+        pub amp_factor: u64,
+        pub config_key: Pubkey,
+        pub config_account: Account,
+        pub admin_key: Pubkey,
+        pub admin_account: Account,
+        pub deltafi_mint_key: Pubkey,
+        pub deltafi_mint_account: Account,
+        pub fees: Fees,
+        pub rewards: Rewards,
+    }
+
+    impl ConfigAccountInfo {
+        pub fn new(amp_factor: u64, fees: Fees, rewards: Rewards) -> Self {
+            let config_key = pubkey_rand();
+            let config_account = Account::new(0, ConfigInfo::get_packed_len(), &SWAP_PROGRAM_ID);
+            let (authority_key, _) =
+                Pubkey::find_program_address(&[&config_key.to_bytes()[..]], &SWAP_PROGRAM_ID);
+
+            let (deltafi_mint_key, deltafi_mint_account) = create_mint(
+                &spl_token::id(),
+                &authority_key,
+                DEFAULT_TOKEN_DECIMALS,
+                None,
+            );
+
+            let admin_account = Account::default();
+
+            ConfigAccountInfo {
+                authority_key,
+                amp_factor,
+                config_key,
+                config_account,
+                admin_key: admin_account.owner,
+                admin_account,
+                deltafi_mint_key,
+                deltafi_mint_account,
+                fees,
+                rewards,
+            }
+        }
+
+        pub fn initialize(&mut self) -> ProgramResult {
+            do_process_instruction(
+                initialize_config(
+                    &SWAP_PROGRAM_ID,
+                    &self.config_key,
+                    &self.authority_key,
+                    &self.admin_key,
+                    &self.deltafi_mint_key,
+                    self.amp_factor,
+                    self.fees,
+                    self.rewards,
+                )
+                .unwrap(),
+                vec![
+                    &mut self.config_account,
+                    &mut Account::default(),
+                    &mut self.admin_account,
+                    &mut self.deltafi_mint_account,
+                ],
+            )
+        }
+
+        pub fn apply_new_admin(&mut self, current_ts: i64) -> ProgramResult {
+            do_process_instruction(
+                apply_new_admin(&SWAP_PROGRAM_ID, &self.config_key, &self.admin_key).unwrap(),
+                vec![
+                    &mut self.config_account,
+                    &mut self.admin_account,
+                    &mut clock_account(current_ts),
+                ],
+            )
+        }
+
+        pub fn commit_new_admin(
+            &mut self,
+            new_admin_key: &Pubkey,
+            current_ts: i64,
+        ) -> ProgramResult {
+            do_process_instruction(
+                commit_new_admin(
+                    &SWAP_PROGRAM_ID,
+                    &self.config_key,
+                    &self.admin_key,
+                    new_admin_key,
+                )
+                .unwrap(),
+                vec![
+                    &mut self.config_account,
+                    &mut self.admin_account,
+                    &mut Account::default(),
+                    &mut clock_account(current_ts),
                 ],
             )
         }

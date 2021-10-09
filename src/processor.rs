@@ -21,19 +21,17 @@ use spl_token::state::Mint;
 use crate::{
     admin::process_admin_instruction,
     bn::{FixedU256, U256},
-    curve::{Farm, StableSwap, MAX_AMP, MIN_AMP, ZERO_TS},
+    curve::{Farm, StableSwap, ZERO_TS},
     error::SwapError,
-    fees::Fees,
     instruction::{
-        AdminInstruction, DepositData, FarmingDepositData, FarmingInstruction, FarmingWithdrawData,
-        InitializeData, StableInstruction, SwapData, SwapInstruction, WithdrawData,
+        DepositData, FarmingDepositData, FarmingInstruction, FarmingWithdrawData, InitializeData,
+        InstructionType, StableInstruction, SwapData, SwapInstruction, WithdrawData,
         WithdrawOneData,
     },
     math2::{get_buy_shares, get_deposit_adjustment_amount},
     oracle::Oracle,
     pool_converter::PoolTokenConverter,
-    rewards::Rewards,
-    state::{FarmBaseInfo, FarmInfo, FarmingUserInfo, SwapInfo},
+    state::{ConfigInfo, FarmBaseInfo, FarmInfo, FarmingUserInfo, SwapInfo},
     utils,
     v2curve::{
         adjusted_target, get_mid_price, sell_base_token, sell_quote_token, PMMState, RState,
@@ -211,18 +209,15 @@ impl Processor {
     pub fn process_stable_initialize(
         program_id: &Pubkey,
         nonce: u8,
-        amp_factor: u64,
-        fees: Fees,
-        rewards: Rewards,
         k_v: u64,
         i_v: u64,
         is_open_twap: u64,
         accounts: &[AccountInfo],
     ) -> ProgramResult {
         let account_info_iter = &mut accounts.iter();
+        let config_info = next_account_info(account_info_iter)?;
         let swap_info = next_account_info(account_info_iter)?;
         let authority_info = next_account_info(account_info_iter)?;
-        let admin_key_info = next_account_info(account_info_iter)?;
         let admin_fee_a_info = next_account_info(account_info_iter)?;
         let admin_fee_b_info = next_account_info(account_info_iter)?;
         let token_a_mint_info = next_account_info(account_info_iter)?;
@@ -234,12 +229,6 @@ impl Processor {
         let deltafi_mint_info = next_account_info(account_info_iter)?;
         let deltafi_token_info = next_account_info(account_info_iter)?;
         let token_program_info = next_account_info(account_info_iter)?;
-        let k = FixedU256::new_from_fixed_u64(k_v)?;
-        let i = FixedU256::new_from_fixed_u64(i_v)?;
-
-        if !(MIN_AMP..=MAX_AMP).contains(&amp_factor) {
-            return Err(SwapError::InvalidInput.into());
-        }
 
         let token_swap = SwapInfo::unpack_unchecked(&swap_info.data.borrow())?;
         if token_swap.is_initialized {
@@ -335,8 +324,16 @@ impl Processor {
             return Err(SwapError::InvalidAdmin.into());
         }
 
+        let config = ConfigInfo::unpack(&config_info.data.borrow())?;
+
         // amp_factor == intial_amp_factor == target_amp_factor on init
-        let invariant = StableSwap::new(amp_factor, amp_factor, ZERO_TS, ZERO_TS, ZERO_TS);
+        let invariant = StableSwap::new(
+            config.amp_factor,
+            config.amp_factor,
+            ZERO_TS,
+            ZERO_TS,
+            ZERO_TS,
+        );
         // Compute amount of LP tokens to mint for bootstrapper
         let mint_amount = invariant
             .compute_d(U256::from(token_a.amount), U256::from(token_b.amount))
@@ -353,7 +350,8 @@ impl Processor {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs() as i64;
-
+        let k = FixedU256::new_from_fixed_u64(k_v)?;
+        let i = FixedU256::new_from_fixed_u64(i_v)?;
         let (_, new_base_target, new_quote_target, new_base_reserve, new_quote_reserve) =
             get_buy_shares(
                 base_balance,
@@ -408,13 +406,10 @@ impl Processor {
             is_initialized: true,
             is_paused: false,
             nonce,
-            initial_amp_factor: amp_factor,
-            target_amp_factor: amp_factor,
+            initial_amp_factor: config.amp_factor,
+            target_amp_factor: config.amp_factor,
             start_ramp_ts: ZERO_TS,
             stop_ramp_ts: ZERO_TS,
-            future_admin_deadline: ZERO_TS,
-            future_admin_key: Pubkey::default(),
-            admin_key: *admin_key_info.key,
             token_a: *token_a_info.key,
             token_b: *token_b_info.key,
             deltafi_token: *deltafi_token_info.key,
@@ -424,8 +419,8 @@ impl Processor {
             deltafi_mint: deltafi_token.mint,
             admin_fee_key_a: *admin_fee_a_info.key,
             admin_fee_key_b: *admin_fee_b_info.key,
-            fees,
-            rewards,
+            fees: config.fees,
+            rewards: config.rewards,
             oracle: Oracle::new(*token_a_info.key, *token_b_info.key),
             k,
             i,
@@ -446,22 +441,18 @@ impl Processor {
     }
 
     /// Processes an [Initialize](enum.Instruction.html).
-    #[allow(clippy::too_many_arguments)]
     pub fn process_initialize(
         program_id: &Pubkey,
         nonce: u8,
-        amp_factor: u64,
-        fees: Fees,
-        rewards: Rewards,
         k_v: u64,
         i_v: u64,
         is_open_twap: u64,
         accounts: &[AccountInfo],
     ) -> ProgramResult {
         let account_info_iter = &mut accounts.iter();
+        let config_info = next_account_info(account_info_iter)?;
         let swap_info = next_account_info(account_info_iter)?;
         let authority_info = next_account_info(account_info_iter)?;
-        let admin_key_info = next_account_info(account_info_iter)?;
         let admin_fee_a_info = next_account_info(account_info_iter)?;
         let admin_fee_b_info = next_account_info(account_info_iter)?;
         let token_a_mint_info = next_account_info(account_info_iter)?;
@@ -473,13 +464,6 @@ impl Processor {
         let deltafi_mint_info = next_account_info(account_info_iter)?;
         let deltafi_token_info = next_account_info(account_info_iter)?;
         let token_program_info = next_account_info(account_info_iter)?;
-        msg!("Account gathered");
-        let k = FixedU256::new_from_fixed_u64(k_v)?;
-        let i = FixedU256::new_from_fixed_u64(i_v)?;
-
-        if !(MIN_AMP..=MAX_AMP).contains(&amp_factor) {
-            return Err(SwapError::InvalidInput.into());
-        }
 
         let token_swap = SwapInfo::unpack_unchecked(&swap_info.data.borrow())?;
         if token_swap.is_initialized {
@@ -588,7 +572,8 @@ impl Processor {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs() as i64;
-
+        let k = FixedU256::new_from_fixed_u64(k_v)?;
+        let i = FixedU256::new_from_fixed_u64(i_v)?;
         let (mint_amount, new_base_target, new_quote_target, new_base_reserve, new_quote_reserve) =
             get_buy_shares(
                 base_balance,
@@ -639,17 +624,16 @@ impl Processor {
         }
         let receive_amount = FixedU256::zero();
 
+        let config = ConfigInfo::unpack(&config_info.data.borrow())?;
+
         let obj = SwapInfo {
             is_initialized: true,
             is_paused: false,
             nonce,
-            initial_amp_factor: amp_factor,
-            target_amp_factor: amp_factor,
+            initial_amp_factor: config.amp_factor,
+            target_amp_factor: config.amp_factor,
             start_ramp_ts: ZERO_TS,
             stop_ramp_ts: ZERO_TS,
-            future_admin_deadline: ZERO_TS,
-            future_admin_key: Pubkey::default(),
-            admin_key: *admin_key_info.key,
             token_a: *token_a_info.key,
             token_b: *token_b_info.key,
             deltafi_token: *deltafi_token_info.key,
@@ -659,8 +643,8 @@ impl Processor {
             deltafi_mint: deltafi_token.mint,
             admin_fee_key_a: *admin_fee_a_info.key,
             admin_fee_key_b: *admin_fee_b_info.key,
-            fees,
-            rewards,
+            fees: config.fees,
+            rewards: config.rewards,
             oracle: Oracle::new(*token_a_info.key, *token_b_info.key),
             k,
             i,
@@ -793,9 +777,6 @@ impl Processor {
             target_amp_factor: token_swap.target_amp_factor,
             start_ramp_ts: token_swap.start_ramp_ts,
             stop_ramp_ts: token_swap.stop_ramp_ts,
-            future_admin_deadline: token_swap.future_admin_deadline,
-            future_admin_key: token_swap.future_admin_key,
-            admin_key: token_swap.admin_key,
             token_a: token_swap.token_a,
             token_b: token_swap.token_b,
             pool_mint: token_swap.pool_mint,
@@ -1121,9 +1102,6 @@ impl Processor {
             target_amp_factor: token_swap.target_amp_factor,
             start_ramp_ts: token_swap.start_ramp_ts,
             stop_ramp_ts: token_swap.stop_ramp_ts,
-            future_admin_deadline: token_swap.future_admin_deadline,
-            future_admin_key: token_swap.future_admin_key,
-            admin_key: token_swap.admin_key,
             token_a: token_swap.token_a,
             token_b: token_swap.token_b,
             pool_mint: token_swap.pool_mint,
@@ -1314,9 +1292,6 @@ impl Processor {
             target_amp_factor: token_swap.target_amp_factor,
             start_ramp_ts: token_swap.start_ramp_ts,
             stop_ramp_ts: token_swap.stop_ramp_ts,
-            future_admin_deadline: token_swap.future_admin_deadline,
-            future_admin_key: token_swap.future_admin_key,
-            admin_key: token_swap.admin_key,
             token_a: token_swap.token_a,
             token_b: token_swap.token_b,
             pool_mint: token_swap.pool_mint,
@@ -1404,9 +1379,6 @@ impl Processor {
             target_amp_factor: token_swap.target_amp_factor,
             start_ramp_ts: token_swap.start_ramp_ts,
             stop_ramp_ts: token_swap.stop_ramp_ts,
-            future_admin_deadline: token_swap.future_admin_deadline,
-            future_admin_key: token_swap.future_admin_key,
-            admin_key: token_swap.admin_key,
             token_a: token_swap.token_a,
             token_b: token_swap.token_b,
             pool_mint: token_swap.pool_mint,
@@ -1760,9 +1732,6 @@ impl Processor {
             target_amp_factor: token_swap.target_amp_factor,
             start_ramp_ts: token_swap.start_ramp_ts,
             stop_ramp_ts: token_swap.stop_ramp_ts,
-            future_admin_deadline: token_swap.future_admin_deadline,
-            future_admin_key: token_swap.future_admin_key,
-            admin_key: token_swap.admin_key,
             token_a: token_swap.token_a,
             token_b: token_swap.token_b,
             pool_mint: token_swap.pool_mint,
@@ -1957,9 +1926,6 @@ impl Processor {
             target_amp_factor: token_swap.target_amp_factor,
             start_ramp_ts: token_swap.start_ramp_ts,
             stop_ramp_ts: token_swap.stop_ramp_ts,
-            future_admin_deadline: token_swap.future_admin_deadline,
-            future_admin_key: token_swap.future_admin_key,
-            admin_key: token_swap.admin_key,
             token_a: token_swap.token_a,
             token_b: token_swap.token_b,
             pool_mint: token_swap.pool_mint,
@@ -2136,9 +2102,6 @@ impl Processor {
             target_amp_factor: token_swap.target_amp_factor,
             start_ramp_ts: token_swap.start_ramp_ts,
             stop_ramp_ts: token_swap.stop_ramp_ts,
-            future_admin_deadline: token_swap.future_admin_deadline,
-            future_admin_key: token_swap.future_admin_key,
-            admin_key: token_swap.admin_key,
             token_a: token_swap.token_a,
             token_b: token_swap.token_b,
             pool_mint: token_swap.pool_mint,
@@ -2798,28 +2761,18 @@ impl Processor {
 
     /// Processes an [Instruction](enum.Instruction.html).
     pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], input: &[u8]) -> ProgramResult {
-        let instruction = AdminInstruction::unpack(input)?;
-        match instruction {
-            None => {
-                let result = SwapInstruction::unpack(input)?;
-                match result {
-                    Some(instruction) => {
-                        Self::process_swap_instruction(&instruction, program_id, accounts)
-                    }
-                    None => {
-                        let sub_instruction = StableInstruction::unpack(input)?;
-                        match sub_instruction {
-                            None => Self::process_farming_instruction(program_id, accounts, input),
-                            Some(_stable_instruction) => {
-                                Self::process_stable_instruction(program_id, accounts, input)
-                            }
-                        }
-                    }
-                }
+        match InstructionType::check(input) {
+            Some(InstructionType::Admin) => process_admin_instruction(program_id, accounts, input),
+            Some(InstructionType::Swap) => {
+                Self::process_swap_instruction(program_id, accounts, input)
             }
-            Some(admin_instruction) => {
-                process_admin_instruction(&admin_instruction, program_id, accounts)
+            Some(InstructionType::StableSwap) => {
+                Self::process_stable_instruction(program_id, accounts, input)
             }
+            Some(InstructionType::Farm) => {
+                Self::process_farming_instruction(program_id, accounts, input)
+            }
+            _ => Err(ProgramError::InvalidInstructionData),
         }
     }
 
@@ -2832,25 +2785,12 @@ impl Processor {
         match instruction {
             StableInstruction::StableInitialize(InitializeData {
                 nonce,
-                amp_factor,
-                fees,
-                rewards,
                 k,
                 i,
                 is_open_twap,
             }) => {
                 msg!("StableInstruction: Init");
-                Self::process_stable_initialize(
-                    program_id,
-                    nonce,
-                    amp_factor,
-                    fees,
-                    rewards,
-                    k,
-                    i,
-                    is_open_twap,
-                    accounts,
-                )
+                Self::process_stable_initialize(program_id, nonce, k, i, is_open_twap, accounts)
             }
             StableInstruction::StableSwap(SwapData {
                 amount_in,
@@ -2924,33 +2864,20 @@ impl Processor {
     }
 
     fn process_swap_instruction(
-        instruction: &SwapInstruction,
         program_id: &Pubkey,
         accounts: &[AccountInfo],
+        input: &[u8],
     ) -> ProgramResult {
-        // let instruction = SwapInstruction::unpack(input)?;
-        match *instruction {
+        let instruction = SwapInstruction::unpack(input)?.ok_or(ProgramError::InvalidArgument)?;
+        match instruction {
             SwapInstruction::Initialize(InitializeData {
                 nonce,
-                amp_factor,
-                fees,
-                rewards,
                 k,
                 i,
                 is_open_twap,
             }) => {
                 msg!("Instruction: Init");
-                Self::process_initialize(
-                    program_id,
-                    nonce,
-                    amp_factor,
-                    fees,
-                    rewards,
-                    k,
-                    i,
-                    is_open_twap,
-                    accounts,
-                )
+                Self::process_initialize(program_id, nonce, k, i, is_open_twap, accounts)
             }
             SwapInstruction::Swap(SwapData {
                 amount_in,
@@ -3139,10 +3066,13 @@ mod tests {
 
     use super::*;
     use crate::{
+        curve::MIN_AMP,
+        fees::Fees,
         instruction::{
             deposit, farm_deposit, farm_emergency_withdraw, farm_withdraw, swap, withdraw,
             withdraw_one,
         },
+        rewards::Rewards,
         utils::{
             test_utils::*, DEFAULT_BASE_POINT, DEFAULT_TOKEN_DECIMALS, SWAP_DIRECTION_SELL_BASE,
             SWAP_DIRECTION_SELL_QUOTE,
@@ -3191,8 +3121,12 @@ mod tests {
         let token_a_amount = 1000;
         let token_b_amount = 2000;
         let pool_token_amount = 10;
+        let mut config_account =
+            ConfigAccountInfo::new(amp_factor, DEFAULT_TEST_FEES, DEFAULT_TEST_REWARDS);
+        config_account.initialize().unwrap();
         let mut accounts = SwapAccountInfo::new(
             &user_key,
+            &config_account,
             amp_factor,
             token_a_amount,
             token_b_amount,
@@ -3212,24 +3146,6 @@ mod tests {
                 accounts.initialize_stable_swap()
             );
             accounts.nonce = old_nonce;
-        }
-
-        // invalid amp factors
-        {
-            let old_initial_amp_factor = accounts.initial_amp_factor;
-            accounts.initial_amp_factor = MIN_AMP - 1;
-            // amp factor too low
-            assert_eq!(
-                Err(SwapError::InvalidInput.into()),
-                accounts.initialize_stable_swap()
-            );
-            accounts.initial_amp_factor = MAX_AMP + 1;
-            // amp factor too high
-            assert_eq!(
-                Err(SwapError::InvalidInput.into()),
-                accounts.initialize_stable_swap()
-            );
-            accounts.initial_amp_factor = old_initial_amp_factor;
         }
 
         // uninitialized token a account
@@ -3813,9 +3729,6 @@ mod tests {
         assert_eq!(swap_info.target_amp_factor, amp_factor);
         assert_eq!(swap_info.start_ramp_ts, ZERO_TS);
         assert_eq!(swap_info.stop_ramp_ts, ZERO_TS);
-        assert_eq!(swap_info.future_admin_deadline, ZERO_TS);
-        assert_eq!(swap_info.future_admin_key, Pubkey::default());
-        assert_eq!(swap_info.admin_key, accounts.admin_key);
         assert_eq!(swap_info.token_a, accounts.token_a_key);
         assert_eq!(swap_info.token_b, accounts.token_b_key);
         assert_eq!(swap_info.pool_mint, accounts.pool_mint_key);
@@ -3844,8 +3757,13 @@ mod tests {
         let token_a_amount = 1000;
         let token_b_amount = 2000;
         let pool_token_amount = 10;
+        let mut config_account =
+            ConfigAccountInfo::new(amp_factor, DEFAULT_TEST_FEES, DEFAULT_TEST_REWARDS);
+        config_account.initialize().unwrap();
+
         let mut accounts = SwapAccountInfo::new(
             &user_key,
+            &config_account,
             amp_factor,
             token_a_amount,
             token_b_amount,
@@ -3865,24 +3783,6 @@ mod tests {
                 accounts.initialize_swap()
             );
             accounts.nonce = old_nonce;
-        }
-
-        // invalid amp factors
-        {
-            let old_initial_amp_factor = accounts.initial_amp_factor;
-            accounts.initial_amp_factor = MIN_AMP - 1;
-            // amp factor too low
-            assert_eq!(
-                Err(SwapError::InvalidInput.into()),
-                accounts.initialize_swap()
-            );
-            accounts.initial_amp_factor = MAX_AMP + 1;
-            // amp factor too high
-            assert_eq!(
-                Err(SwapError::InvalidInput.into()),
-                accounts.initialize_swap()
-            );
-            accounts.initial_amp_factor = old_initial_amp_factor;
         }
 
         // uninitialized token a account
@@ -4466,9 +4366,6 @@ mod tests {
         assert_eq!(swap_info.target_amp_factor, amp_factor);
         assert_eq!(swap_info.start_ramp_ts, ZERO_TS);
         assert_eq!(swap_info.stop_ramp_ts, ZERO_TS);
-        assert_eq!(swap_info.future_admin_deadline, ZERO_TS);
-        assert_eq!(swap_info.future_admin_key, Pubkey::default());
-        assert_eq!(swap_info.admin_key, accounts.admin_key);
         assert_eq!(swap_info.token_a, accounts.token_a_key);
         assert_eq!(swap_info.token_b, accounts.token_b_key);
         assert_eq!(swap_info.pool_mint, accounts.pool_mint_key);
@@ -4497,8 +4394,12 @@ mod tests {
         let amp_factor = MIN_AMP;
         let token_a_amount = 100;
         let token_b_amount = 10000;
+        let mut config_account =
+            ConfigAccountInfo::new(amp_factor, DEFAULT_TEST_FEES, DEFAULT_TEST_REWARDS);
+        config_account.initialize().unwrap();
         let mut accounts = SwapAccountInfo::new(
             &user_key,
+            &config_account,
             amp_factor,
             token_a_amount,
             token_b_amount,
@@ -5015,8 +4916,12 @@ mod tests {
         let amp_factor = MIN_AMP;
         let token_a_amount = 100;
         let token_b_amount = 10000;
+        let mut config_account =
+            ConfigAccountInfo::new(amp_factor, DEFAULT_TEST_FEES, DEFAULT_TEST_REWARDS);
+        config_account.initialize().unwrap();
         let mut accounts = SwapAccountInfo::new(
             &user_key,
+            &config_account,
             amp_factor,
             token_a_amount,
             token_b_amount,
@@ -5532,8 +5437,12 @@ mod tests {
         let amp_factor = MIN_AMP;
         let token_a_amount = 1000;
         let token_b_amount = 2000;
+        let mut config_account =
+            ConfigAccountInfo::new(amp_factor, DEFAULT_TEST_FEES, DEFAULT_TEST_REWARDS);
+        config_account.initialize().unwrap();
         let mut accounts = SwapAccountInfo::new(
             &user_key,
+            &config_account,
             amp_factor,
             token_a_amount,
             token_b_amount,
@@ -6182,8 +6091,12 @@ mod tests {
             trade_reward_cap: 100,
         };
 
+        let mut config_account = ConfigAccountInfo::new(amp_factor, swap_fees, swap_rewards);
+        config_account.initialize().unwrap();
+
         let mut accounts = SwapAccountInfo::new(
             &user_key,
+            &config_account,
             amp_factor,
             token_a_amount.inner_u64().unwrap(),
             token_b_amount.inner_u64().unwrap(),
@@ -6414,8 +6327,12 @@ mod tests {
             trade_reward_cap: 100,
         };
 
+        let mut config_account = ConfigAccountInfo::new(amp_factor, swap_fees, swap_rewards);
+        config_account.initialize().unwrap();
+
         let mut accounts = SwapAccountInfo::new(
             &user_key,
+            &config_account,
             amp_factor,
             token_a_amount.inner_u64().unwrap(),
             token_b_amount.inner_u64().unwrap(),
@@ -6528,8 +6445,13 @@ mod tests {
             trade_reward_cap: 100,
         };
 
+        let mut config_account =
+            ConfigAccountInfo::new(amp_factor, DEFAULT_TEST_FEES, DEFAULT_TEST_REWARDS);
+        config_account.initialize().unwrap();
+
         let mut accounts = SwapAccountInfo::new(
             &user_key,
+            &config_account,
             amp_factor,
             token_a_amount.inner_u64().unwrap(),
             token_b_amount.inner_u64().unwrap(),
@@ -6613,7 +6535,7 @@ mod tests {
             .unwrap();
 
         let swap_info = SwapInfo::unpack(&accounts.swap_account.data).unwrap();
-        assert_eq!(swap_info.base_balance.into_u64_ceil().unwrap(), 911);
+        assert_eq!(swap_info.base_balance.into_u64_ceil().unwrap(), 913);
         assert_eq!(swap_info.quote_balance.into_u64_ceil().unwrap(), 1100);
     }
 
@@ -6649,8 +6571,12 @@ mod tests {
             trade_reward_cap: 100,
         };
 
+        let mut config_account = ConfigAccountInfo::new(amp_factor, swap_fees, swap_rewards);
+        config_account.initialize().unwrap();
+
         let mut accounts = SwapAccountInfo::new(
             &user_key,
+            &config_account,
             amp_factor,
             token_a_amount.inner_u64().unwrap(),
             token_b_amount.inner_u64().unwrap(),
@@ -6853,8 +6779,12 @@ mod tests {
         let amp_factor = 85;
         let token_a_amount = 100;
         let token_b_amount = 10000;
+        let mut config_account =
+            ConfigAccountInfo::new(amp_factor, DEFAULT_TEST_FEES, DEFAULT_TEST_REWARDS);
+        config_account.initialize().unwrap();
         let mut accounts = SwapAccountInfo::new(
             &user_key,
+            &config_account,
             amp_factor,
             token_a_amount,
             token_b_amount,
@@ -7270,8 +7200,12 @@ mod tests {
         let amp_factor = 85;
         let token_a_amount = 100;
         let token_b_amount = 10000;
+        let mut config_account =
+            ConfigAccountInfo::new(amp_factor, DEFAULT_TEST_FEES, DEFAULT_TEST_REWARDS);
+        config_account.initialize().unwrap();
         let mut accounts = SwapAccountInfo::new(
             &user_key,
+            &config_account,
             amp_factor,
             token_a_amount,
             token_b_amount,
@@ -7686,8 +7620,12 @@ mod tests {
         let amp_factor = MIN_AMP;
         let token_a_amount = 1000;
         let token_b_amount = 1000;
+        let mut config_account =
+            ConfigAccountInfo::new(amp_factor, DEFAULT_TEST_FEES, DEFAULT_TEST_REWARDS);
+        config_account.initialize().unwrap();
         let mut accounts = SwapAccountInfo::new(
             &user_key,
+            &config_account,
             amp_factor,
             token_a_amount,
             token_b_amount,

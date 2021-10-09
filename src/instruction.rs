@@ -14,6 +14,33 @@ use solana_program::{
 
 use crate::{error::SwapError, fees::Fees, rewards::Rewards};
 
+/// Instruction Type
+#[repr(C)]
+pub enum InstructionType {
+    /// Admin
+    Admin,
+    /// Swap
+    Swap,
+    /// Stable Swap
+    StableSwap,
+    /// Farm
+    Farm,
+}
+
+impl InstructionType {
+    #[doc(hidden)]
+    pub fn check(input: &[u8]) -> Option<Self> {
+        let (&tag, _rest) = input.split_first()?;
+        match tag {
+            0x63u8..=0x6Fu8 => Some(Self::Admin),
+            0u8..=6u8 => Some(Self::Swap),
+            10u8..=15u8 => Some(Self::StableSwap),
+            0x1Eu8..=0x22u8 => Some(Self::Farm),
+            _ => None,
+        }
+    }
+}
+
 /// SWAP INSTRUNCTION DATA
 /// Initialize instruction data
 #[repr(C)]
@@ -21,12 +48,6 @@ use crate::{error::SwapError, fees::Fees, rewards::Rewards};
 pub struct InitializeData {
     /// Nonce used to create valid program address
     pub nonce: u8,
-    /// Amplification coefficient (A)
-    pub amp_factor: u64,
-    /// Fees
-    pub fees: Fees,
-    /// Rewards
-    pub rewards: Rewards,
     /// Slope variable - real value * 10**6
     pub k: u64,
     /// mid price 0 ~ 10**6
@@ -84,6 +105,17 @@ pub struct WithdrawOneData {
 }
 
 /// ADMIN INSTRUCTION DATA
+/// Admin initialize config data
+#[repr(C)]
+#[derive(Clone, Debug, PartialEq)]
+pub struct AdminInitializeData {
+    /// Default amp coefficient
+    pub amp_factor: u64,
+    /// Default fees
+    pub fees: Fees,
+    /// Default rewards
+    pub rewards: Rewards,
+}
 /// RampA instruction data
 #[repr(C)]
 #[derive(Clone, Debug, PartialEq)]
@@ -131,6 +163,8 @@ pub struct FarmingDepositData {
 #[repr(C)]
 #[derive(Debug, PartialEq)]
 pub enum AdminInstruction {
+    /// Admin initialization instruction
+    Initialize(AdminInitializeData),
     /// TODO: Docs
     RampA(RampAData),
     /// TODO: Docs
@@ -159,53 +193,65 @@ pub enum AdminInstruction {
 
 impl AdminInstruction {
     /// Unpacks a byte buffer into a [AdminInstruction](enum.AdminInstruction.html).
-    pub fn unpack(input: &[u8]) -> Result<Option<Self>, ProgramError> {
+    pub fn unpack(input: &[u8]) -> Result<Self, ProgramError> {
         let (&tag, rest) = input.split_first().ok_or(SwapError::InvalidInstruction)?;
         Ok(match tag {
+            0x63 => {
+                let (amp_factor, rest) = unpack_u64(rest)?;
+                let (fees, rest) = rest.split_at(Fees::LEN);
+                let fees = Fees::unpack_unchecked(fees)?;
+                let (rewards, _rest) = rest.split_at(Rewards::LEN);
+                let rewards = Rewards::unpack_unchecked(rewards)?;
+                Self::Initialize(AdminInitializeData {
+                    amp_factor,
+                    fees,
+                    rewards,
+                })
+            }
             0x64 => {
                 let (target_amp, rest) = unpack_u64(rest)?;
                 let (stop_ramp_ts, _rest) = unpack_i64(rest)?;
-                Some(Self::RampA(RampAData {
+                Self::RampA(RampAData {
                     target_amp,
                     stop_ramp_ts,
-                }))
+                })
             }
-            0x65 => Some(Self::StopRampA),
-            0x66 => Some(Self::Pause),
-            0x67 => Some(Self::Unpause),
-            0x68 => Some(Self::SetFeeAccount),
-            0x69 => Some(Self::ApplyNewAdmin),
-            0x6A => Some(Self::CommitNewAdmin),
+            0x65 => Self::StopRampA,
+            0x66 => Self::Pause,
+            0x67 => Self::Unpause,
+            0x68 => Self::SetFeeAccount,
+            0x69 => Self::ApplyNewAdmin,
+            0x6A => Self::CommitNewAdmin,
             0x6B => {
                 let fees = Fees::unpack_unchecked(rest)?;
-                Some(Self::SetNewFees(fees))
+                Self::SetNewFees(fees)
             }
             0x6C => {
                 let (&nonce, rest) = rest.split_first().ok_or(SwapError::InvalidInstruction)?;
                 let (alloc_point, rest) = unpack_u64(rest)?;
                 let (reward_unit, _rest) = unpack_u64(rest)?;
-                Some(Self::InitializeFarm(FarmData {
+                Self::InitializeFarm(FarmData {
                     nonce,
                     alloc_point,
                     reward_unit,
-                }))
+                })
             }
             0x6D => {
                 let (&nonce, rest) = rest.split_first().ok_or(SwapError::InvalidInstruction)?;
                 let (alloc_point, rest) = unpack_u64(rest)?;
                 let (reward_unit, _rest) = unpack_u64(rest)?;
-                Some(Self::SetFarm(FarmData {
+                Self::SetFarm(FarmData {
                     nonce,
                     alloc_point,
                     reward_unit,
-                }))
+                })
             }
-            0x6E => Some(Self::ApplyNewAdminForFarm),
+            0x6E => Self::ApplyNewAdminForFarm,
             0x6F => {
                 let rewards = Rewards::unpack_unchecked(rest)?;
-                Some(Self::SetNewRewards(rewards))
+                Self::SetNewRewards(rewards)
             }
-            _ => None,
+            _ => return Err(SwapError::InvalidInstruction.into()),
         })
     }
 
@@ -213,6 +259,20 @@ impl AdminInstruction {
     pub fn pack(&self) -> Vec<u8> {
         let mut buf = Vec::with_capacity(size_of::<Self>());
         match *self {
+            Self::Initialize(AdminInitializeData {
+                amp_factor,
+                fees,
+                rewards,
+            }) => {
+                buf.push(0x63);
+                buf.extend_from_slice(&amp_factor.to_le_bytes());
+                let mut fees_slice = [0u8; Fees::LEN];
+                Pack::pack_into_slice(&fees, &mut fees_slice[..]);
+                buf.extend_from_slice(&fees_slice);
+                let mut rewards_slice = [0u8; Rewards::LEN];
+                Pack::pack_into_slice(&rewards, &mut rewards_slice[..]);
+                buf.extend_from_slice(&rewards_slice);
+            }
             Self::RampA(RampAData {
                 target_amp,
                 stop_ramp_ts,
@@ -265,11 +325,43 @@ impl AdminInstruction {
     }
 }
 
+/// Creates an 'initialize' instruction
+pub fn initialize_config(
+    program_id: &Pubkey,
+    config_key: &Pubkey,
+    authority_key: &Pubkey,
+    admin_key: &Pubkey,
+    deltafi_mint_key: &Pubkey,
+    amp_factor: u64,
+    fees: Fees,
+    rewards: Rewards,
+) -> Result<Instruction, ProgramError> {
+    let data = AdminInstruction::Initialize(AdminInitializeData {
+        amp_factor,
+        fees,
+        rewards,
+    })
+    .pack();
+
+    let accounts = vec![
+        AccountMeta::new_readonly(*config_key, true),
+        AccountMeta::new_readonly(*authority_key, false),
+        AccountMeta::new_readonly(*admin_key, true),
+        AccountMeta::new_readonly(*deltafi_mint_key, false),
+    ];
+
+    Ok(Instruction {
+        program_id: *program_id,
+        accounts,
+        data,
+    })
+}
+
 /// Creates a 'ramp_a' instruction
 pub fn ramp_a(
     program_id: &Pubkey,
+    config_pubkey: &Pubkey,
     swap_pubkey: &Pubkey,
-    authority_pubkey: &Pubkey,
     admin_pubkey: &Pubkey,
     target_amp: u64,
     stop_ramp_ts: i64,
@@ -281,10 +373,10 @@ pub fn ramp_a(
     .pack();
 
     let accounts = vec![
-        AccountMeta::new(*swap_pubkey, true),
-        AccountMeta::new(*authority_pubkey, false),
-        AccountMeta::new(*admin_pubkey, true),
-        AccountMeta::new(clock::id(), false),
+        AccountMeta::new_readonly(*config_pubkey, true),
+        AccountMeta::new_readonly(*swap_pubkey, true),
+        AccountMeta::new_readonly(*admin_pubkey, true),
+        AccountMeta::new_readonly(clock::id(), false),
     ];
 
     Ok(Instruction {
@@ -297,17 +389,17 @@ pub fn ramp_a(
 /// Creates a 'stop_ramp_a' instruction
 pub fn stop_ramp_a(
     program_id: &Pubkey,
+    config_pubkey: &Pubkey,
     swap_pubkey: &Pubkey,
-    authority_pubkey: &Pubkey,
     admin_pubkey: &Pubkey,
 ) -> Result<Instruction, ProgramError> {
     let data = AdminInstruction::StopRampA.pack();
 
     let accounts = vec![
-        AccountMeta::new(*swap_pubkey, true),
-        AccountMeta::new(*authority_pubkey, false),
-        AccountMeta::new(*admin_pubkey, true),
-        AccountMeta::new(clock::id(), false),
+        AccountMeta::new_readonly(*config_pubkey, true),
+        AccountMeta::new_readonly(*swap_pubkey, true),
+        AccountMeta::new_readonly(*admin_pubkey, true),
+        AccountMeta::new_readonly(clock::id(), false),
     ];
 
     Ok(Instruction {
@@ -320,16 +412,16 @@ pub fn stop_ramp_a(
 /// Creates a 'pause' instruction
 pub fn pause(
     program_id: &Pubkey,
+    config_pubkey: &Pubkey,
     swap_pubkey: &Pubkey,
-    authority_pubkey: &Pubkey,
     admin_pubkey: &Pubkey,
 ) -> Result<Instruction, ProgramError> {
     let data = AdminInstruction::Pause.pack();
 
     let accounts = vec![
-        AccountMeta::new(*swap_pubkey, true),
-        AccountMeta::new(*authority_pubkey, false),
-        AccountMeta::new(*admin_pubkey, true),
+        AccountMeta::new_readonly(*config_pubkey, true),
+        AccountMeta::new_readonly(*swap_pubkey, true),
+        AccountMeta::new_readonly(*admin_pubkey, true),
     ];
 
     Ok(Instruction {
@@ -342,16 +434,16 @@ pub fn pause(
 /// Creates a 'unpause' instruction
 pub fn unpause(
     program_id: &Pubkey,
+    config_pubkey: &Pubkey,
     swap_pubkey: &Pubkey,
-    authority_pubkey: &Pubkey,
     admin_pubkey: &Pubkey,
 ) -> Result<Instruction, ProgramError> {
     let data = AdminInstruction::Unpause.pack();
 
     let accounts = vec![
-        AccountMeta::new(*swap_pubkey, true),
-        AccountMeta::new(*authority_pubkey, false),
-        AccountMeta::new(*admin_pubkey, true),
+        AccountMeta::new_readonly(*config_pubkey, true),
+        AccountMeta::new_readonly(*swap_pubkey, true),
+        AccountMeta::new_readonly(*admin_pubkey, true),
     ];
 
     Ok(Instruction {
@@ -364,17 +456,15 @@ pub fn unpause(
 /// Creates a 'apply_new_admin' instruction
 pub fn apply_new_admin(
     program_id: &Pubkey,
-    swap_pubkey: &Pubkey,
-    authority_pubkey: &Pubkey,
+    config_pubkey: &Pubkey,
     admin_pubkey: &Pubkey,
 ) -> Result<Instruction, ProgramError> {
     let data = AdminInstruction::ApplyNewAdmin.pack();
 
     let accounts = vec![
-        AccountMeta::new(*swap_pubkey, true),
-        AccountMeta::new(*authority_pubkey, false),
-        AccountMeta::new(*admin_pubkey, true),
-        AccountMeta::new(clock::id(), false),
+        AccountMeta::new_readonly(*config_pubkey, true),
+        AccountMeta::new_readonly(*admin_pubkey, true),
+        AccountMeta::new_readonly(clock::id(), false),
     ];
 
     Ok(Instruction {
@@ -410,19 +500,17 @@ pub fn apply_new_admin_for_farm(
 /// Creates a 'commit_new_admin' instruction
 pub fn commit_new_admin(
     program_id: &Pubkey,
-    swap_pubkey: &Pubkey,
-    authority_pubkey: &Pubkey,
+    config_pubkey: &Pubkey,
     admin_pubkey: &Pubkey,
     new_admin_pubkey: &Pubkey,
 ) -> Result<Instruction, ProgramError> {
     let data = AdminInstruction::CommitNewAdmin.pack();
 
     let accounts = vec![
-        AccountMeta::new(*swap_pubkey, true),
-        AccountMeta::new(*authority_pubkey, false),
-        AccountMeta::new(*admin_pubkey, true),
-        AccountMeta::new(*new_admin_pubkey, false),
-        AccountMeta::new(clock::id(), false),
+        AccountMeta::new_readonly(*config_pubkey, true),
+        AccountMeta::new_readonly(*admin_pubkey, true),
+        AccountMeta::new_readonly(*new_admin_pubkey, false),
+        AccountMeta::new_readonly(clock::id(), false),
     ];
 
     Ok(Instruction {
@@ -435,6 +523,7 @@ pub fn commit_new_admin(
 /// Creates a 'set_fee_account' instruction
 pub fn set_fee_account(
     program_id: &Pubkey,
+    config_pubkey: &Pubkey,
     swap_pubkey: &Pubkey,
     authority_pubkey: &Pubkey,
     admin_pubkey: &Pubkey,
@@ -443,10 +532,11 @@ pub fn set_fee_account(
     let data = AdminInstruction::SetFeeAccount.pack();
 
     let accounts = vec![
-        AccountMeta::new(*swap_pubkey, true),
-        AccountMeta::new(*authority_pubkey, false),
-        AccountMeta::new(*admin_pubkey, true),
-        AccountMeta::new(*new_fee_account_pubkey, false),
+        AccountMeta::new_readonly(*config_pubkey, true),
+        AccountMeta::new_readonly(*swap_pubkey, true),
+        AccountMeta::new_readonly(*authority_pubkey, false),
+        AccountMeta::new_readonly(*admin_pubkey, true),
+        AccountMeta::new_readonly(*new_fee_account_pubkey, false),
     ];
 
     Ok(Instruction {
@@ -459,17 +549,17 @@ pub fn set_fee_account(
 /// Creates a 'set_new_fees' instruction
 pub fn set_new_fees(
     program_id: &Pubkey,
+    config_pubkey: &Pubkey,
     swap_pubkey: &Pubkey,
-    authority_pubkey: &Pubkey,
     admin_pubkey: &Pubkey,
     new_fees: Fees,
 ) -> Result<Instruction, ProgramError> {
     let data = AdminInstruction::SetNewFees(new_fees).pack();
 
     let accounts = vec![
-        AccountMeta::new(*swap_pubkey, true),
-        AccountMeta::new(*authority_pubkey, false),
-        AccountMeta::new(*admin_pubkey, true),
+        AccountMeta::new_readonly(*config_pubkey, false),
+        AccountMeta::new_readonly(*swap_pubkey, true),
+        AccountMeta::new_readonly(*admin_pubkey, true),
     ];
 
     Ok(Instruction {
@@ -482,17 +572,17 @@ pub fn set_new_fees(
 /// Creates a 'set_rewards' instruction.
 pub fn set_rewards(
     program_id: &Pubkey,
+    config_pubkey: &Pubkey,
     swap_pubkey: &Pubkey,
-    authority_pubkey: &Pubkey,
     admin_pubkey: &Pubkey,
     new_rewards: Rewards,
 ) -> Result<Instruction, ProgramError> {
     let data = AdminInstruction::SetNewRewards(new_rewards).pack();
 
     let accounts = vec![
-        AccountMeta::new(*swap_pubkey, true),
-        AccountMeta::new(*authority_pubkey, false),
-        AccountMeta::new(*admin_pubkey, true),
+        AccountMeta::new_readonly(*config_pubkey, true),
+        AccountMeta::new_readonly(*swap_pubkey, true),
+        AccountMeta::new_readonly(*admin_pubkey, true),
     ];
 
     Ok(Instruction {
@@ -665,19 +755,11 @@ impl StableInstruction {
         Ok(match tag {
             10 => {
                 let (&nonce, rest) = rest.split_first().ok_or(SwapError::InvalidInstruction)?;
-                let (amp_factor, rest) = unpack_u64(rest)?;
-                let (fees, rest) = rest.split_at(Fees::LEN);
-                let fees = Fees::unpack_unchecked(fees)?;
-                let (rewards, rest) = rest.split_at(Rewards::LEN);
-                let rewards = Rewards::unpack_unchecked(rewards)?;
                 let (k, rest) = unpack_u64(rest)?;
                 let (i, rest) = unpack_u64(rest)?;
                 let (is_open_twap, _rest) = unpack_u64(rest)?;
                 Some(Self::StableInitialize(InitializeData {
                     nonce,
-                    amp_factor,
-                    fees,
-                    rewards,
                     k,
                     i,
                     is_open_twap,
@@ -741,22 +823,12 @@ impl StableInstruction {
         match *self {
             Self::StableInitialize(InitializeData {
                 nonce,
-                amp_factor,
-                fees,
-                rewards,
                 k,
                 i,
                 is_open_twap,
             }) => {
                 buf.push(10);
                 buf.push(nonce);
-                buf.extend_from_slice(&amp_factor.to_le_bytes());
-                let mut fees_slice = [0u8; Fees::LEN];
-                Pack::pack_into_slice(&fees, &mut fees_slice[..]);
-                buf.extend_from_slice(&fees_slice);
-                let mut rewards_slice = [0u8; Rewards::LEN];
-                Pack::pack_into_slice(&rewards, &mut rewards_slice[..]);
-                buf.extend_from_slice(&rewards_slice);
                 buf.extend_from_slice(&k.to_le_bytes());
                 buf.extend_from_slice(&i.to_le_bytes());
                 buf.extend_from_slice(&is_open_twap.to_le_bytes());
@@ -920,19 +992,11 @@ impl SwapInstruction {
         Ok(match tag {
             0x0 => {
                 let (&nonce, rest) = rest.split_first().ok_or(SwapError::InvalidInstruction)?;
-                let (amp_factor, rest) = unpack_u64(rest)?;
-                let (fees, rest) = rest.split_at(Fees::LEN);
-                let fees = Fees::unpack_unchecked(fees)?;
-                let (rewards, rest) = rest.split_at(Rewards::LEN);
-                let rewards = Rewards::unpack_unchecked(rewards)?;
                 let (k, rest) = unpack_u64(rest)?;
                 let (i, rest) = unpack_u64(rest)?;
                 let (is_open_twap, _rest) = unpack_u64(rest)?;
                 Some(Self::Initialize(InitializeData {
                     nonce,
-                    amp_factor,
-                    fees,
-                    rewards,
                     k,
                     i,
                     is_open_twap,
@@ -997,22 +1061,12 @@ impl SwapInstruction {
         match *self {
             Self::Initialize(InitializeData {
                 nonce,
-                amp_factor,
-                fees,
-                rewards,
                 k,
                 i,
                 is_open_twap,
             }) => {
                 buf.push(0x0);
                 buf.push(nonce);
-                buf.extend_from_slice(&amp_factor.to_le_bytes());
-                let mut fees_slice = [0u8; Fees::LEN];
-                Pack::pack_into_slice(&fees, &mut fees_slice[..]);
-                buf.extend_from_slice(&fees_slice);
-                let mut rewards_slice = [0u8; Rewards::LEN];
-                Pack::pack_into_slice(&rewards, &mut rewards_slice[..]);
-                buf.extend_from_slice(&rewards_slice);
                 buf.extend_from_slice(&k.to_le_bytes());
                 buf.extend_from_slice(&i.to_le_bytes());
                 buf.extend_from_slice(&is_open_twap.to_le_bytes());
@@ -1076,10 +1130,10 @@ impl SwapInstruction {
 /// Creates an 'stable_initialize' instruction.
 pub fn stable_initialize(
     program_id: &Pubkey,
-    pool_token_program_id: &Pubkey, // Token program used for the pool token
+    token_program_id: &Pubkey, // Token program used for the pool token
+    config_pubkey: &Pubkey,
     swap_pubkey: &Pubkey,
     authority_pubkey: &Pubkey,
-    admin_pubkey: &Pubkey,
     admin_fee_a_pubkey: &Pubkey,
     admin_fee_b_pubkey: &Pubkey,
     token_a_mint_pubkey: &Pubkey,
@@ -1091,18 +1145,12 @@ pub fn stable_initialize(
     deltafi_mint_pubkey: &Pubkey,
     deltafi_token_pubkey: &Pubkey,
     nonce: u8,
-    amp_factor: u64,
-    fees: Fees,
-    rewards: Rewards,
     k: u64,
     i: u64,
     is_open_twap: u64,
 ) -> Result<Instruction, ProgramError> {
     let data = StableInstruction::StableInitialize(InitializeData {
         nonce,
-        amp_factor,
-        fees,
-        rewards,
         k,
         i,
         is_open_twap,
@@ -1110,20 +1158,20 @@ pub fn stable_initialize(
     .pack();
 
     let accounts = vec![
-        AccountMeta::new(*swap_pubkey, true),
-        AccountMeta::new(*authority_pubkey, false),
-        AccountMeta::new(*admin_pubkey, false),
-        AccountMeta::new(*admin_fee_a_pubkey, false),
-        AccountMeta::new(*admin_fee_b_pubkey, false),
-        AccountMeta::new(*token_a_mint_pubkey, false),
-        AccountMeta::new(*token_a_pubkey, false),
-        AccountMeta::new(*token_b_mint_pubkey, false),
-        AccountMeta::new(*token_b_pubkey, false),
+        AccountMeta::new_readonly(*config_pubkey, false),
+        AccountMeta::new_readonly(*swap_pubkey, true),
+        AccountMeta::new_readonly(*authority_pubkey, false),
+        AccountMeta::new_readonly(*admin_fee_a_pubkey, false),
+        AccountMeta::new_readonly(*admin_fee_b_pubkey, false),
+        AccountMeta::new_readonly(*token_a_mint_pubkey, false),
+        AccountMeta::new_readonly(*token_a_pubkey, false),
+        AccountMeta::new_readonly(*token_b_mint_pubkey, false),
+        AccountMeta::new_readonly(*token_b_pubkey, false),
         AccountMeta::new(*pool_mint_pubkey, false),
         AccountMeta::new(*destination_pubkey, false),
-        AccountMeta::new(*deltafi_mint_pubkey, false),
-        AccountMeta::new(*deltafi_token_pubkey, false),
-        AccountMeta::new(*pool_token_program_id, false),
+        AccountMeta::new_readonly(*deltafi_mint_pubkey, false),
+        AccountMeta::new_readonly(*deltafi_token_pubkey, false),
+        AccountMeta::new_readonly(*token_program_id, false),
     ];
 
     Ok(Instruction {
@@ -1136,10 +1184,10 @@ pub fn stable_initialize(
 /// Creates an 'initialize' instruction.
 pub fn initialize(
     program_id: &Pubkey,
-    pool_token_program_id: &Pubkey, // Token program used for the pool token
+    token_program_id: &Pubkey, // Token program used for the pool token
+    config_pubkey: &Pubkey,
     swap_pubkey: &Pubkey,
     authority_pubkey: &Pubkey,
-    admin_pubkey: &Pubkey,
     admin_fee_a_pubkey: &Pubkey,
     admin_fee_b_pubkey: &Pubkey,
     token_a_mint_pubkey: &Pubkey,
@@ -1151,18 +1199,12 @@ pub fn initialize(
     deltafi_mint_pubkey: &Pubkey,
     deltafi_token_pubkey: &Pubkey,
     nonce: u8,
-    amp_factor: u64,
-    fees: Fees,
-    rewards: Rewards,
     k: u64,
     i: u64,
     is_open_twap: u64,
 ) -> Result<Instruction, ProgramError> {
     let data = SwapInstruction::Initialize(InitializeData {
         nonce,
-        amp_factor,
-        fees,
-        rewards,
         k,
         i,
         is_open_twap,
@@ -1170,20 +1212,20 @@ pub fn initialize(
     .pack();
 
     let accounts = vec![
+        AccountMeta::new_readonly(*config_pubkey, false),
         AccountMeta::new_readonly(*swap_pubkey, true),
         AccountMeta::new_readonly(*authority_pubkey, false),
-        AccountMeta::new_readonly(*admin_pubkey, false),
         AccountMeta::new_readonly(*admin_fee_a_pubkey, false),
         AccountMeta::new_readonly(*admin_fee_b_pubkey, false),
         AccountMeta::new_readonly(*token_a_mint_pubkey, false),
         AccountMeta::new_readonly(*token_a_pubkey, false),
         AccountMeta::new_readonly(*token_b_mint_pubkey, false),
         AccountMeta::new_readonly(*token_b_pubkey, false),
-        AccountMeta::new_readonly(*pool_mint_pubkey, false),
+        AccountMeta::new(*pool_mint_pubkey, false),
         AccountMeta::new(*destination_pubkey, false),
         AccountMeta::new_readonly(*deltafi_mint_pubkey, false),
         AccountMeta::new_readonly(*deltafi_token_pubkey, false),
-        AccountMeta::new_readonly(*pool_token_program_id, false),
+        AccountMeta::new_readonly(*token_program_id, false),
     ];
 
     Ok(Instruction {
@@ -1902,8 +1944,7 @@ mod tests {
         assert_eq!(packed, expect);
         let unpacked = AdminInstruction::unpack(&expect).unwrap();
         assert_eq!(
-            unpacked,
-            Some(check),
+            unpacked, check,
             "test packing and unpacking of the admin instruction to RampA"
         );
 
@@ -1913,8 +1954,7 @@ mod tests {
         assert_eq!(packed, expect);
         let unpacked = AdminInstruction::unpack(&expect).unwrap();
         assert_eq!(
-            unpacked,
-            Some(check),
+            unpacked, check,
             "test packing and unpacking of the admin instruction to StopRampA"
         );
 
@@ -1924,8 +1964,7 @@ mod tests {
         assert_eq!(packed, expect);
         let unpacked = AdminInstruction::unpack(&expect).unwrap();
         assert_eq!(
-            unpacked,
-            Some(check),
+            unpacked, check,
             "test packing and unpacking of the admin instruction to Pause"
         );
 
@@ -1935,8 +1974,7 @@ mod tests {
         assert_eq!(packed, expect);
         let unpacked = AdminInstruction::unpack(&expect).unwrap();
         assert_eq!(
-            unpacked,
-            Some(check),
+            unpacked, check,
             "test packing and unpacking of the admin instruction to Unpause"
         );
 
@@ -1945,7 +1983,7 @@ mod tests {
         let expect: Vec<u8> = vec![0x68];
         assert_eq!(packed, expect);
         let unpacked = AdminInstruction::unpack(&expect).unwrap();
-        assert_eq!(unpacked, Some(check));
+        assert_eq!(unpacked, check);
 
         let check = AdminInstruction::ApplyNewAdmin;
         let packed = check.pack();
@@ -1953,8 +1991,7 @@ mod tests {
         assert_eq!(packed, expect);
         let unpacked = AdminInstruction::unpack(&expect).unwrap();
         assert_eq!(
-            unpacked,
-            Some(check),
+            unpacked, check,
             "test packing and unpacking of the admin instruction to ApplyNewAdmin"
         );
 
@@ -1964,8 +2001,7 @@ mod tests {
         assert_eq!(packed, expect);
         let unpacked = AdminInstruction::unpack(&expect).unwrap();
         assert_eq!(
-            unpacked,
-            Some(check),
+            unpacked, check,
             "test packing and unpacking of the admin instruction to CommitNewAdmin"
         );
 
@@ -1987,7 +2023,7 @@ mod tests {
         expect.extend_from_slice(&new_fees_slice);
         assert_eq!(packed, expect);
         let unpacked = AdminInstruction::unpack(&expect).unwrap();
-        assert_eq!(unpacked, Some(check));
+        assert_eq!(unpacked, check);
 
         let new_rewards = Rewards {
             trade_reward_numerator: 1,
@@ -2002,7 +2038,7 @@ mod tests {
         expect.extend_from_slice(&new_rewards_slice);
         assert_eq!(packed, expect);
         let unpacked = AdminInstruction::unpack(&expect).unwrap();
-        assert_eq!(unpacked, Some(check));
+        assert_eq!(unpacked, check);
 
         let nonce: u8 = 255;
         let alloc_point = 10;
@@ -2021,7 +2057,7 @@ mod tests {
             "test packing and unpacking of the admin instruction to InitializeFarm"
         );
         let unpacked = AdminInstruction::unpack(&expect).unwrap();
-        assert_eq!(unpacked, Some(check));
+        assert_eq!(unpacked, check);
 
         let nonce: u8 = 255;
         let alloc_point = 10;
@@ -2040,7 +2076,7 @@ mod tests {
             "test packing and unpacking of the admin instruction to SetFarm"
         );
         let unpacked = AdminInstruction::unpack(&expect).unwrap();
-        assert_eq!(unpacked, Some(check));
+        assert_eq!(unpacked, check);
     }
 
     #[test]
@@ -2048,44 +2084,18 @@ mod tests {
         // Initialize instruction packing
         {
             let nonce: u8 = 255;
-            let amp_factor: u64 = 0;
-            let fees = Fees {
-                admin_trade_fee_numerator: 1,
-                admin_trade_fee_denominator: 2,
-                admin_withdraw_fee_numerator: 3,
-                admin_withdraw_fee_denominator: 4,
-                trade_fee_numerator: 5,
-                trade_fee_denominator: 6,
-                withdraw_fee_numerator: 7,
-                withdraw_fee_denominator: 8,
-            };
-            let rewards = Rewards {
-                trade_reward_numerator: 1,
-                trade_reward_denominator: 2,
-                trade_reward_cap: 100,
-            };
             let k = default_k().inner_u64().unwrap();
             let i = default_i().inner_u64().unwrap();
             let is_open_twap = TWAP_OPENED;
 
             let check = SwapInstruction::Initialize(InitializeData {
                 nonce,
-                amp_factor,
-                fees,
-                rewards,
                 k,
                 i,
                 is_open_twap,
             });
             let packed = check.pack();
             let mut expect: Vec<u8> = vec![0, nonce];
-            expect.extend_from_slice(&amp_factor.to_le_bytes());
-            let mut fees_slice = [0u8; Fees::LEN];
-            fees.pack_into_slice(&mut fees_slice[..]);
-            expect.extend_from_slice(&fees_slice);
-            let mut rewards_slice = [0u8; Rewards::LEN];
-            rewards.pack_into_slice(&mut rewards_slice);
-            expect.extend_from_slice(&rewards_slice);
             expect.extend_from_slice(&k.to_le_bytes());
             expect.extend_from_slice(&i.to_le_bytes());
             expect.extend_from_slice(&is_open_twap.to_le_bytes());
