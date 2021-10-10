@@ -1,7 +1,6 @@
-use pyo3::prelude::*;
-use pyo3::types::PyTuple;
-use std::fs::File;
-use std::io::prelude::*;
+use std::{fs::File, io::prelude::*};
+
+use pyo3::{prelude::*, types::PyTuple};
 
 pub const MODEL_FEE_NUMERATOR: u64 = 10000000;
 pub const MODEL_FEE_DENOMINATOR: u64 = 10000000000;

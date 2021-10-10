@@ -1020,7 +1020,6 @@ mod tests {
         let amp_factor = MIN_AMP * 100;
         let mut accounts =
             ConfigAccountInfo::new(amp_factor, DEFAULT_TEST_FEES, DEFAULT_TEST_REWARDS);
-
         // swap not initialized
         {
             assert_eq!(

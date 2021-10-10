@@ -51,7 +51,7 @@ pub mod test_utils {
 
     use super::*;
     use crate::{
-        bn::FixedU256,
+        bn::FixedU64,
         curve::ZERO_TS,
         fees::Fees,
         instruction::*,
@@ -85,17 +85,17 @@ pub mod test_utils {
     };
 
     /// Slope Value for testing
-    pub fn default_k() -> FixedU256 {
-        FixedU256::one()
-            .checked_mul_floor(FixedU256::new(5.into()))
+    pub fn default_k() -> FixedU64 {
+        FixedU64::one()
+            .checked_mul_floor(FixedU64::new(5))
             .unwrap()
-            .checked_div_floor(FixedU256::new(10.into()))
+            .checked_div_floor(FixedU64::new(10))
             .unwrap()
     }
 
     /// Mid Price for testing
-    pub fn default_i() -> FixedU256 {
-        FixedU256::new_from_int(100.into(), DEFAULT_TOKEN_DECIMALS).unwrap()
+    pub fn default_i() -> FixedU64 {
+        FixedU64::new_from_int(100, DEFAULT_TOKEN_DECIMALS).unwrap()
     }
 
     pub fn clock_account(ts: i64) -> Account {
@@ -143,15 +143,15 @@ pub mod test_utils {
         pub admin_fee_b_account: Account,
         pub fees: Fees,
         pub rewards: Rewards,
-        pub k: FixedU256,
-        pub i: FixedU256,
-        pub base_target: FixedU256,
-        pub quote_target: FixedU256,
-        pub base_reserve: FixedU256,
-        pub quote_reserve: FixedU256,
+        pub k: FixedU64,
+        pub i: FixedU64,
+        pub base_target: FixedU64,
+        pub quote_target: FixedU64,
+        pub base_reserve: FixedU64,
+        pub quote_reserve: FixedU64,
         pub is_open_twap: u64,
         pub block_timestamp_last: i64,
-        pub base_price_cumulative_last: FixedU256,
+        pub base_price_cumulative_last: FixedU64,
     }
 
     impl SwapAccountInfo {
@@ -163,8 +163,8 @@ pub mod test_utils {
             token_b_amount: u64,
             fees: Fees,
             rewards: Rewards,
-            k: FixedU256,
-            i: FixedU256,
+            k: FixedU64,
+            i: FixedU64,
             is_open_twap: u64,
         ) -> Self {
             let swap_key = pubkey_rand();
@@ -237,15 +237,15 @@ pub mod test_utils {
                 0,
             );
 
-            let base_target = FixedU256::zero();
-            let quote_target = FixedU256::zero();
-            let base_reserve = FixedU256::zero();
-            let quote_reserve = FixedU256::zero();
+            let base_target = FixedU64::zero();
+            let quote_target = FixedU64::zero();
+            let base_reserve = FixedU64::zero();
+            let quote_reserve = FixedU64::zero();
             let block_timestamp_last = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_secs() as i64;
-            let base_price_cumulative_last = FixedU256::zero();
+            let base_price_cumulative_last = FixedU64::zero();
 
             SwapAccountInfo {
                 nonce,
@@ -311,8 +311,8 @@ pub mod test_utils {
                     &self.deltafi_mint_key,
                     &self.deltafi_token_key,
                     self.nonce,
-                    self.k.inner_u64()?,
-                    self.i.inner_u64()?,
+                    self.k.inner(),
+                    self.i.inner(),
                     self.is_open_twap,
                 )
                 .unwrap(),
@@ -354,8 +354,8 @@ pub mod test_utils {
                     &self.deltafi_mint_key,
                     &self.deltafi_token_key,
                     self.nonce,
-                    self.k.inner_u64()?,
-                    self.i.inner_u64()?,
+                    self.k.inner(),
+                    self.i.inner(),
                     self.is_open_twap,
                 )
                 .unwrap(),

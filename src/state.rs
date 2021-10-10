@@ -7,7 +7,7 @@ use solana_program::{
     pubkey::Pubkey,
 };
 
-use crate::{bn::FixedU256, fees::Fees, oracle::Oracle, rewards::Rewards, v2curve::RState};
+use crate::{bn::FixedU64, fees::Fees, rewards::Rewards, v2curve::RState};
 
 /// Dex Default Configuration information
 #[repr(C)]
@@ -158,37 +158,35 @@ pub struct SwapInfo {
     pub admin_fee_key_b: Pubkey,
     /// Fees
     pub fees: Fees,
-    /// Oracle
-    pub oracle: Oracle,
     /// Rewards
     pub rewards: Rewards,
 
     /// Slope value - 0 < k < 1
-    pub k: FixedU256,
+    pub k: FixedU64,
     /// Mid price
-    pub i: FixedU256,
+    pub i: FixedU64,
     /// r status
     pub r: RState,
     /// base target price
-    pub base_target: FixedU256,
+    pub base_target: FixedU64,
     /// quote target price
-    pub quote_target: FixedU256,
+    pub quote_target: FixedU64,
     /// base reserve price
-    pub base_reserve: FixedU256,
+    pub base_reserve: FixedU64,
     /// quote reserve price
-    pub quote_reserve: FixedU256,
+    pub quote_reserve: FixedU64,
     /// twap open flag
     pub is_open_twap: u64,
     /// block timestamp last - twap
     pub block_timestamp_last: i64,
     /// base price cumulative last - twap
-    pub base_price_cumulative_last: FixedU256,
+    pub base_price_cumulative_last: FixedU64,
     /// receive amount on swap
-    pub receive_amount: FixedU256,
+    pub receive_amount: FixedU64,
     /// base token amount
-    pub base_balance: FixedU256,
+    pub base_balance: FixedU64,
     /// quote token amount
-    pub quote_balance: FixedU256,
+    pub quote_balance: FixedU64,
 }
 
 impl Sealed for SwapInfo {}
@@ -198,11 +196,11 @@ impl IsInitialized for SwapInfo {
     }
 }
 impl Pack for SwapInfo {
-    const LEN: usize = 1272;
+    const LEN: usize = 518;
 
     /// Unpacks a byte buffer into a [SwapInfo](struct.SwapInfo.html).
     fn unpack_from_slice(input: &[u8]) -> Result<Self, ProgramError> {
-        let input = array_ref![input, 0, 1272];
+        let input = array_ref![input, 0, 518];
         #[allow(clippy::ptr_offset_with_cast)]
         let (
             is_initialized,
@@ -222,7 +220,6 @@ impl Pack for SwapInfo {
             admin_fee_key_a,
             admin_fee_key_b,
             fees,
-            oracle,
             rewards,
             k,
             i,
@@ -238,8 +235,8 @@ impl Pack for SwapInfo {
             base_balance,
             quote_balance,
         ) = array_refs![
-            input, 1, 1, 1, 8, 8, 8, 8, 32, 32, 32, 32, 32, 32, 32, 32, 32, 64, 204, 24, 64, 64, 1,
-            64, 64, 64, 64, 8, 8, 64, 64, 64, 64
+            input, 1, 1, 1, 8, 8, 8, 8, 32, 32, 32, 32, 32, 32, 32, 32, 32, 64, 24, 9, 9, 1, 9, 9,
+            9, 9, 8, 8, 9, 9, 9, 9
         ];
         Ok(Self {
             is_initialized: match is_initialized {
@@ -267,26 +264,25 @@ impl Pack for SwapInfo {
             admin_fee_key_a: Pubkey::new_from_array(*admin_fee_key_a),
             admin_fee_key_b: Pubkey::new_from_array(*admin_fee_key_b),
             fees: Fees::unpack_from_slice(fees)?,
-            oracle: Oracle::unpack_from_slice(oracle)?,
             rewards: Rewards::unpack_from_slice(rewards)?,
-            k: FixedU256::unpack_from_slice(k)?,
-            i: FixedU256::unpack_from_slice(i)?,
+            k: FixedU64::unpack_from_slice(k)?,
+            i: FixedU64::unpack_from_slice(i)?,
             r: RState::unpack(r)?,
-            base_target: FixedU256::unpack_from_slice(base_target)?,
-            quote_target: FixedU256::unpack_from_slice(quote_target)?,
-            base_reserve: FixedU256::unpack_from_slice(base_reserve)?,
-            quote_reserve: FixedU256::unpack_from_slice(quote_reserve)?,
+            base_target: FixedU64::unpack_from_slice(base_target)?,
+            quote_target: FixedU64::unpack_from_slice(quote_target)?,
+            base_reserve: FixedU64::unpack_from_slice(base_reserve)?,
+            quote_reserve: FixedU64::unpack_from_slice(quote_reserve)?,
             is_open_twap: u64::from_le_bytes(*is_open_twap),
             block_timestamp_last: i64::from_le_bytes(*block_timestamp_last),
-            base_price_cumulative_last: FixedU256::unpack_from_slice(base_price_cumulative_last)?,
-            receive_amount: FixedU256::unpack_from_slice(receive_amount)?,
-            base_balance: FixedU256::unpack_from_slice(base_balance)?,
-            quote_balance: FixedU256::unpack_from_slice(quote_balance)?,
+            base_price_cumulative_last: FixedU64::unpack_from_slice(base_price_cumulative_last)?,
+            receive_amount: FixedU64::unpack_from_slice(receive_amount)?,
+            base_balance: FixedU64::unpack_from_slice(base_balance)?,
+            quote_balance: FixedU64::unpack_from_slice(quote_balance)?,
         })
     }
 
     fn pack_into_slice(&self, output: &mut [u8]) {
-        let output = array_mut_ref![output, 0, 1272];
+        let output = array_mut_ref![output, 0, 518];
         let (
             is_initialized,
             is_paused,
@@ -305,7 +301,6 @@ impl Pack for SwapInfo {
             admin_fee_key_a,
             admin_fee_key_b,
             fees,
-            oracle,
             rewards,
             k,
             i,
@@ -321,8 +316,8 @@ impl Pack for SwapInfo {
             base_balance,
             quote_balance,
         ) = mut_array_refs![
-            output, 1, 1, 1, 8, 8, 8, 8, 32, 32, 32, 32, 32, 32, 32, 32, 32, 64, 204, 24, 64, 64,
-            1, 64, 64, 64, 64, 8, 8, 64, 64, 64, 64
+            output, 1, 1, 1, 8, 8, 8, 8, 32, 32, 32, 32, 32, 32, 32, 32, 32, 64, 24, 9, 9, 1, 9, 9,
+            9, 9, 8, 8, 9, 9, 9, 9
         ];
         is_initialized[0] = self.is_initialized as u8;
         is_paused[0] = self.is_paused as u8;
@@ -341,7 +336,6 @@ impl Pack for SwapInfo {
         admin_fee_key_a.copy_from_slice(self.admin_fee_key_a.as_ref());
         admin_fee_key_b.copy_from_slice(self.admin_fee_key_b.as_ref());
         self.fees.pack_into_slice(&mut fees[..]);
-        self.oracle.pack_into_slice(&mut oracle[..]);
         self.rewards.pack_into_slice(&mut rewards[..]);
         self.k.pack_into_slice(&mut k[..]);
         self.i.pack_into_slice(&mut i[..]);
@@ -638,7 +632,6 @@ mod tests {
             withdraw_fee_numerator,
             withdraw_fee_denominator,
         };
-        let oracle = Oracle::new(token_a, token_b);
         let is_initialized = true;
         let is_paused = false;
         let trade_reward_numerator = 1;
@@ -652,19 +645,19 @@ mod tests {
         let k = default_k();
         let i = default_i();
         let r = RState::One;
-        let base_target = FixedU256::zero();
-        let quote_target = FixedU256::zero();
-        let base_reserve = FixedU256::zero();
-        let quote_reserve = FixedU256::zero();
+        let base_target = FixedU64::zero();
+        let quote_target = FixedU64::zero();
+        let base_reserve = FixedU64::zero();
+        let quote_reserve = FixedU64::zero();
         let is_open_twap = TWAP_OPENED;
         let block_timestamp_last: i64 = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs() as i64;
-        let base_price_cumulative_last = FixedU256::zero();
-        let receive_amount = FixedU256::zero();
-        let base_balance = FixedU256::zero();
-        let quote_balance = FixedU256::zero();
+        let base_price_cumulative_last = FixedU64::zero();
+        let receive_amount = FixedU64::zero();
+        let base_balance = FixedU64::zero();
+        let quote_balance = FixedU64::zero();
 
         let swap_info = SwapInfo {
             is_initialized,
@@ -684,7 +677,6 @@ mod tests {
             admin_fee_key_a,
             admin_fee_key_b,
             fees,
-            oracle,
             rewards,
             k,
             i,
@@ -729,47 +721,43 @@ mod tests {
         packed.extend_from_slice(&withdraw_fee_numerator.to_le_bytes());
         packed.extend_from_slice(&withdraw_fee_denominator.to_le_bytes());
 
-        let mut packed_oracle = [0u8; Oracle::LEN];
-        oracle.pack_into_slice(&mut packed_oracle);
-        packed.extend_from_slice(&packed_oracle);
-
         let mut packed_rewards = [0u8; Rewards::LEN];
         rewards.pack_into_slice(&mut packed_rewards);
         packed.extend_from_slice(&packed_rewards);
 
-        let mut packed_k = [0u8; FixedU256::LEN];
+        let mut packed_k = [0u8; FixedU64::LEN];
         k.pack_into_slice(&mut packed_k);
         packed.extend_from_slice(&packed_k);
-        let mut packed_i = [0u8; FixedU256::LEN];
+        let mut packed_i = [0u8; FixedU64::LEN];
         i.pack_into_slice(&mut packed_i);
         packed.extend_from_slice(&packed_i);
         let packed_r = r.pack();
         packed.extend_from_slice(&packed_r);
 
-        let mut packed_base_target = [0u8; FixedU256::LEN];
+        let mut packed_base_target = [0u8; FixedU64::LEN];
         base_target.pack_into_slice(&mut packed_base_target);
         packed.extend_from_slice(&packed_base_target);
-        let mut packed_quote_target = [0u8; FixedU256::LEN];
+        let mut packed_quote_target = [0u8; FixedU64::LEN];
         quote_target.pack_into_slice(&mut packed_quote_target);
         packed.extend_from_slice(&packed_quote_target);
-        let mut packed_base_reserve = [0u8; FixedU256::LEN];
+        let mut packed_base_reserve = [0u8; FixedU64::LEN];
         base_reserve.pack_into_slice(&mut packed_base_reserve);
         packed.extend_from_slice(&packed_base_reserve);
-        let mut packed_quote_reserve = [0u8; FixedU256::LEN];
+        let mut packed_quote_reserve = [0u8; FixedU64::LEN];
         quote_reserve.pack_into_slice(&mut packed_quote_reserve);
         packed.extend_from_slice(&packed_quote_reserve);
         packed.extend_from_slice(&is_open_twap.to_le_bytes());
         packed.extend_from_slice(&block_timestamp_last.to_le_bytes());
-        let mut packed_base_price_cumulative_last = [0u8; FixedU256::LEN];
+        let mut packed_base_price_cumulative_last = [0u8; FixedU64::LEN];
         base_price_cumulative_last.pack_into_slice(&mut packed_base_price_cumulative_last);
         packed.extend_from_slice(&packed_base_price_cumulative_last);
-        let mut packed_receive_amount = [0u8; FixedU256::LEN];
+        let mut packed_receive_amount = [0u8; FixedU64::LEN];
         receive_amount.pack_into_slice(&mut packed_receive_amount);
         packed.extend_from_slice(&packed_receive_amount);
-        let mut packed_base_balance = [0u8; FixedU256::LEN];
+        let mut packed_base_balance = [0u8; FixedU64::LEN];
         base_balance.pack_into_slice(&mut packed_base_balance);
         packed.extend_from_slice(&packed_base_balance);
-        let mut packed_quote_balance = [0u8; FixedU256::LEN];
+        let mut packed_quote_balance = [0u8; FixedU64::LEN];
         quote_balance.pack_into_slice(&mut packed_quote_balance);
         packed.extend_from_slice(&packed_quote_balance);
 

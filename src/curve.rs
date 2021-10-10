@@ -169,7 +169,7 @@ impl StableSwap {
                 } else {
                     new_balances[i].checked_sub(ideal_balance)?
                 };
-                let fee = fees.normalized_trade_fee(N_COINS, difference)?;
+                let fee = fees.normalized_trade_fee_256(N_COINS, difference)?;
                 new_balances[i] = new_balances[i].checked_sub(fee)?;
             }
 
@@ -252,10 +252,10 @@ impl StableSwap {
             swap_quote_amount.checked_sub(swap_quote_amount.checked_mul(d_1)?.checked_div(d_0)?)?;
         // new_base_amount = swap_base_amount - expected_base_amount * fee / fee_denominator;
         let new_base_amount = swap_base_amount
-            .checked_sub(fees.normalized_trade_fee(N_COINS, expected_base_amount)?)?;
+            .checked_sub(fees.normalized_trade_fee_256(N_COINS, expected_base_amount)?)?;
         // new_quote_amount = swap_quote_amount - expected_quote_amount * fee / fee_denominator;
         let new_quote_amount = swap_quote_amount
-            .checked_sub(fees.normalized_trade_fee(N_COINS, expected_quote_amount)?)?;
+            .checked_sub(fees.normalized_trade_fee_256(N_COINS, expected_quote_amount)?)?;
         let dy = new_base_amount
             .checked_sub(self.compute_y(new_quote_amount, d_1)?)?
             .checked_sub(1.into())?; // Withdraw less to account for rounding errors
@@ -277,8 +277,8 @@ impl StableSwap {
             self.compute_d(swap_source_amount, swap_destination_amount)?,
         )?;
         let dy = swap_destination_amount.checked_sub(y)?;
-        let dy_fee = fees.trade_fee(dy)?;
-        let admin_fee = fees.admin_trade_fee(dy_fee)?;
+        let dy_fee = fees.trade_fee_256(dy)?;
+        let admin_fee = fees.admin_trade_fee_256(dy_fee)?;
 
         let amount_swapped = dy.checked_sub(dy_fee)?;
         let new_destination_amount = swap_destination_amount

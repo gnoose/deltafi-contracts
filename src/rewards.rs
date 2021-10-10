@@ -8,7 +8,7 @@ use solana_program::{
     program_pack::{Pack, Sealed},
 };
 
-use crate::bn::{FixedU256, U256};
+use crate::bn::{FixedU64, U256};
 
 /// Rewards structure
 #[repr(C)]
@@ -38,18 +38,15 @@ impl Rewards {
     }
 
     /// Calc trade reward amount with [`FixedU256`]
-    pub fn trade_reward_fixed_u256(&self, amount: FixedU256) -> Result<FixedU256, ProgramError> {
+    pub fn trade_reward_fixed_u256(&self, amount: FixedU64) -> Result<FixedU64, ProgramError> {
         let c_reward = amount
             .sqrt()?
-            .checked_mul_floor(FixedU256::new(self.trade_reward_numerator.into()))?
-            .checked_div_floor(FixedU256::new(self.trade_reward_denominator.into()))
+            .checked_mul_floor(FixedU64::new(self.trade_reward_numerator))?
+            .checked_div_floor(FixedU64::new(self.trade_reward_denominator))
             .unwrap();
 
-        match c_reward
-            .into_u256_floor()
-            .cmp(&self.trade_reward_cap.into())
-        {
-            Ordering::Greater => Ok(FixedU256::new(self.trade_reward_cap.into())),
+        match c_reward.into_real_u64_floor().cmp(&self.trade_reward_cap) {
+            Ordering::Greater => Ok(FixedU64::new(self.trade_reward_cap)),
             _ => Ok(c_reward),
         }
     }
@@ -125,9 +122,9 @@ mod tests {
             let expected_trade_reward = U256::from(trade_reward_cap);
             let trade_reward = rewards.trade_reward_u256(trade_amount.into()).unwrap();
             assert_eq!(trade_reward, expected_trade_reward);
-            let expected_trade_reward = FixedU256::new(trade_reward_cap.into());
+            let expected_trade_reward = FixedU64::new(trade_reward_cap.into());
             let trade_reward = rewards
-                .trade_reward_fixed_u256(FixedU256::new(trade_amount.into()))
+                .trade_reward_fixed_u256(FixedU64::new(trade_amount.into()))
                 .unwrap();
             assert_eq!(trade_reward, expected_trade_reward);
         }
@@ -145,9 +142,9 @@ mod tests {
             let trade_reward = rewards.trade_reward_u256(trade_amount.into()).unwrap();
             assert_eq!(trade_reward, U256::from(expected_trade_reward));
             let trade_reward = rewards
-                .trade_reward_fixed_u256(FixedU256::new(trade_amount.into()))
+                .trade_reward_fixed_u256(FixedU64::new(trade_amount.into()))
                 .unwrap();
-            assert_eq!(trade_reward, FixedU256::new(expected_trade_reward.into()));
+            assert_eq!(trade_reward, FixedU64::new(expected_trade_reward.into()));
         }
     }
 }

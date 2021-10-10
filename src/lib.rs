@@ -10,7 +10,6 @@ pub mod error;
 pub mod fees;
 pub mod instruction;
 pub mod math2;
-pub mod oracle;
 pub mod pool_converter;
 pub mod processor;
 pub mod rewards;

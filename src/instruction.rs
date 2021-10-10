@@ -2084,8 +2084,8 @@ mod tests {
         // Initialize instruction packing
         {
             let nonce: u8 = 255;
-            let k = default_k().inner_u64().unwrap();
-            let i = default_i().inner_u64().unwrap();
+            let k = default_k().inner();
+            let i = default_i().inner();
             let is_open_twap = TWAP_OPENED;
 
             let check = SwapInstruction::Initialize(InitializeData {

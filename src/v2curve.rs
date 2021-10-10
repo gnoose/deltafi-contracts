@@ -4,7 +4,7 @@ use std::{cmp::Ordering, mem::size_of};
 use solana_program::{entrypoint::ProgramResult, program_error::ProgramError};
 
 use crate::{
-    bn::FixedU256,
+    bn::FixedU64,
     math2::{
         general_integrate, solve_quadratic_function_for_target, solve_quadratic_function_for_trade,
     },
@@ -59,22 +59,22 @@ impl RState {
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct PMMState {
     /// i
-    pub i: FixedU256,
+    pub i: FixedU64,
 
     /// k
-    pub k: FixedU256,
+    pub k: FixedU64,
 
     /// b
-    pub b: FixedU256,
+    pub b: FixedU64,
 
     /// q
-    pub q: FixedU256,
+    pub q: FixedU64,
 
     /// b_0
-    pub b_0: FixedU256,
+    pub b_0: FixedU64,
 
     /// q_0
-    pub q_0: FixedU256,
+    pub q_0: FixedU64,
 
     /// r
     pub r: RState,
@@ -84,12 +84,12 @@ impl PMMState {
     /// initialize PMMState
     #[allow(clippy::many_single_char_names)]
     pub fn new(
-        i: FixedU256,
-        k: FixedU256,
-        b: FixedU256,
-        q: FixedU256,
-        b_0: FixedU256,
-        q_0: FixedU256,
+        i: FixedU64,
+        k: FixedU64,
+        b: FixedU64,
+        q: FixedU64,
+        b_0: FixedU64,
+        q_0: FixedU64,
         r: RState,
     ) -> Self {
         Self {
@@ -109,8 +109,8 @@ impl PMMState {
 /// return receive_quote_amount and r_status
 pub fn sell_base_token(
     state: PMMState,
-    pay_base_amount: FixedU256,
-) -> Result<(FixedU256, RState), ProgramError> {
+    pay_base_amount: FixedU64,
+) -> Result<(FixedU64, RState), ProgramError> {
     let mut receive_quote_amount;
     let new_r;
     if state.r == RState::One {
@@ -121,15 +121,15 @@ pub fn sell_base_token(
         let back_to_one_receive_quote = state.q.checked_sub(state.q_0)?;
 
         match pay_base_amount
-            .into_u256_ceil()
-            .cmp(&back_to_one_pay_base.into_u256_ceil())
+            .into_real_u64_ceil()
+            .cmp(&back_to_one_pay_base.into_real_u64_ceil())
         {
             Ordering::Less => {
                 receive_quote_amount = r_above_sell_base_token(state, pay_base_amount)?;
                 new_r = RState::AboveOne;
 
-                if receive_quote_amount.into_u256_ceil()
-                    > back_to_one_receive_quote.into_u256_ceil()
+                if receive_quote_amount.into_real_u64_ceil()
+                    > back_to_one_receive_quote.into_real_u64_ceil()
                 {
                     receive_quote_amount = back_to_one_receive_quote;
                 }
@@ -158,8 +158,8 @@ pub fn sell_base_token(
 /// return receive_base_amount and r_status
 pub fn sell_quote_token(
     state: PMMState,
-    pay_quote_amount: FixedU256,
-) -> Result<(FixedU256, RState), ProgramError> {
+    pay_quote_amount: FixedU64,
+) -> Result<(FixedU64, RState), ProgramError> {
     let mut receive_base_amount;
     let new_r;
     if state.r == RState::One {
@@ -173,14 +173,15 @@ pub fn sell_quote_token(
         let back_to_one_receive_base = state.b.checked_sub(state.b_0)?;
 
         match pay_quote_amount
-            .into_u256_ceil()
-            .cmp(&back_to_one_pay_quote.into_u256_ceil())
+            .into_real_u64_ceil()
+            .cmp(&back_to_one_pay_quote.into_real_u64_ceil())
         {
             Ordering::Less => {
                 receive_base_amount = r_below_sell_quote_token(state, pay_quote_amount)?;
                 new_r = RState::BelowOne;
 
-                if receive_base_amount.into_u256_ceil() > back_to_one_receive_base.into_u256_ceil()
+                if receive_base_amount.into_real_u64_ceil()
+                    > back_to_one_receive_base.into_real_u64_ceil()
                 {
                     receive_base_amount = back_to_one_receive_base;
                 }
@@ -208,21 +209,21 @@ pub fn sell_quote_token(
 /// receiveQuoteToken
 pub fn r_one_sell_base_token(
     state: PMMState,
-    pay_base_amount: FixedU256,
-) -> Result<FixedU256, ProgramError> {
+    pay_base_amount: FixedU64,
+) -> Result<FixedU64, ProgramError> {
     solve_quadratic_function_for_trade(state.q_0, state.q_0, pay_base_amount, state.i, state.k)
 }
 
 /// receiveBaseToken
 pub fn r_one_sell_quote_token(
     state: PMMState,
-    pay_quote_amount: FixedU256,
-) -> Result<FixedU256, ProgramError> {
+    pay_quote_amount: FixedU64,
+) -> Result<FixedU64, ProgramError> {
     solve_quadratic_function_for_trade(
         state.b_0,
         state.b_0,
         pay_quote_amount,
-        FixedU256::reciprocal_floor(state.i)?,
+        FixedU64::reciprocal_floor(state.i)?,
         state.k,
     )
 }
@@ -232,13 +233,13 @@ pub fn r_one_sell_quote_token(
 /// receiveBaseToken
 pub fn r_below_sell_quote_token(
     state: PMMState,
-    pay_quote_amount: FixedU256,
-) -> Result<FixedU256, ProgramError> {
+    pay_quote_amount: FixedU64,
+) -> Result<FixedU64, ProgramError> {
     general_integrate(
         state.q_0,
         state.q.checked_add(pay_quote_amount)?,
         state.q,
-        FixedU256::reciprocal_floor(state.i)?,
+        FixedU64::reciprocal_floor(state.i)?,
         state.k,
     )
 }
@@ -246,8 +247,8 @@ pub fn r_below_sell_quote_token(
 /// receiveQuoteToken
 pub fn r_below_sell_base_token(
     state: PMMState,
-    pay_base_amount: FixedU256,
-) -> Result<FixedU256, ProgramError> {
+    pay_base_amount: FixedU64,
+) -> Result<FixedU64, ProgramError> {
     solve_quadratic_function_for_trade(state.q_0, state.q, pay_base_amount, state.i, state.k)
 }
 
@@ -256,8 +257,8 @@ pub fn r_below_sell_base_token(
 /// receiveQuoteToken
 pub fn r_above_sell_base_token(
     state: PMMState,
-    pay_base_amount: FixedU256,
-) -> Result<FixedU256, ProgramError> {
+    pay_base_amount: FixedU64,
+) -> Result<FixedU64, ProgramError> {
     general_integrate(
         state.b_0,
         state.b.checked_add(pay_base_amount)?,
@@ -270,13 +271,13 @@ pub fn r_above_sell_base_token(
 /// receiveBaseToken
 pub fn r_above_sell_quote_token(
     state: PMMState,
-    pay_quote_amount: FixedU256,
-) -> Result<FixedU256, ProgramError> {
+    pay_quote_amount: FixedU64,
+) -> Result<FixedU64, ProgramError> {
     solve_quadratic_function_for_trade(
         state.b_0,
         state.b,
         pay_quote_amount,
-        FixedU256::reciprocal_floor(state.i)?,
+        FixedU64::reciprocal_floor(state.i)?,
         state.k,
     )
 }
@@ -296,7 +297,7 @@ pub fn adjusted_target(state: &mut PMMState) -> ProgramResult {
         state.b_0 = solve_quadratic_function_for_target(
             state.b,
             state.q.checked_sub(state.q_0)?,
-            FixedU256::reciprocal_floor(state.i)?,
+            FixedU64::reciprocal_floor(state.i)?,
             state.k,
         )?;
     }
@@ -304,14 +305,14 @@ pub fn adjusted_target(state: &mut PMMState) -> ProgramResult {
 }
 
 /// get mid price
-pub fn get_mid_price(state: PMMState) -> Result<FixedU256, ProgramError> {
+pub fn get_mid_price(state: PMMState) -> Result<FixedU64, ProgramError> {
     if state.r == RState::BelowOne {
         let mut r = state
             .q_0
             .checked_mul_floor(state.q_0)?
             .checked_div_floor(state.q)?
             .checked_div_floor(state.q)?;
-        r = FixedU256::one()
+        r = FixedU64::one()
             .checked_sub(state.k)?
             .checked_add(state.k.checked_mul_floor(r)?)?;
 
@@ -322,7 +323,7 @@ pub fn get_mid_price(state: PMMState) -> Result<FixedU256, ProgramError> {
             .checked_mul_floor(state.b_0)?
             .checked_div_floor(state.b)?
             .checked_div_floor(state.b)?;
-        r = FixedU256::one()
+        r = FixedU64::one()
             .checked_sub(state.k)?
             .checked_add(state.k.checked_mul_floor(r)?)?;
 
@@ -333,7 +334,7 @@ pub fn get_mid_price(state: PMMState) -> Result<FixedU256, ProgramError> {
 #[cfg(test)]
 mod tests {
     use crate::{
-        bn::{FixedU256, U256},
+        bn::FixedU64,
         math2::solve_quadratic_function_for_target,
         utils::{
             test_utils::{default_i, default_k},
@@ -348,21 +349,18 @@ mod tests {
 
     #[test]
     fn basic() {
-        let k: FixedU256 = default_k();
-        let i: FixedU256 = default_i();
+        let k: FixedU64 = default_k();
+        let i: FixedU64 = default_i();
         let mut r = RState::One;
-        let base_balance: FixedU256 =
-            FixedU256::new_from_int(100.into(), DEFAULT_TOKEN_DECIMALS).unwrap();
-        let quote_balance: FixedU256 =
-            FixedU256::new_from_int(10000.into(), DEFAULT_TOKEN_DECIMALS).unwrap();
+        let base_balance: FixedU64 = FixedU64::new_from_int(100, DEFAULT_TOKEN_DECIMALS).unwrap();
+        let quote_balance: FixedU64 =
+            FixedU64::new_from_int(10000, DEFAULT_TOKEN_DECIMALS).unwrap();
         let base_reserve = base_balance;
         let quote_reserve = quote_balance;
-        let base_target: FixedU256 =
-            FixedU256::new_from_int(100.into(), DEFAULT_TOKEN_DECIMALS).unwrap();
-        let quote_target: FixedU256 =
-            FixedU256::new_from_int(10000.into(), DEFAULT_TOKEN_DECIMALS).unwrap();
+        let base_target: FixedU64 = FixedU64::new_from_int(100, DEFAULT_TOKEN_DECIMALS).unwrap();
+        let quote_target: FixedU64 = FixedU64::new_from_int(10000, DEFAULT_TOKEN_DECIMALS).unwrap();
 
-        let amount: FixedU256 = FixedU256::new_from_int(10.into(), DEFAULT_TOKEN_DECIMALS).unwrap();
+        let amount: FixedU64 = FixedU64::new_from_int(10, DEFAULT_TOKEN_DECIMALS).unwrap();
 
         // ============ R = 0 case =============
         let mut state = PMMState::new(
@@ -376,16 +374,13 @@ mod tests {
         );
         adjusted_target(&mut state).unwrap();
 
-        assert_eq!(U256::to_u64(state.b_0.into_u256_ceil()).unwrap(), 100,);
+        assert_eq!(state.b_0.into_real_u64_ceil(), 100);
 
-        assert_eq!(U256::to_u64(state.q_0.into_u256_ceil()).unwrap(), 10000,);
+        assert_eq!(state.q_0.into_real_u64_ceil(), 10000);
 
         let receive_quote_amount = r_one_sell_base_token(state, amount).unwrap();
 
-        assert_eq!(
-            U256::to_u64(receive_quote_amount.into_u256_ceil()).unwrap(),
-            909
-        );
+        assert_eq!(receive_quote_amount.into_real_u64_ceil(), 910);
 
         // ============ R > 1 cases ============
         r = RState::AboveOne;
@@ -402,29 +397,36 @@ mod tests {
         let new_b_0 = solve_quadratic_function_for_target(
             state.b,
             state.q.checked_sub(state.q_0).unwrap(),
-            FixedU256::reciprocal_floor(state.i).unwrap(),
+            FixedU64::reciprocal_floor(state.i).unwrap(),
             state.k,
         )
         .unwrap();
 
-        assert_eq!(U256::to_u64(new_b_0.into_u256_ceil()).unwrap(), 100);
+        assert_eq!(state.b.into_real_u64_ceil(), 100);
+        assert_eq!(state.q.into_real_u64_ceil(), 10000);
+        assert_eq!(state.q_0.into_real_u64_ceil(), 10000);
+        assert_eq!(
+            state.q.checked_sub(state.q_0).unwrap().into_real_u64_ceil(),
+            0
+        );
+
+        assert_eq!(new_b_0.into_real_u64_ceil(), 100);
 
         adjusted_target(&mut state).unwrap();
 
-        assert_eq!(U256::to_u64(state.b_0.into_u256_ceil()).unwrap(), 100);
+        assert_eq!(state.b_0.into_real_u64_ceil(), 100);
 
         assert_eq!(
-            r_above_sell_base_token(state, amount).unwrap(),
-            FixedU256::new_from_int(950.into(), DEFAULT_TOKEN_DECIMALS).unwrap()
+            r_above_sell_base_token(state, amount)
+                .unwrap()
+                .into_real_u64_ceil(),
+            955
         );
 
         assert_eq!(
-            U256::to_u64(
-                r_above_sell_quote_token(state, amount)
-                    .unwrap()
-                    .into_u256_ceil()
-            )
-            .unwrap(),
+            r_above_sell_quote_token(state, amount)
+                .unwrap()
+                .into_real_u64_ceil(),
             1
         );
 
@@ -441,17 +443,16 @@ mod tests {
         );
 
         assert_eq!(
-            r_below_sell_base_token(state, amount).unwrap(),
-            FixedU256::new_from_int(909.into(), DEFAULT_TOKEN_DECIMALS).unwrap()
+            r_below_sell_base_token(state, amount)
+                .unwrap()
+                .into_real_u64_ceil(),
+            910
         );
 
         assert_eq!(
-            U256::to_u64(
-                r_below_sell_quote_token(state, amount)
-                    .unwrap()
-                    .into_u256_ceil()
-            )
-            .unwrap(),
+            r_below_sell_quote_token(state, amount)
+                .unwrap()
+                .into_real_u64_ceil(),
             1
         );
 
@@ -479,9 +480,9 @@ mod tests {
         adjusted_target(&mut new_state).unwrap();
         assert_eq!(new_state, state);
 
-        let value = FixedU256::new_from_int(1000.into(), DEFAULT_TOKEN_DECIMALS)
+        let value = FixedU64::new_from_int(1000, DEFAULT_TOKEN_DECIMALS)
             .unwrap()
-            .checked_div_floor(FixedU256::new(10.into()))
+            .checked_div_floor(FixedU64::new(10))
             .unwrap();
         assert_eq!(get_mid_price(state).unwrap(), value);
     }
