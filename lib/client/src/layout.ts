@@ -19,6 +19,15 @@ export const FixedU256Layout = (property: string = "fixedU256") =>
   BufferLayout.struct([U256Layout("inner"), U256Layout("basePoint")], property);
 
 /**
+ * Layout for FixedU64
+ */
+export const FixedU64Layout = (property: string = "fixedU64") =>
+  BufferLayout.struct(
+    [BufferLayout.nu64("inner"), BufferLayout.nu64("basePoint")],
+    property
+  );
+
+/**
  * Layout for fees struct
  */
 export const FeesLayout = (property: string = "fees") =>
@@ -68,6 +77,23 @@ export const OracleLayout = (property: string = "oracle") =>
   );
 
 /**
+ * Layout for config info state
+ */
+export const ConfigInfoLayout: typeof BufferLayout.Structure = BufferLayout.struct(
+  [
+    BufferLayout.u8("isInitialized"),
+    BufferLayout.u8("isPaused"),
+    BufferLayout.nu64("ampFactor"),
+    BufferLayout.ns64("futureAdminDeadline"),
+    PublicKeyLayout("futureAdminKey"),
+    PublicKeyLayout("adminKey"),
+    PublicKeyLayout("deltafiMint"),
+    FeesLayout("fees"),
+    RewardsLayout("rewards"),
+  ]
+);
+
+/**
  * Layout for stable swap state
  */
 export const StableSwapLayout: typeof BufferLayout.Structure = BufferLayout.struct(
@@ -79,31 +105,30 @@ export const StableSwapLayout: typeof BufferLayout.Structure = BufferLayout.stru
     BufferLayout.nu64("targetAmpFactor"),
     BufferLayout.ns64("startRampTs"),
     BufferLayout.ns64("stopRampTs"),
-    BufferLayout.ns64("futureAdminDeadline"),
-    PublicKeyLayout("futureAdminAccount"),
-    PublicKeyLayout("adminAccount"),
     PublicKeyLayout("tokenAccountA"),
     PublicKeyLayout("tokenAccountB"),
-    PublicKeyLayout("tokenPool"),
+    PublicKeyLayout("deltafiToken"),
+    PublicKeyLayout("poolMint"),
     PublicKeyLayout("mintA"),
     PublicKeyLayout("mintB"),
-    PublicKeyLayout("deltafiTokenAccount"),
-    PublicKeyLayout("deltafiTokenMint"),
+    PublicKeyLayout("deltafiMint"),
     PublicKeyLayout("adminFeeAccountA"),
     PublicKeyLayout("adminFeeAccountB"),
     FeesLayout("fees"),
-    OracleLayout("oracle"),
     RewardsLayout("rewards"),
-    FixedU256Layout("k"),
-    FixedU256Layout("l"),
+    FixedU64Layout("k"),
+    FixedU64Layout("l"),
     BufferLayout.u8("r"),
-    FixedU256Layout("baseTarget"),
-    FixedU256Layout("quoteTarget"),
-    FixedU256Layout("baseReserve"),
-    FixedU256Layout("quoteReserve"),
+    FixedU64Layout("baseTarget"),
+    FixedU64Layout("quoteTarget"),
+    FixedU64Layout("baseReserve"),
+    FixedU64Layout("quoteReserve"),
     BufferLayout.nu64("isOpenTwap"),
     BufferLayout.nu64("blockTimestamp"),
-    FixedU256Layout("basePriceCumulative"),
+    FixedU64Layout("basePriceCumulative"),
+    FixedU64Layout("receiveAmount"),
+    FixedU64Layout("baseBalance"),
+    FixedU64Layout("quoteBalance"),
   ]
 );
 

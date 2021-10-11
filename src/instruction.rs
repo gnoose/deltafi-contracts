@@ -329,7 +329,6 @@ impl AdminInstruction {
 pub fn initialize_config(
     program_id: &Pubkey,
     config_key: &Pubkey,
-    authority_key: &Pubkey,
     admin_key: &Pubkey,
     deltafi_mint_key: &Pubkey,
     amp_factor: u64,
@@ -345,7 +344,6 @@ pub fn initialize_config(
 
     let accounts = vec![
         AccountMeta::new_readonly(*config_key, true),
-        AccountMeta::new_readonly(*authority_key, false),
         AccountMeta::new_readonly(*admin_key, true),
         AccountMeta::new_readonly(*deltafi_mint_key, false),
     ];
@@ -1136,13 +1134,10 @@ pub fn stable_initialize(
     authority_pubkey: &Pubkey,
     admin_fee_a_pubkey: &Pubkey,
     admin_fee_b_pubkey: &Pubkey,
-    token_a_mint_pubkey: &Pubkey,
     token_a_pubkey: &Pubkey,
-    token_b_mint_pubkey: &Pubkey,
     token_b_pubkey: &Pubkey,
     pool_mint_pubkey: &Pubkey,
     destination_pubkey: &Pubkey, // Desintation to mint pool tokens for bootstrapper
-    deltafi_mint_pubkey: &Pubkey,
     deltafi_token_pubkey: &Pubkey,
     nonce: u8,
     k: u64,
@@ -1163,13 +1158,10 @@ pub fn stable_initialize(
         AccountMeta::new_readonly(*authority_pubkey, false),
         AccountMeta::new_readonly(*admin_fee_a_pubkey, false),
         AccountMeta::new_readonly(*admin_fee_b_pubkey, false),
-        AccountMeta::new_readonly(*token_a_mint_pubkey, false),
         AccountMeta::new_readonly(*token_a_pubkey, false),
-        AccountMeta::new_readonly(*token_b_mint_pubkey, false),
         AccountMeta::new_readonly(*token_b_pubkey, false),
         AccountMeta::new(*pool_mint_pubkey, false),
         AccountMeta::new(*destination_pubkey, false),
-        AccountMeta::new_readonly(*deltafi_mint_pubkey, false),
         AccountMeta::new_readonly(*deltafi_token_pubkey, false),
         AccountMeta::new_readonly(*token_program_id, false),
     ];
@@ -1190,13 +1182,10 @@ pub fn initialize(
     authority_pubkey: &Pubkey,
     admin_fee_a_pubkey: &Pubkey,
     admin_fee_b_pubkey: &Pubkey,
-    token_a_mint_pubkey: &Pubkey,
     token_a_pubkey: &Pubkey,
-    token_b_mint_pubkey: &Pubkey,
     token_b_pubkey: &Pubkey,
     pool_mint_pubkey: &Pubkey,
     destination_pubkey: &Pubkey, // Desintation to mint pool tokens for bootstrapper
-    deltafi_mint_pubkey: &Pubkey,
     deltafi_token_pubkey: &Pubkey,
     nonce: u8,
     k: u64,
@@ -1217,13 +1206,10 @@ pub fn initialize(
         AccountMeta::new_readonly(*authority_pubkey, false),
         AccountMeta::new_readonly(*admin_fee_a_pubkey, false),
         AccountMeta::new_readonly(*admin_fee_b_pubkey, false),
-        AccountMeta::new_readonly(*token_a_mint_pubkey, false),
         AccountMeta::new_readonly(*token_a_pubkey, false),
-        AccountMeta::new_readonly(*token_b_mint_pubkey, false),
         AccountMeta::new_readonly(*token_b_pubkey, false),
         AccountMeta::new(*pool_mint_pubkey, false),
         AccountMeta::new(*destination_pubkey, false),
-        AccountMeta::new_readonly(*deltafi_mint_pubkey, false),
         AccountMeta::new_readonly(*deltafi_token_pubkey, false),
         AccountMeta::new_readonly(*token_program_id, false),
     ];

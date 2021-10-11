@@ -1,6 +1,6 @@
 import * as BufferLayout from "buffer-layout";
 import {
-  Account,
+  Keypair,
   PublicKey,
   TransactionInstruction,
   SYSVAR_CLOCK_PUBKEY,
@@ -11,7 +11,8 @@ import { Fees, Rewards } from "src/struct";
 import { FeesLayout, RewardsLayout } from "../layout";
 
 export enum AdminInstruction {
-  RampA = 100,
+  Initialize = 99,
+  RampA,
   StopRamp,
   Pause,
   Unpause,
@@ -21,6 +22,44 @@ export enum AdminInstruction {
   SetNewFees,
   SetNewRewards,
 }
+
+export const createAdminInitializeInstruction = (
+  config: PublicKey,
+  adminKey: PublicKey,
+  deltafiMint: PublicKey,
+  ampFactor: NumberU64,
+  fees: Fees,
+  rewards: Rewards,
+  programId: PublicKey
+): TransactionInstruction => {
+  const keys = [
+    { pubkey: config, isSigner: true, isWritable: false },
+    { pubkey: adminKey, isSigner: true, isWritable: false },
+    { pubkey: deltafiMint, isSigner: false, isWritable: false },
+  ];
+  const dataLayout = BufferLayout.struct([
+    BufferLayout.u8("instruction"),
+    BufferLayout.nu64("ampFactor"),
+    FeesLayout("fees"),
+    RewardsLayout("rewards"),
+  ]);
+  let data = Buffer.alloc(dataLayout.span);
+  dataLayout.encode(
+    {
+      instruction: AdminInstruction.Initialize,
+      ampFactor: ampFactor.toBuffer(),
+      fees: fees.toBuffer(),
+      rewards: rewards.toBuffer(),
+    },
+    data
+  );
+
+  return new TransactionInstruction({
+    keys,
+    data,
+    programId,
+  });
+};
 
 export const createRampAInstruction = (
   tokenSwap: PublicKey,
@@ -60,7 +99,7 @@ export const createRampAInstruction = (
 };
 
 export const createStopRampInstruction = (
-  tokenSwapAccount: Account,
+  tokenSwapAccount: Keypair,
   authority: PublicKey,
   adminAccount: PublicKey,
   programId: PublicKey
@@ -89,7 +128,7 @@ export const createStopRampInstruction = (
 };
 
 export const createPauseInstruction = (
-  tokenSwapAccount: Account,
+  tokenSwapAccount: Keypair,
   authority: PublicKey,
   adminAccount: PublicKey,
   programId: PublicKey
@@ -117,7 +156,7 @@ export const createPauseInstruction = (
 };
 
 export const createUnpauseInstruction = (
-  tokenSwapAccount: Account,
+  tokenSwapAccount: Keypair,
   authority: PublicKey,
   adminAccount: PublicKey,
   programId: PublicKey
@@ -145,7 +184,7 @@ export const createUnpauseInstruction = (
 };
 
 export const createSetFeeAccountInstruction = (
-  tokenSwapAccount: Account,
+  tokenSwapAccount: Keypair,
   authority: PublicKey,
   adminAccount: PublicKey,
   newFeeAccount: PublicKey,
@@ -175,7 +214,7 @@ export const createSetFeeAccountInstruction = (
 };
 
 export const createApplyNewAdminInstruction = (
-  tokenSwapAccount: Account,
+  tokenSwapAccount: Keypair,
   authority: PublicKey,
   adminAccount: PublicKey,
   programId: PublicKey
@@ -204,7 +243,7 @@ export const createApplyNewAdminInstruction = (
 };
 
 export const createCommitNewAdminInstruction = (
-  tokenSwapAccount: Account,
+  tokenSwapAccount: Keypair,
   authority: PublicKey,
   adminAccount: PublicKey,
   newAdminAccount: PublicKey,
@@ -235,7 +274,7 @@ export const createCommitNewAdminInstruction = (
 };
 
 export const createSetNewFeesInstruction = (
-  tokenSwapAccount: Account,
+  tokenSwapAccount: Keypair,
   authority: PublicKey,
   adminAccount: PublicKey,
   newFees: Fees,
@@ -268,7 +307,7 @@ export const createSetNewFeesInstruction = (
 };
 
 export const createSetNewRewardsInstruction = (
-  tokenSwapAccount: Account,
+  tokenSwapAccount: Keypair,
   authority: PublicKey,
   adminAccount: PublicKey,
   newRewards: Rewards,

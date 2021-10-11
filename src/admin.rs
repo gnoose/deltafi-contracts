@@ -114,7 +114,7 @@ fn is_admin(expected_admin_key: &Pubkey, admin_account_info: &AccountInfo) -> Pr
 /// Initialize configuration
 #[inline(never)]
 fn initialize(
-    program_id: &Pubkey,
+    _program_id: &Pubkey,
     amp_factor: u64,
     fees: &Fees,
     rewards: &Rewards,
@@ -122,7 +122,6 @@ fn initialize(
 ) -> ProgramResult {
     let account_info_iter = &mut accounts.iter();
     let config_info = next_account_info(account_info_iter)?;
-    let authority_info = next_account_info(account_info_iter)?;
     let admin_info = next_account_info(account_info_iter)?;
     let deltafi_mint_info = next_account_info(account_info_iter)?;
 
@@ -132,11 +131,6 @@ fn initialize(
     }
     if !admin_info.is_signer {
         return Err(ProgramError::MissingRequiredSignature);
-    }
-    let (config_authority, _) =
-        Pubkey::find_program_address(&[&config_info.key.to_bytes()], program_id);
-    if *authority_info.key != config_authority {
-        return Err(SwapError::InvalidProgramAddress.into());
     }
 
     if !(MIN_AMP..=MAX_AMP).contains(&amp_factor) {
@@ -572,21 +566,6 @@ mod tests {
         let amp_factor = MIN_AMP * 100;
         let mut accounts =
             ConfigAccountInfo::new(amp_factor, DEFAULT_TEST_FEES, DEFAULT_TEST_REWARDS);
-
-        // wrong authority
-        {
-            let old_authority_key = accounts.authority_key;
-            let (authority_key, _nonce) = Pubkey::find_program_address(
-                &[&accounts.config_key.to_bytes()[..]],
-                &spl_token::id(),
-            );
-            accounts.authority_key = authority_key;
-            assert_eq!(
-                Err(SwapError::InvalidProgramAddress.into()),
-                accounts.initialize()
-            );
-            accounts.authority_key = old_authority_key;
-        }
 
         // wrong amp_factor
         {
