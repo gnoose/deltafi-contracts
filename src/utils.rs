@@ -1747,17 +1747,12 @@ pub mod test_utils {
                     &SWAP_PROGRAM_ID,
                     &self.config_key,
                     &self.admin_key,
-                    &self.deltafi_mint_key,
                     self.amp_factor,
                     self.fees,
                     self.rewards,
                 )
                 .unwrap(),
-                vec![
-                    &mut self.config_account,
-                    &mut self.admin_account,
-                    &mut self.deltafi_mint_account,
-                ],
+                vec![&mut self.config_account, &mut self.admin_account],
             )
         }
 

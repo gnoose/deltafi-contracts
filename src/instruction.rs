@@ -8,7 +8,7 @@ use solana_program::{
     instruction::{AccountMeta, Instruction},
     program_error::ProgramError,
     program_pack::Pack,
-    pubkey::Pubkey,
+    pubkey::{Pubkey, PUBKEY_BYTES},
     sysvar::clock,
 };
 
@@ -32,7 +32,7 @@ impl InstructionType {
     pub fn check(input: &[u8]) -> Option<Self> {
         let (&tag, _rest) = input.split_first()?;
         match tag {
-            0x63u8..=0x6Fu8 => Some(Self::Admin),
+            100..=112 => Some(Self::Admin),
             0u8..=6u8 => Some(Self::Swap),
             10u8..=15u8 => Some(Self::StableSwap),
             0x1Eu8..=0x22u8 => Some(Self::Farm),
@@ -196,7 +196,7 @@ impl AdminInstruction {
     pub fn unpack(input: &[u8]) -> Result<Self, ProgramError> {
         let (&tag, rest) = input.split_first().ok_or(SwapError::InvalidInstruction)?;
         Ok(match tag {
-            0x63 => {
+            100 => {
                 let (amp_factor, rest) = unpack_u64(rest)?;
                 let (fees, rest) = rest.split_at(Fees::LEN);
                 let fees = Fees::unpack_unchecked(fees)?;
@@ -208,7 +208,7 @@ impl AdminInstruction {
                     rewards,
                 })
             }
-            0x64 => {
+            101 => {
                 let (target_amp, rest) = unpack_u64(rest)?;
                 let (stop_ramp_ts, _rest) = unpack_i64(rest)?;
                 Self::RampA(RampAData {
@@ -216,17 +216,17 @@ impl AdminInstruction {
                     stop_ramp_ts,
                 })
             }
-            0x65 => Self::StopRampA,
-            0x66 => Self::Pause,
-            0x67 => Self::Unpause,
-            0x68 => Self::SetFeeAccount,
-            0x69 => Self::ApplyNewAdmin,
-            0x6A => Self::CommitNewAdmin,
-            0x6B => {
+            102 => Self::StopRampA,
+            103 => Self::Pause,
+            104 => Self::Unpause,
+            105 => Self::SetFeeAccount,
+            106 => Self::ApplyNewAdmin,
+            107 => Self::CommitNewAdmin,
+            108 => {
                 let fees = Fees::unpack_unchecked(rest)?;
                 Self::SetNewFees(fees)
             }
-            0x6C => {
+            109 => {
                 let (&nonce, rest) = rest.split_first().ok_or(SwapError::InvalidInstruction)?;
                 let (alloc_point, rest) = unpack_u64(rest)?;
                 let (reward_unit, _rest) = unpack_u64(rest)?;
@@ -236,7 +236,7 @@ impl AdminInstruction {
                     reward_unit,
                 })
             }
-            0x6D => {
+            110 => {
                 let (&nonce, rest) = rest.split_first().ok_or(SwapError::InvalidInstruction)?;
                 let (alloc_point, rest) = unpack_u64(rest)?;
                 let (reward_unit, _rest) = unpack_u64(rest)?;
@@ -246,8 +246,8 @@ impl AdminInstruction {
                     reward_unit,
                 })
             }
-            0x6E => Self::ApplyNewAdminForFarm,
-            0x6F => {
+            111 => Self::ApplyNewAdminForFarm,
+            112 => {
                 let rewards = Rewards::unpack_unchecked(rest)?;
                 Self::SetNewRewards(rewards)
             }
@@ -264,7 +264,7 @@ impl AdminInstruction {
                 fees,
                 rewards,
             }) => {
-                buf.push(0x63);
+                buf.push(100);
                 buf.extend_from_slice(&amp_factor.to_le_bytes());
                 let mut fees_slice = [0u8; Fees::LEN];
                 Pack::pack_into_slice(&fees, &mut fees_slice[..]);
@@ -277,18 +277,18 @@ impl AdminInstruction {
                 target_amp,
                 stop_ramp_ts,
             }) => {
-                buf.push(0x64);
+                buf.push(101);
                 buf.extend_from_slice(&target_amp.to_le_bytes());
                 buf.extend_from_slice(&stop_ramp_ts.to_le_bytes());
             }
-            Self::StopRampA => buf.push(0x65),
-            Self::Pause => buf.push(0x66),
-            Self::Unpause => buf.push(0x67),
-            Self::SetFeeAccount => buf.push(0x68),
-            Self::ApplyNewAdmin => buf.push(0x69),
-            Self::CommitNewAdmin => buf.push(0x6a),
+            Self::StopRampA => buf.push(102),
+            Self::Pause => buf.push(103),
+            Self::Unpause => buf.push(104),
+            Self::SetFeeAccount => buf.push(105),
+            Self::ApplyNewAdmin => buf.push(106),
+            Self::CommitNewAdmin => buf.push(107),
             Self::SetNewFees(fees) => {
-                buf.push(0x6b);
+                buf.push(108);
                 let mut fees_slice = [0u8; Fees::LEN];
                 Pack::pack_into_slice(&fees, &mut fees_slice[..]);
                 buf.extend_from_slice(&fees_slice);
@@ -298,7 +298,7 @@ impl AdminInstruction {
                 alloc_point,
                 reward_unit,
             }) => {
-                buf.push(0x6c);
+                buf.push(109);
                 buf.push(nonce);
                 buf.extend_from_slice(&alloc_point.to_le_bytes());
                 buf.extend_from_slice(&reward_unit.to_le_bytes());
@@ -308,14 +308,14 @@ impl AdminInstruction {
                 alloc_point,
                 reward_unit,
             }) => {
-                buf.push(0x6d);
+                buf.push(110);
                 buf.push(nonce);
                 buf.extend_from_slice(&alloc_point.to_le_bytes());
                 buf.extend_from_slice(&reward_unit.to_le_bytes());
             }
-            Self::ApplyNewAdminForFarm => buf.push(0x6e),
+            Self::ApplyNewAdminForFarm => buf.push(111),
             Self::SetNewRewards(rewards) => {
-                buf.push(0x6f);
+                buf.push(112);
                 let mut rewards_slice = [0u8; Rewards::LEN];
                 Pack::pack_into_slice(&rewards, &mut rewards_slice[..]);
                 buf.extend_from_slice(&rewards_slice);
@@ -330,7 +330,6 @@ pub fn initialize_config(
     program_id: &Pubkey,
     config_key: &Pubkey,
     admin_key: &Pubkey,
-    deltafi_mint_key: &Pubkey,
     amp_factor: u64,
     fees: Fees,
     rewards: Rewards,
@@ -343,9 +342,8 @@ pub fn initialize_config(
     .pack();
 
     let accounts = vec![
-        AccountMeta::new_readonly(*config_key, true),
+        AccountMeta::new(*config_key, true),
         AccountMeta::new_readonly(*admin_key, true),
-        AccountMeta::new_readonly(*deltafi_mint_key, false),
     ];
 
     Ok(Instruction {
@@ -372,7 +370,7 @@ pub fn ramp_a(
 
     let accounts = vec![
         AccountMeta::new_readonly(*config_pubkey, true),
-        AccountMeta::new_readonly(*swap_pubkey, true),
+        AccountMeta::new(*swap_pubkey, true),
         AccountMeta::new_readonly(*admin_pubkey, true),
         AccountMeta::new_readonly(clock::id(), false),
     ];
@@ -1869,42 +1867,67 @@ pub fn farm_pending_deltafi(
 }
 
 fn unpack_i64(input: &[u8]) -> Result<(i64, &[u8]), ProgramError> {
-    if input.len() >= 8 {
-        let (amount, rest) = input.split_at(8);
-        let amount = amount
-            .get(..8)
-            .and_then(|slice| slice.try_into().ok())
-            .map(i64::from_le_bytes)
-            .ok_or(SwapError::InvalidInstruction)?;
-        Ok((amount, rest))
-    } else {
-        Err(SwapError::InvalidInstruction.into())
+    if input.len() < 8 {
+        return Err(SwapError::InstructionUnpackError.into());
     }
+    let (amount, rest) = input.split_at(8);
+    let amount = amount
+        .get(..8)
+        .and_then(|slice| slice.try_into().ok())
+        .map(i64::from_le_bytes)
+        .ok_or(SwapError::InstructionUnpackError)?;
+    Ok((amount, rest))
 }
 
 fn unpack_u64(input: &[u8]) -> Result<(u64, &[u8]), ProgramError> {
-    if input.len() >= 8 {
-        let (amount, rest) = input.split_at(8);
-        let amount = amount
-            .get(..8)
-            .and_then(|slice| slice.try_into().ok())
-            .map(u64::from_le_bytes)
-            .ok_or(SwapError::InvalidInstruction)?;
-        Ok((amount, rest))
-    } else {
-        Err(SwapError::InvalidInstruction.into())
+    if input.len() < 8 {
+        return Err(SwapError::InstructionUnpackError.into());
     }
+    let (amount, rest) = input.split_at(8);
+    let amount = amount
+        .get(..8)
+        .and_then(|slice| slice.try_into().ok())
+        .map(u64::from_le_bytes)
+        .ok_or(SwapError::InstructionUnpackError)?;
+    Ok((amount, rest))
 }
 
-/// Unpacks a reference from a bytes buffer.
-/// TODO actually pack / unpack instead of relying on normal memory layout.
-pub fn unpack<T>(input: &[u8]) -> Result<&T, ProgramError> {
-    if input.len() < size_of::<u8>() + size_of::<T>() {
-        return Err(ProgramError::InvalidAccountData);
+#[allow(dead_code)]
+fn unpack_u8(input: &[u8]) -> Result<(u8, &[u8]), ProgramError> {
+    if input.is_empty() {
+        return Err(SwapError::InstructionUnpackError.into());
     }
-    #[allow(clippy::cast_ptr_alignment)]
-    let val: &T = unsafe { &*(&input[1] as *const u8 as *const T) };
-    Ok(val)
+    let (bytes, rest) = input.split_at(1);
+    let value = bytes
+        .get(..1)
+        .and_then(|slice| slice.try_into().ok())
+        .map(u8::from_le_bytes)
+        .ok_or(SwapError::InstructionUnpackError)?;
+    Ok((value, rest))
+}
+
+#[allow(dead_code)]
+fn unpack_bytes32(input: &[u8]) -> Result<(&[u8; 32], &[u8]), ProgramError> {
+    if input.len() < 32 {
+        return Err(SwapError::InstructionUnpackError.into());
+    }
+    let (bytes, rest) = input.split_at(32);
+    Ok((
+        bytes
+            .try_into()
+            .map_err(|_| SwapError::InstructionUnpackError)?,
+        rest,
+    ))
+}
+
+#[allow(dead_code)]
+fn unpack_pubkey(input: &[u8]) -> Result<(Pubkey, &[u8]), ProgramError> {
+    if input.len() < PUBKEY_BYTES {
+        return Err(SwapError::InstructionUnpackError.into());
+    }
+    let (key, rest) = input.split_at(PUBKEY_BYTES);
+    let pk = Pubkey::new(key);
+    Ok((pk, rest))
 }
 
 #[cfg(test)]
@@ -1924,7 +1947,7 @@ mod tests {
             stop_ramp_ts,
         });
         let packed = check.pack();
-        let mut expect: Vec<u8> = vec![0x64];
+        let mut expect: Vec<u8> = vec![101];
         expect.extend_from_slice(&target_amp.to_le_bytes());
         expect.extend_from_slice(&stop_ramp_ts.to_le_bytes());
         assert_eq!(packed, expect);
@@ -1936,7 +1959,7 @@ mod tests {
 
         let check = AdminInstruction::StopRampA;
         let packed = check.pack();
-        let expect: Vec<u8> = vec![0x65];
+        let expect: Vec<u8> = vec![102];
         assert_eq!(packed, expect);
         let unpacked = AdminInstruction::unpack(&expect).unwrap();
         assert_eq!(
@@ -1946,7 +1969,7 @@ mod tests {
 
         let check = AdminInstruction::Pause;
         let packed = check.pack();
-        let expect: Vec<u8> = vec![0x66];
+        let expect: Vec<u8> = vec![103];
         assert_eq!(packed, expect);
         let unpacked = AdminInstruction::unpack(&expect).unwrap();
         assert_eq!(
@@ -1956,7 +1979,7 @@ mod tests {
 
         let check = AdminInstruction::Unpause;
         let packed = check.pack();
-        let expect: Vec<u8> = vec![0x67];
+        let expect: Vec<u8> = vec![104];
         assert_eq!(packed, expect);
         let unpacked = AdminInstruction::unpack(&expect).unwrap();
         assert_eq!(
@@ -1966,14 +1989,14 @@ mod tests {
 
         let check = AdminInstruction::SetFeeAccount;
         let packed = check.pack();
-        let expect: Vec<u8> = vec![0x68];
+        let expect: Vec<u8> = vec![105];
         assert_eq!(packed, expect);
         let unpacked = AdminInstruction::unpack(&expect).unwrap();
         assert_eq!(unpacked, check);
 
         let check = AdminInstruction::ApplyNewAdmin;
         let packed = check.pack();
-        let expect: Vec<u8> = vec![0x69];
+        let expect: Vec<u8> = vec![106];
         assert_eq!(packed, expect);
         let unpacked = AdminInstruction::unpack(&expect).unwrap();
         assert_eq!(
@@ -1983,7 +2006,7 @@ mod tests {
 
         let check = AdminInstruction::CommitNewAdmin;
         let packed = check.pack();
-        let expect: Vec<u8> = vec![0x6A];
+        let expect: Vec<u8> = vec![107];
         assert_eq!(packed, expect);
         let unpacked = AdminInstruction::unpack(&expect).unwrap();
         assert_eq!(
@@ -2003,7 +2026,7 @@ mod tests {
         };
         let check = AdminInstruction::SetNewFees(new_fees);
         let packed = check.pack();
-        let mut expect: Vec<u8> = vec![0x6B];
+        let mut expect: Vec<u8> = vec![108];
         let mut new_fees_slice = [0u8; Fees::LEN];
         new_fees.pack_into_slice(&mut new_fees_slice[..]);
         expect.extend_from_slice(&new_fees_slice);
@@ -2018,7 +2041,7 @@ mod tests {
         };
         let check = AdminInstruction::SetNewRewards(new_rewards);
         let packed = check.pack();
-        let mut expect: Vec<u8> = vec![0x6F];
+        let mut expect: Vec<u8> = vec![112];
         let mut new_rewards_slice = [0u8; Rewards::LEN];
         new_rewards.pack_into_slice(&mut new_rewards_slice[..]);
         expect.extend_from_slice(&new_rewards_slice);
@@ -2035,7 +2058,7 @@ mod tests {
             reward_unit,
         });
         let packed = check.pack();
-        let mut expect = vec![0x6C, nonce];
+        let mut expect = vec![109, nonce];
         expect.extend_from_slice(&alloc_point.to_le_bytes());
         expect.extend_from_slice(&reward_unit.to_le_bytes());
         assert_eq!(
@@ -2054,7 +2077,7 @@ mod tests {
             reward_unit,
         });
         let packed = check.pack();
-        let mut expect = vec![0x6D, nonce];
+        let mut expect = vec![110, nonce];
         expect.extend_from_slice(&alloc_point.to_le_bytes());
         expect.extend_from_slice(&reward_unit.to_le_bytes());
         assert_eq!(

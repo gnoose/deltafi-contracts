@@ -4,14 +4,12 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use num_traits::FromPrimitive;
 use solana_program::{
     account_info::{next_account_info, AccountInfo},
-    decode_error::DecodeError,
     entrypoint::ProgramResult,
     msg,
     program::invoke_signed,
-    program_error::{PrintProgramError, ProgramError},
+    program_error::ProgramError,
     program_pack::Pack,
     pubkey::Pubkey,
     sysvar::{clock::Clock, Sysvar},
@@ -2903,71 +2901,6 @@ impl Processor {
                 msg!("Instruction: Farm Print Pending Deltafi");
                 Self::process_farming_pending_deltafi(program_id, accounts)
             } // _ => Err(SwapError::InvalidInstruction.into())
-        }
-    }
-}
-
-impl PrintProgramError for SwapError {
-    fn print<E>(&self)
-    where
-        E: 'static + std::error::Error + DecodeError<E> + PrintProgramError + FromPrimitive,
-    {
-        match self {
-            SwapError::AlreadyInUse => msg!("Error: Swap account already in use"),
-            SwapError::InvalidAdmin => {
-                msg!("Error: Address of the admin fee account is incorrect")
-            }
-            SwapError::InvalidOwner => {
-                msg!("Error: The input account owner is not the program address")
-            }
-            SwapError::InvalidOutputOwner => {
-                msg!("Error: Output pool account owner cannot be the program address")
-            }
-            SwapError::InvalidProgramAddress => {
-                msg!("Error: Invalid program address generated from nonce and key")
-            }
-            SwapError::ExpectedMint => {
-                msg!("Error: Deserialized account is not an SPL Token mint")
-            }
-            SwapError::ExpectedAccount => {
-                msg!("Error: Deserialized account is not an SPL Token account")
-            }
-            SwapError::EmptySupply => msg!("Error: Input token account empty"),
-            SwapError::EmptyPool => msg!("Error: Pool token supply is 0"),
-            SwapError::InvalidSupply => msg!("Error: Pool token mint has a non-zero supply"),
-            SwapError::RepeatedMint => msg!("Error: Swap input token accounts have the same mint"),
-            SwapError::InvalidDelegate => msg!("Error: Token account has a delegate"),
-            SwapError::InvalidInput => msg!("Error: InvalidInput"),
-            SwapError::IncorrectSwapAccount => {
-                msg!("Error: Address of the provided swap token account is incorrect")
-            }
-            SwapError::IncorrectRewardAccount => {
-                msg!("Error: Address of the reward token account is incorrect")
-            }
-            SwapError::IncorrectMint => {
-                msg!("Error: Address of the provided token mint is incorrect")
-            }
-            SwapError::CalculationFailure => msg!("Error: CalculationFailure"),
-            SwapError::InvalidInstruction => msg!("Error: InvalidInstruction"),
-            // SwapError::NoSwapInstruction => msg!("Error: NoSwapInstruction"),
-            SwapError::ExceededSlippage => {
-                msg!("Error: Swap instruction exceeds desired slippage limit")
-            }
-            SwapError::InvalidCloseAuthority => msg!("Error: Token account has a close authority"),
-            SwapError::InvalidFreezeAuthority => {
-                msg!("Error: Pool token mint has a freeze authority")
-            }
-            SwapError::ConversionFailure => msg!("Error: Conversion to or from u64 failed"),
-            SwapError::Unauthorized => {
-                msg!("Error: Account is not authorized to execute this instruction")
-            }
-            SwapError::IsPaused => msg!("Error: Swap pool is paused"),
-            SwapError::RampLocked => msg!("Error: Ramp is locked in this time period"),
-            SwapError::InsufficientRampTime => msg!("Error: Insufficient ramp time"),
-            SwapError::ActiveTransfer => msg!("Error: Active admin transfer in progress"),
-            SwapError::NoActiveTransfer => msg!("Error: No active admin transfer in progress"),
-            SwapError::AdminDeadlineExceeded => msg!("Error: Admin transfer deadline exceeded"),
-            SwapError::MismatchedDecimals => msg!("Error: Token mints must have same decimals"),
         }
     }
 }

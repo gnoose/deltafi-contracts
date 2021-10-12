@@ -1,17 +1,17 @@
-import * as BufferLayout from "buffer-layout";
 import {
-  Keypair,
   PublicKey,
   TransactionInstruction,
   SYSVAR_CLOCK_PUBKEY,
 } from "@solana/web3.js";
+import { struct, u8 } from "buffer-layout";
+import BN from "bn.js";
 
-import { NumberU64 } from "../util/u64";
-import { Fees, Rewards } from "src/struct";
-import { FeesLayout, RewardsLayout } from "../layout";
+import { Fees, Rewards } from "../state";
+import { FeesLayout, RewardsLayout } from "../state";
+import { u64 } from "../util";
 
 export enum AdminInstruction {
-  Initialize = 99,
+  Initialize = 100,
   RampA,
   StopRamp,
   Pause,
@@ -23,33 +23,45 @@ export enum AdminInstruction {
   SetNewRewards,
 }
 
+export interface AdminInitializeData {
+  ampFactor: BN;
+  fees: Fees;
+  rewards: Rewards;
+}
+
+/** @internal */
+export const AdminInitializeDataLayout = struct<AdminInitializeData>(
+  [u64("ampFactor"), FeesLayout("fees"), RewardsLayout("rewards")],
+  "initData"
+);
+
+export interface RampAData {
+  targetAmp: BN;
+  stopRampTimestamp: BN;
+}
+
+/** @internal */
+export const RampADataLayout = struct<RampAData>(
+  [u64("targetAmp"), u64("stopRampTimestamp")],
+  "ramp"
+);
+
 export const createAdminInitializeInstruction = (
   config: PublicKey,
   adminKey: PublicKey,
-  deltafiMint: PublicKey,
-  ampFactor: NumberU64,
-  fees: Fees,
-  rewards: Rewards,
+  initData: AdminInitializeData,
   programId: PublicKey
 ): TransactionInstruction => {
   const keys = [
-    { pubkey: config, isSigner: true, isWritable: false },
+    { pubkey: config, isSigner: true, isWritable: true },
     { pubkey: adminKey, isSigner: true, isWritable: false },
-    { pubkey: deltafiMint, isSigner: false, isWritable: false },
   ];
-  const dataLayout = BufferLayout.struct([
-    BufferLayout.u8("instruction"),
-    BufferLayout.nu64("ampFactor"),
-    FeesLayout("fees"),
-    RewardsLayout("rewards"),
-  ]);
+  const dataLayout = struct([u8("instruction"), AdminInitializeDataLayout]);
   let data = Buffer.alloc(dataLayout.span);
   dataLayout.encode(
     {
       instruction: AdminInstruction.Initialize,
-      ampFactor: ampFactor.toBuffer(),
-      fees: fees.toBuffer(),
-      rewards: rewards.toBuffer(),
+      initData,
     },
     data
   );
@@ -62,34 +74,27 @@ export const createAdminInitializeInstruction = (
 };
 
 export const createRampAInstruction = (
+  config: PublicKey,
   tokenSwap: PublicKey,
-  authority: PublicKey,
-  adminAccount: PublicKey,
-  targetAmp: NumberU64,
-  stopRampTimestamp: NumberU64,
+  adminKey: PublicKey,
+  ramp: RampAData,
   programId: PublicKey
 ) => {
   const keys = [
-    { pubkey: tokenSwap, isSigner: true, isWritable: false },
-    { pubkey: authority, isSigner: false, isWritable: false },
-    { pubkey: adminAccount, isSigner: true, isWritable: false },
+    { pubkey: config, isSigner: false, isWritable: false },
+    { pubkey: tokenSwap, isSigner: true, isWritable: true },
+    { pubkey: adminKey, isSigner: true, isWritable: false },
     { pubkey: SYSVAR_CLOCK_PUBKEY, isSigner: false, isWritable: false },
   ];
-  const dataLayout = BufferLayout.struct([
-    BufferLayout.u8("instruction"),
-    BufferLayout.nu64("targetAmp"),
-    BufferLayout.nu64("stopRampTimestamp"),
-  ]);
+  const dataLayout = struct([u8("instruction"), RampADataLayout]);
   let data = Buffer.alloc(dataLayout.span);
-  const encodeLength = dataLayout.encode(
+  dataLayout.encode(
     {
       instruction: AdminInstruction.RampA,
-      targetAmp: targetAmp.toBuffer(),
-      stopRampTimestamp: stopRampTimestamp.toBuffer(),
+      ramp,
     },
     data
   );
-  data = data.slice(0, encodeLength);
 
   return new TransactionInstruction({
     keys,
@@ -99,26 +104,25 @@ export const createRampAInstruction = (
 };
 
 export const createStopRampInstruction = (
-  tokenSwapAccount: Keypair,
-  authority: PublicKey,
-  adminAccount: PublicKey,
+  config: PublicKey,
+  tokenSwap: PublicKey,
+  adminKey: PublicKey,
   programId: PublicKey
 ) => {
   const keys = [
-    { pubkey: tokenSwapAccount.publicKey, isSigner: true, isWritable: false },
-    { pubkey: authority, isSigner: false, isWritable: false },
-    { pubkey: adminAccount, isSigner: true, isWritable: false },
+    { pubkey: config, isSigner: false, isWritable: false },
+    { pubkey: tokenSwap, isSigner: true, isWritable: true },
+    { pubkey: adminKey, isSigner: true, isWritable: false },
     { pubkey: SYSVAR_CLOCK_PUBKEY, isSigner: false, isWritable: false },
   ];
-  const dataLayout = BufferLayout.struct([BufferLayout.u8("instruction")]);
+  const dataLayout = struct([u8("instruction")]);
   let data = Buffer.alloc(dataLayout.span);
-  const encodeLength = dataLayout.encode(
+  dataLayout.encode(
     {
       instruction: AdminInstruction.StopRamp,
     },
     data
   );
-  data = data.slice(0, encodeLength);
 
   return new TransactionInstruction({
     keys,
@@ -128,25 +132,24 @@ export const createStopRampInstruction = (
 };
 
 export const createPauseInstruction = (
-  tokenSwapAccount: Keypair,
-  authority: PublicKey,
-  adminAccount: PublicKey,
+  config: PublicKey,
+  tokenSwap: PublicKey,
+  adminKey: PublicKey,
   programId: PublicKey
 ) => {
   const keys = [
-    { pubkey: tokenSwapAccount.publicKey, isSigner: true, isWritable: false },
-    { pubkey: authority, isSigner: false, isWritable: false },
-    { pubkey: adminAccount, isSigner: true, isWritable: false },
+    { pubkey: config, isSigner: false, isWritable: false },
+    { pubkey: tokenSwap, isSigner: true, isWritable: true },
+    { pubkey: adminKey, isSigner: true, isWritable: false },
   ];
-  const dataLayout = BufferLayout.struct([BufferLayout.u8("instruction")]);
+  const dataLayout = struct([u8("instruction")]);
   let data = Buffer.alloc(dataLayout.span);
-  const encodeLength = dataLayout.encode(
+  dataLayout.encode(
     {
       instruction: AdminInstruction.Pause,
     },
     data
   );
-  data = data.slice(0, encodeLength);
 
   return new TransactionInstruction({
     keys,
@@ -156,25 +159,24 @@ export const createPauseInstruction = (
 };
 
 export const createUnpauseInstruction = (
-  tokenSwapAccount: Keypair,
-  authority: PublicKey,
-  adminAccount: PublicKey,
+  config: PublicKey,
+  tokenSwap: PublicKey,
+  adminKey: PublicKey,
   programId: PublicKey
 ) => {
   const keys = [
-    { pubkey: tokenSwapAccount.publicKey, isSigner: true, isWritable: false },
-    { pubkey: authority, isSigner: false, isWritable: false },
-    { pubkey: adminAccount, isSigner: true, isWritable: false },
+    { pubkey: config, isSigner: false, isWritable: false },
+    { pubkey: tokenSwap, isSigner: true, isWritable: true },
+    { pubkey: adminKey, isSigner: true, isWritable: false },
   ];
-  const dataLayout = BufferLayout.struct([BufferLayout.u8("instruction")]);
+  const dataLayout = struct([u8("instruction")]);
   let data = Buffer.alloc(dataLayout.span);
-  const encodeLength = dataLayout.encode(
+  dataLayout.encode(
     {
       instruction: AdminInstruction.Unpause,
     },
     data
   );
-  data = data.slice(0, encodeLength);
 
   return new TransactionInstruction({
     keys,
@@ -184,27 +186,26 @@ export const createUnpauseInstruction = (
 };
 
 export const createSetFeeAccountInstruction = (
-  tokenSwapAccount: Keypair,
-  authority: PublicKey,
-  adminAccount: PublicKey,
+  config: PublicKey,
+  tokenSwap: PublicKey,
+  adminKey: PublicKey,
   newFeeAccount: PublicKey,
   programId: PublicKey
 ) => {
   const keys = [
-    { pubkey: tokenSwapAccount.publicKey, isSigner: true, isWritable: false },
-    { pubkey: authority, isSigner: false, isWritable: false },
-    { pubkey: adminAccount, isSigner: true, isWritable: false },
+    { pubkey: config, isSigner: false, isWritable: false },
+    { pubkey: tokenSwap, isSigner: true, isWritable: true },
+    { pubkey: adminKey, isSigner: true, isWritable: false },
     { pubkey: newFeeAccount, isSigner: false, isWritable: false },
   ];
-  const dataLayout = BufferLayout.struct([BufferLayout.u8("instruction")]);
+  const dataLayout = struct([u8("instruction")]);
   let data = Buffer.alloc(dataLayout.span);
-  const encodeLength = dataLayout.encode(
+  dataLayout.encode(
     {
       instruction: AdminInstruction.SetFeeAccount,
     },
     data
   );
-  data = data.slice(0, encodeLength);
 
   return new TransactionInstruction({
     keys,
@@ -214,26 +215,23 @@ export const createSetFeeAccountInstruction = (
 };
 
 export const createApplyNewAdminInstruction = (
-  tokenSwapAccount: Keypair,
-  authority: PublicKey,
-  adminAccount: PublicKey,
+  config: PublicKey,
+  adminKey: PublicKey,
   programId: PublicKey
 ) => {
   const keys = [
-    { pubkey: tokenSwapAccount.publicKey, isSigner: true, isWritable: false },
-    { pubkey: authority, isSigner: false, isWritable: false },
-    { pubkey: adminAccount, isSigner: true, isWritable: false },
+    { pubkey: config, isSigner: false, isWritable: true },
+    { pubkey: adminKey, isSigner: true, isWritable: false },
     { pubkey: SYSVAR_CLOCK_PUBKEY, isSigner: false, isWritable: false },
   ];
-  const dataLayout = BufferLayout.struct([BufferLayout.u8("instruction")]);
+  const dataLayout = struct([u8("instruction")]);
   let data = Buffer.alloc(dataLayout.span);
-  const encodeLength = dataLayout.encode(
+  dataLayout.encode(
     {
       instruction: AdminInstruction.ApplyNewAdmin,
     },
     data
   );
-  data = data.slice(0, encodeLength);
 
   return new TransactionInstruction({
     keys,
@@ -243,28 +241,25 @@ export const createApplyNewAdminInstruction = (
 };
 
 export const createCommitNewAdminInstruction = (
-  tokenSwapAccount: Keypair,
-  authority: PublicKey,
-  adminAccount: PublicKey,
+  config: PublicKey,
+  adminKey: PublicKey,
   newAdminAccount: PublicKey,
   programId: PublicKey
 ) => {
   const keys = [
-    { pubkey: tokenSwapAccount.publicKey, isSigner: true, isWritable: false },
-    { pubkey: authority, isSigner: false, isWritable: false },
-    { pubkey: adminAccount, isSigner: true, isWritable: false },
+    { pubkey: config, isSigner: true, isWritable: true },
+    { pubkey: adminKey, isSigner: true, isWritable: false },
     { pubkey: newAdminAccount, isSigner: false, isWritable: false },
     { pubkey: SYSVAR_CLOCK_PUBKEY, isSigner: false, isWritable: false },
   ];
-  const dataLayout = BufferLayout.struct([BufferLayout.u8("instruction")]);
+  const dataLayout = struct([u8("instruction")]);
   let data = Buffer.alloc(dataLayout.span);
-  const encodeLength = dataLayout.encode(
+  dataLayout.encode(
     {
       instruction: AdminInstruction.CommitNewAdmin,
     },
     data
   );
-  data = data.slice(0, encodeLength);
 
   return new TransactionInstruction({
     keys,
@@ -274,30 +269,26 @@ export const createCommitNewAdminInstruction = (
 };
 
 export const createSetNewFeesInstruction = (
-  tokenSwapAccount: Keypair,
-  authority: PublicKey,
-  adminAccount: PublicKey,
+  config: PublicKey,
+  tokenSwap: PublicKey,
+  adminKey: PublicKey,
   newFees: Fees,
   programId: PublicKey
 ) => {
   const keys = [
-    { pubkey: tokenSwapAccount.publicKey, isSigner: true, isWritable: false },
-    { pubkey: authority, isSigner: false, isWritable: false },
-    { pubkey: adminAccount, isSigner: true, isWritable: false },
+    { pubkey: config, isSigner: false, isWritable: false },
+    { pubkey: tokenSwap, isSigner: true, isWritable: true },
+    { pubkey: adminKey, isSigner: true, isWritable: false },
   ];
-  const dataLayout = BufferLayout.struct([
-    BufferLayout.u8("instruction"),
-    FeesLayout("newFees"),
-  ]);
+  const dataLayout = struct([u8("instruction"), FeesLayout("newFees")]);
   let data = Buffer.alloc(dataLayout.span);
-  const encodeLength = dataLayout.encode(
+  dataLayout.encode(
     {
       instruction: AdminInstruction.CommitNewAdmin,
-      newFees: newFees.toBuffer(),
+      newFees,
     },
     data
   );
-  data = data.slice(0, encodeLength);
 
   return new TransactionInstruction({
     keys,
@@ -307,30 +298,26 @@ export const createSetNewFeesInstruction = (
 };
 
 export const createSetNewRewardsInstruction = (
-  tokenSwapAccount: Keypair,
-  authority: PublicKey,
-  adminAccount: PublicKey,
+  config: PublicKey,
+  tokenSwap: PublicKey,
+  adminKey: PublicKey,
   newRewards: Rewards,
   programId: PublicKey
 ) => {
   const keys = [
-    { pubkey: tokenSwapAccount.publicKey, isSigner: true, isWritable: false },
-    { pubkey: authority, isSigner: false, isWritable: false },
-    { pubkey: adminAccount, isSigner: true, isWritable: false },
+    { pubkey: config, isSigner: false, isWritable: false },
+    { pubkey: tokenSwap, isSigner: true, isWritable: true },
+    { pubkey: adminKey, isSigner: true, isWritable: false },
   ];
-  const dataLayout = BufferLayout.struct([
-    BufferLayout.u8("instruction"),
-    RewardsLayout("newRewards"),
-  ]);
+  const dataLayout = struct([u8("instruction"), RewardsLayout("newRewards")]);
   let data = Buffer.alloc(dataLayout.span);
-  const encodeLength = dataLayout.encode(
+  dataLayout.encode(
     {
       instruction: AdminInstruction.CommitNewAdmin,
-      newRewards: newRewards.toBuffer(),
+      newRewards,
     },
     data
   );
-  data = data.slice(0, encodeLength);
 
   return new TransactionInstruction({
     keys,

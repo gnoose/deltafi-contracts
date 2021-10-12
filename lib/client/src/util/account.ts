@@ -1,10 +1,10 @@
-import { PublicKey, Connection } from "@solana/web3.js";
+import { PublicKey, Connection, AccountInfo } from "@solana/web3.js";
 
 export const loadAccount = async (
   connection: Connection,
   address: PublicKey,
   programId: PublicKey
-): Promise<Buffer> => {
+): Promise<AccountInfo<Buffer>> => {
   const accountInfo = await connection.getAccountInfo(address);
   if (accountInfo === null) {
     throw new Error("Failed to find account");
@@ -16,5 +16,12 @@ export const loadAccount = async (
     );
   }
 
-  return Buffer.from(accountInfo.data);
+  return accountInfo;
+};
+
+export const getMinBalanceRentForExempt = async (
+  connection: Connection,
+  dataLength: number
+): Promise<number> => {
+  return await connection.getMinimumBalanceForRentExemption(dataLength);
 };

@@ -1,5 +1,5 @@
 import fs from "fs";
-import { Account, PublicKey, Connection } from "@solana/web3.js";
+import { Keypair, PublicKey, Connection } from "@solana/web3.js";
 
 export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -8,8 +8,8 @@ export function sleep(ms: number): Promise<void> {
 export async function newAccountWithLamports(
   connection: Connection,
   lamports: number = 1000000
-): Promise<Account> {
-  const account = new Account();
+): Promise<Keypair> {
+  const account = new Keypair();
 
   let retries = 60;
   try {
