@@ -23,6 +23,11 @@ spl-token = { version = "3.2", features = ["no-entrypoint"] }
 uint = { version = "0.8.3", default-features = false }
 thiserror = "1.0"
 log = "0.4"
+pyth-client = "0.2.2"
+
+[target.'cfg(unix)'.dependencies]
+solana-sdk = "=1.7.11"
+solana-client = "=1.7.11"
 
 [dev-dependencies]
 solana-sdk = "=1.7.11"
