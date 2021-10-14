@@ -34,10 +34,14 @@ export const DEFAULT_REWARDS: Rewards = {
 };
 
 export const CLUSTER_URL = "http://localhost:8899";
-export const BOOTSTRAP_TIMEOUT = 10000;
+export const BOOTSTRAP_TIMEOUT = 50000;
 export const AMP_FACTOR = 100;
-
+export const K = 0.5;
+export const I = 100;
 export const TWAP_OPEN = 1;
+export const MIN_AMP = 1;
+export const MAX_AMP = 1000000;
+export const MIN_RAMP_DURATION = 86400;
 
 /// swap directions - sell base
 export const SWAP_DIRECTION_SELL_BASE = 0;

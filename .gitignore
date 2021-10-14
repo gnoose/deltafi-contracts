@@ -24,3 +24,5 @@ tmp*
 
 # deploy json file
 last-deploy.json
+
+test-ledger

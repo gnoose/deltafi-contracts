@@ -6,6 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use solana_program::{
     account_info::{next_account_info, AccountInfo},
+    clock::Clock as BpfClock,
     entrypoint::ProgramResult,
     msg,
     program::invoke_signed,
@@ -503,10 +504,12 @@ impl Processor {
         let total_supply = FixedU64::new_from_fixed_u64(pool_mint.supply)?;
         let base_target = FixedU64::zero();
         let quote_target = FixedU64::zero();
-        let block_timestamp_last: i64 = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i64;
+        // let block_timestamp_last: i64 = SystemTime::now()
+        //     .duration_since(UNIX_EPOCH)
+        //     .unwrap()
+        //     .as_secs() as i64;
+        let clock = BpfClock::get()?;
+        let block_timestamp_last: i64 = clock.unix_timestamp;
         let k = FixedU64::new_from_fixed_u64(k_v)?;
         let i = FixedU64::new_from_fixed_u64(i_v)?;
         let (mint_amount, new_base_target, new_quote_target, new_base_reserve, new_quote_reserve) =
@@ -521,19 +524,12 @@ impl Processor {
                 i,
             )?;
 
-        Self::token_mint_to(
-            swap_info.key,
-            token_program_info.clone(),
-            pool_mint_info.clone(),
-            destination_info.clone(),
-            authority_info.clone(),
-            nonce,
-            mint_amount.inner(),
-        )?;
-        let new_block_timestamp_last: i64 = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i64;
+        // let new_block_timestamp_last: i64 = SystemTime::now()
+        //     .duration_since(UNIX_EPOCH)
+        //     .unwrap()
+        //     .as_secs() as i64;
+        let clock = BpfClock::get()?;
+        let new_block_timestamp_last = clock.unix_timestamp;
         let mut base_price_cumulative_last = FixedU64::zero();
         if is_open_twap == utils::TWAP_OPENED {
             let time_elapsed = new_block_timestamp_last - block_timestamp_last;
@@ -555,6 +551,16 @@ impl Processor {
             }
         }
         let receive_amount = FixedU64::zero();
+
+        Self::token_mint_to(
+            swap_info.key,
+            token_program_info.clone(),
+            pool_mint_info.clone(),
+            destination_info.clone(),
+            authority_info.clone(),
+            nonce,
+            mint_amount.inner(),
+        )?;
 
         let config = ConfigInfo::unpack(&config_info.data.borrow())?;
 

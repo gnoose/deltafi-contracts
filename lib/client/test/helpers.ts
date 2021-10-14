@@ -9,25 +9,19 @@ export async function newAccountWithLamports(
   connection: Connection,
   lamports: number = 1000000
 ): Promise<Keypair> {
-  const account = new Keypair();
+  const account = Keypair.generate();
 
-  let retries = 60;
   try {
-    await connection.requestAirdrop(account.publicKey, lamports);
+    const airdropSignature = await connection.requestAirdrop(
+      account.publicKey,
+      lamports
+    );
+    await connection.confirmTransaction(airdropSignature);
+    return account;
   } catch (e) {
     // tslint:disable:no-console
-    console.error(e);
+    throw new Error(`Airdrop of ${lamports} failed`);
   }
-  for (;;) {
-    await sleep(1000);
-    if (lamports === (await connection.getBalance(account.publicKey))) {
-      return account;
-    }
-    if (--retries <= 0) {
-      break;
-    }
-  }
-  throw new Error(`Airdrop of ${lamports} failed`);
 }
 
 export const getDeploymentInfo = () => {

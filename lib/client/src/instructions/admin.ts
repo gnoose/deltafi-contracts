@@ -82,7 +82,7 @@ export const createRampAInstruction = (
 ) => {
   const keys = [
     { pubkey: config, isSigner: false, isWritable: false },
-    { pubkey: tokenSwap, isSigner: true, isWritable: true },
+    { pubkey: tokenSwap, isSigner: false, isWritable: true },
     { pubkey: adminKey, isSigner: true, isWritable: false },
     { pubkey: SYSVAR_CLOCK_PUBKEY, isSigner: false, isWritable: false },
   ];
@@ -111,7 +111,7 @@ export const createStopRampInstruction = (
 ) => {
   const keys = [
     { pubkey: config, isSigner: false, isWritable: false },
-    { pubkey: tokenSwap, isSigner: true, isWritable: true },
+    { pubkey: tokenSwap, isSigner: false, isWritable: true },
     { pubkey: adminKey, isSigner: true, isWritable: false },
     { pubkey: SYSVAR_CLOCK_PUBKEY, isSigner: false, isWritable: false },
   ];

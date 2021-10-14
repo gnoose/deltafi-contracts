@@ -15,6 +15,9 @@ import { ConfigInfo, ConfigInfoLayout, parserConfigInfo } from "./state";
 import {
   AdminInitializeData,
   createAdminInitializeInstruction,
+  createRampAInstruction,
+  createStopRampInstruction,
+  RampAData,
 } from "./instructions";
 
 export const initialize = async (
@@ -70,4 +73,54 @@ export const loadConfig = async (
   if (!parsed) throw new Error("Failed to load configuration account");
 
   return parsed.data;
+};
+
+export const applyRampA = async (
+  connection: Connection,
+  payer: Keypair,
+  config: PublicKey,
+  tokenSwapAccount: Keypair,
+  adminAccount: Keypair,
+  ramp: RampAData,
+  swapProgramId: PublicKey
+) => {
+  const instruction = createRampAInstruction(
+    config,
+    tokenSwapAccount.publicKey,
+    adminAccount.publicKey,
+    ramp,
+    swapProgramId
+  );
+  const transaction = new Transaction().add(instruction);
+  await sendAndConfirmTransaction(
+    "apply amplification",
+    connection,
+    transaction,
+    payer,
+    adminAccount
+  );
+};
+
+export const stopRamp = async (
+  connection: Connection,
+  payer: Keypair,
+  config: PublicKey,
+  tokenSwapAccount: Keypair,
+  adminAccount: Keypair,
+  swapProgramId: PublicKey
+) => {
+  const instruction = createStopRampInstruction(
+    config,
+    tokenSwapAccount.publicKey,
+    adminAccount.publicKey,
+    swapProgramId
+  );
+  const transaction = new Transaction().add(instruction);
+  await sendAndConfirmTransaction(
+    "stop ramp",
+    connection,
+    transaction,
+    payer,
+    adminAccount
+  );
 };

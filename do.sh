@@ -52,13 +52,8 @@ perform_action() {
         ;;
     e2e-test)
         (
-            docker-compose up -d
-            {
-                ./scripts/deploy-stable-swap.sh localnet \
-                && yarn --cwd lib/client install \
-                && yarn --cwd lib/client test-int ${@:2}
-            } || docker-compose down
-            docker-compose down
+            yarn --cwd lib/client install \
+            && yarn --cwd lib/client ci
         )
     ;;
     deploy)
