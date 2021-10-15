@@ -1,13 +1,17 @@
 //! pricing for proactive market maker
 use std::{cmp::Ordering, mem::size_of};
 
-use solana_program::{entrypoint::ProgramResult, program_error::ProgramError};
+use arrayref::{array_mut_ref, array_ref, array_refs, mut_array_refs};
+use solana_program::{
+    entrypoint::ProgramResult, program_error::ProgramError, program_pack::Sealed,
+};
 
 use crate::{
     bn::FixedU64,
     math2::{
         general_integrate, solve_quadratic_function_for_target, solve_quadratic_function_for_trade,
     },
+    solana_program::program_pack::Pack,
 };
 
 /// RStatus enum
@@ -58,25 +62,25 @@ impl RState {
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct PMMState {
-    /// i
+    /// i - mid price
     pub i: FixedU64,
 
-    /// k
+    /// k - slope
     pub k: FixedU64,
 
-    /// b
+    /// b - base_reserve
     pub b: FixedU64,
 
-    /// q
+    /// q - quote_reserve
     pub q: FixedU64,
 
-    /// b_0
+    /// b_0 - base_target
     pub b_0: FixedU64,
 
-    /// q_0
+    /// q_0 - quote_target
     pub q_0: FixedU64,
 
-    /// r
+    /// r - state
     pub r: RState,
 }
 
@@ -101,6 +105,39 @@ impl PMMState {
             q_0,
             r,
         }
+    }
+}
+
+impl Sealed for PMMState {}
+impl Pack for PMMState {
+    const LEN: usize = 55;
+    #[allow(clippy::many_single_char_names)]
+    fn unpack_from_slice(input: &[u8]) -> Result<Self, ProgramError> {
+        let input = array_ref![input, 0, 55];
+        #[allow(clippy::ptr_offset_with_cast)]
+        let (i, k, b, q, b_0, q_0, r) = array_refs![input, 9, 9, 9, 9, 9, 9, 1];
+        Ok(Self {
+            i: FixedU64::unpack_from_slice(i)?,
+            k: FixedU64::unpack_from_slice(k)?,
+            b: FixedU64::unpack_from_slice(b)?,
+            q: FixedU64::unpack_from_slice(q)?,
+            b_0: FixedU64::unpack_from_slice(b_0)?,
+            q_0: FixedU64::unpack_from_slice(q_0)?,
+            r: RState::unpack(r)?,
+        })
+    }
+
+    #[allow(clippy::many_single_char_names)]
+    fn pack_into_slice(&self, output: &mut [u8]) {
+        let output = array_mut_ref![output, 0, 55];
+        let (i, k, b, q, b_0, q_0, r) = mut_array_refs![output, 9, 9, 9, 9, 9, 9, 1];
+        self.k.pack_into_slice(&mut k[..]);
+        self.i.pack_into_slice(&mut i[..]);
+        *r = self.r.pack();
+        self.b.pack_into_slice(&mut b[..]);
+        self.q.pack_into_slice(&mut q[..]);
+        self.b_0.pack_into_slice(&mut b_0[..]);
+        self.q_0.pack_into_slice(&mut q_0[..]);
     }
 }
 

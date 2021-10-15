@@ -94,7 +94,7 @@ mod tests {
     #[test]
     fn basic_tests() {
         let sol_prod_pubkey =
-            Pubkey::from_str("ALP8SdU9oARYVLgLR7LrqMNCYBnhtnQz1cj6bwgwQmgj").unwrap();
+            Pubkey::from_str("2Lg3b2UdD4hzrxHpcwhgShuUdccTKFoo2doAUZawEdPH").unwrap();
         let (price, conf) = get_pyth_price_info(sol_prod_pubkey).unwrap();
         assert_ne!((price, conf), (0, 0));
     }

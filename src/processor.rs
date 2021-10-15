@@ -357,7 +357,7 @@ impl Processor {
                     new_quote_reserve,
                     new_base_target,
                     new_quote_target,
-                    token_swap.r,
+                    token_swap.pmm_state.r,
                 );
 
                 base_price_cumulative_last = base_price_cumulative_last.checked_add(
@@ -387,19 +387,19 @@ impl Processor {
             admin_fee_key_b: *admin_fee_b_info.key,
             fees: config.fees,
             rewards: config.rewards,
-            k,
-            i,
-            r: token_swap.r,
-            base_target: new_base_target,
-            quote_target: new_quote_target,
-            base_reserve: new_base_reserve,
-            quote_reserve: new_quote_reserve,
+            pmm_state: PMMState::new(
+                i,
+                k,
+                new_base_reserve,
+                new_quote_reserve,
+                new_base_target,
+                new_quote_target,
+                token_swap.pmm_state.r,
+            ),
             is_open_twap,
             block_timestamp_last: new_block_timestamp_last,
             base_price_cumulative_last,
             receive_amount,
-            base_balance,
-            quote_balance,
         };
         SwapInfo::pack(obj, &mut swap_info.data.borrow_mut())?;
         Ok(())
@@ -541,7 +541,7 @@ impl Processor {
                     new_quote_reserve,
                     new_base_target,
                     new_quote_target,
-                    token_swap.r,
+                    token_swap.pmm_state.r,
                 );
 
                 base_price_cumulative_last = base_price_cumulative_last.checked_add(
@@ -583,19 +583,19 @@ impl Processor {
             admin_fee_key_b: *admin_fee_b_info.key,
             fees: config.fees,
             rewards: config.rewards,
-            k,
-            i,
-            r: token_swap.r,
-            base_target: new_base_target,
-            quote_target: new_quote_target,
-            base_reserve: new_base_reserve,
-            quote_reserve: new_quote_reserve,
+            pmm_state: PMMState::new(
+                i,
+                k,
+                new_base_reserve,
+                new_quote_reserve,
+                new_base_target,
+                new_quote_target,
+                token_swap.pmm_state.r,
+            ),
             is_open_twap,
             block_timestamp_last: new_block_timestamp_last,
             base_price_cumulative_last,
             receive_amount,
-            base_balance,
-            quote_balance,
         };
         SwapInfo::pack(obj, &mut swap_info.data.borrow_mut())?;
         Ok(())
@@ -725,19 +725,19 @@ impl Processor {
             deltafi_mint: token_swap.deltafi_mint,
             fees: token_swap.fees,
             rewards: token_swap.rewards,
-            k: token_swap.k,
-            i: token_swap.i,
-            r: token_swap.r,
-            base_target: token_swap.base_target,
-            quote_target: token_swap.quote_target,
-            base_reserve: token_swap.base_reserve,
-            quote_reserve: token_swap.quote_reserve,
+            pmm_state: PMMState::new(
+                token_swap.pmm_state.i,
+                token_swap.pmm_state.k,
+                token_swap.pmm_state.b,
+                token_swap.pmm_state.q,
+                token_swap.pmm_state.b_0,
+                token_swap.pmm_state.q_0,
+                token_swap.pmm_state.r,
+            ),
             is_open_twap: token_swap.is_open_twap,
             block_timestamp_last: token_swap.block_timestamp_last,
             base_price_cumulative_last: token_swap.base_price_cumulative_last,
             receive_amount: dy_swap_amount,
-            base_balance: token_swap.base_balance,
-            quote_balance: token_swap.quote_balance,
         };
         SwapInfo::pack(obj, &mut swap_info.data.borrow_mut())?;
 
@@ -869,19 +869,19 @@ impl Processor {
         let quote_balance = FixedU64::new_from_fixed_u64(token_b.amount)?;
         let pay_amount = FixedU64::new_from_fixed_u64(amount_in)?;
 
-        let base_reserve = token_swap.base_reserve;
-        let quote_reserve = token_swap.quote_reserve;
-        let base_target = token_swap.base_target;
-        let quote_target = token_swap.quote_target;
+        let base_reserve = token_swap.pmm_state.b;
+        let quote_reserve = token_swap.pmm_state.q;
+        let base_target = token_swap.pmm_state.b_0;
+        let quote_target = token_swap.pmm_state.q_0;
 
         let mut state = PMMState::new(
-            token_swap.i,
-            token_swap.k,
+            token_swap.pmm_state.i,
+            token_swap.pmm_state.k,
             base_reserve,
             quote_reserve,
             base_target,
             quote_target,
-            token_swap.r,
+            token_swap.pmm_state.r,
         );
         adjusted_target(&mut state)?;
         let mut _new_r = RState::One;
@@ -1011,13 +1011,13 @@ impl Processor {
             if time_elapsed > 0 && _new_base_reserve.inner() != 0 && _new_quote_reserve.inner() != 0
             {
                 let state = PMMState::new(
-                    token_swap.i,
-                    token_swap.k,
+                    token_swap.pmm_state.i,
+                    token_swap.pmm_state.k,
                     _new_base_reserve,
                     _new_quote_reserve,
                     new_base_target,
                     new_quote_target,
-                    token_swap.r,
+                    token_swap.pmm_state.r,
                 );
 
                 base_price_cumulative_last = base_price_cumulative_last.checked_add(
@@ -1047,19 +1047,19 @@ impl Processor {
             deltafi_mint: token_swap.deltafi_mint,
             fees: token_swap.fees,
             rewards: token_swap.rewards,
-            k: token_swap.k,
-            i: token_swap.i,
-            r: _new_r,
-            base_target: new_base_target,
-            quote_target: new_quote_target,
-            base_reserve: _new_base_reserve,
-            quote_reserve: _new_quote_reserve,
+            pmm_state: PMMState::new(
+                token_swap.pmm_state.i,
+                token_swap.pmm_state.k,
+                _new_base_reserve,
+                _new_quote_reserve,
+                new_base_target,
+                new_quote_target,
+                _new_r,
+            ),
             is_open_twap: token_swap.is_open_twap,
             block_timestamp_last,
             base_price_cumulative_last,
             receive_amount,
-            base_balance: _new_base_reserve,
-            quote_balance: _new_quote_reserve,
         };
         SwapInfo::pack(obj, &mut swap_info.data.borrow_mut())?;
 
@@ -1168,19 +1168,19 @@ impl Processor {
             }
         }
 
-        let base_reserve = token_swap.base_reserve;
-        let quote_reserve = token_swap.quote_reserve;
-        let base_target = token_swap.base_target;
-        let quote_target = token_swap.quote_target;
+        let base_reserve = token_swap.pmm_state.b;
+        let quote_reserve = token_swap.pmm_state.q;
+        let base_target = token_swap.pmm_state.b_0;
+        let quote_target = token_swap.pmm_state.q_0;
 
         let mut state = PMMState::new(
-            token_swap.i,
-            token_swap.k,
+            token_swap.pmm_state.i,
+            token_swap.pmm_state.k,
             base_reserve,
             quote_reserve,
             base_target,
             quote_target,
-            token_swap.r,
+            token_swap.pmm_state.r,
         );
         adjusted_target(&mut state)?;
 
@@ -1236,108 +1236,22 @@ impl Processor {
             deltafi_mint: token_swap.deltafi_mint,
             fees: token_swap.fees,
             rewards: token_swap.rewards,
-            k: token_swap.k,
-            i: token_swap.i,
-            r: token_swap.r,
-            base_target: token_swap.base_target,
-            quote_target: token_swap.quote_target,
-            base_reserve: token_swap.base_reserve,
-            quote_reserve: token_swap.quote_reserve,
+            pmm_state: PMMState::new(
+                token_swap.pmm_state.i,
+                token_swap.pmm_state.k,
+                token_swap.pmm_state.b,
+                token_swap.pmm_state.q,
+                token_swap.pmm_state.b_0,
+                token_swap.pmm_state.q_0,
+                token_swap.pmm_state.r,
+            ),
             is_open_twap: token_swap.is_open_twap,
             block_timestamp_last: token_swap.block_timestamp_last,
             base_price_cumulative_last: token_swap.base_price_cumulative_last,
             receive_amount: dy_swap_amount,
-            base_balance: token_swap.base_balance,
-            quote_balance: token_swap.quote_balance,
         };
         SwapInfo::pack(obj, &mut swap_info.data.borrow_mut())?;
 
-        Ok(())
-    }
-
-    /// Processes an [UpdateBalance](enum.Instruction.html).
-    pub fn process_update_balance(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
-        let account_info_iter = &mut accounts.iter();
-        let swap_info = next_account_info(account_info_iter)?;
-        let authority_info = next_account_info(account_info_iter)?;
-        let _source_info = next_account_info(account_info_iter)?;
-        let swap_source_info = next_account_info(account_info_iter)?;
-        let swap_destination_info = next_account_info(account_info_iter)?;
-        let _destination_info = next_account_info(account_info_iter)?;
-        let reward_token_info = next_account_info(account_info_iter)?;
-        let reward_mint_info = next_account_info(account_info_iter)?;
-        let _admin_destination_info = next_account_info(account_info_iter)?;
-        let _token_program_info = next_account_info(account_info_iter)?;
-        let _clock_sysvar_info = next_account_info(account_info_iter)?;
-
-        let token_swap = SwapInfo::unpack(&swap_info.data.borrow())?;
-        if token_swap.is_paused {
-            return Err(SwapError::IsPaused.into());
-        }
-        if *authority_info.key != utils::authority_id(program_id, swap_info.key, token_swap.nonce)?
-        {
-            return Err(SwapError::InvalidProgramAddress.into());
-        }
-        if !(*swap_source_info.key == token_swap.token_a
-            || *swap_source_info.key == token_swap.token_b)
-        {
-            return Err(SwapError::IncorrectSwapAccount.into());
-        }
-        if !(*swap_destination_info.key == token_swap.token_a
-            || *swap_destination_info.key == token_swap.token_b)
-        {
-            return Err(SwapError::IncorrectSwapAccount.into());
-        }
-        if *swap_source_info.key == *swap_destination_info.key {
-            return Err(SwapError::InvalidInput.into());
-        }
-        if *reward_mint_info.key != token_swap.deltafi_mint {
-            return Err(SwapError::IncorrectMint.into());
-        }
-        if *reward_token_info.key != token_swap.deltafi_token {
-            return Err(SwapError::IncorrectRewardAccount.into());
-        }
-        let token_a = utils::unpack_token_account(&swap_source_info.data.borrow())?;
-        let token_b = utils::unpack_token_account(&swap_destination_info.data.borrow())?;
-
-        let base_balance = FixedU64::new_from_fixed_u64(token_a.amount)?;
-        let quote_balance = FixedU64::new_from_fixed_u64(token_b.amount)?;
-
-        let obj = SwapInfo {
-            is_initialized: token_swap.is_initialized,
-            is_paused: token_swap.is_paused,
-            nonce: token_swap.nonce,
-            initial_amp_factor: token_swap.initial_amp_factor,
-            target_amp_factor: token_swap.target_amp_factor,
-            start_ramp_ts: token_swap.start_ramp_ts,
-            stop_ramp_ts: token_swap.stop_ramp_ts,
-            token_a: token_swap.token_a,
-            token_b: token_swap.token_b,
-            pool_mint: token_swap.pool_mint,
-            token_a_mint: token_swap.token_a_mint,
-            token_b_mint: token_swap.token_b_mint,
-            admin_fee_key_a: token_swap.admin_fee_key_a,
-            admin_fee_key_b: token_swap.admin_fee_key_b,
-            deltafi_token: token_swap.deltafi_token,
-            deltafi_mint: token_swap.deltafi_mint,
-            fees: token_swap.fees,
-            rewards: token_swap.rewards,
-            k: token_swap.k,
-            i: token_swap.i,
-            r: token_swap.r,
-            base_target: token_swap.base_target,
-            quote_target: token_swap.quote_target,
-            base_reserve: token_swap.base_reserve,
-            quote_reserve: token_swap.quote_reserve,
-            is_open_twap: token_swap.is_open_twap,
-            block_timestamp_last: token_swap.block_timestamp_last,
-            base_price_cumulative_last: token_swap.base_price_cumulative_last,
-            receive_amount: token_swap.receive_amount,
-            base_balance,
-            quote_balance,
-        };
-
-        SwapInfo::pack(obj, &mut swap_info.data.borrow_mut())?;
         Ok(())
     }
 
@@ -1459,19 +1373,19 @@ impl Processor {
             }
         }
 
-        let base_reserve = token_swap.base_reserve;
-        let quote_reserve = token_swap.quote_reserve;
-        let base_target = token_swap.base_target;
-        let quote_target = token_swap.quote_target;
+        let base_reserve = token_swap.pmm_state.b;
+        let quote_reserve = token_swap.pmm_state.q;
+        let base_target = token_swap.pmm_state.b_0;
+        let quote_target = token_swap.pmm_state.q_0;
 
         let mut state = PMMState::new(
-            token_swap.i,
-            token_swap.k,
+            token_swap.pmm_state.i,
+            token_swap.pmm_state.k,
             base_reserve,
             quote_reserve,
             base_target,
             quote_target,
-            token_swap.r,
+            token_swap.pmm_state.r,
         );
         adjusted_target(&mut state)?;
 
@@ -1636,13 +1550,13 @@ impl Processor {
             if time_elapsed > 0 && _new_base_reserve.inner() != 0 && _new_quote_reserve.inner() != 0
             {
                 let state = PMMState::new(
-                    token_swap.i,
-                    token_swap.k,
+                    token_swap.pmm_state.i,
+                    token_swap.pmm_state.k,
                     _new_base_reserve,
                     _new_quote_reserve,
                     new_base_target,
                     new_quote_target,
-                    token_swap.r,
+                    token_swap.pmm_state.r,
                 );
 
                 base_price_cumulative_last = base_price_cumulative_last.checked_add(
@@ -1672,19 +1586,19 @@ impl Processor {
             deltafi_mint: token_swap.deltafi_mint,
             fees: token_swap.fees,
             rewards: token_swap.rewards,
-            k: token_swap.k,
-            i: token_swap.i,
-            r: _new_r,
-            base_target: new_base_target,
-            quote_target: new_quote_target,
-            base_reserve: _new_base_reserve,
-            quote_reserve: _new_quote_reserve,
+            pmm_state: PMMState::new(
+                token_swap.pmm_state.i,
+                token_swap.pmm_state.k,
+                _new_base_reserve,
+                _new_quote_reserve,
+                new_base_target,
+                new_quote_target,
+                _new_r,
+            ),
             is_open_twap: token_swap.is_open_twap,
             block_timestamp_last,
             base_price_cumulative_last,
             receive_amount,
-            base_balance: _new_base_reserve,
-            quote_balance: _new_quote_reserve,
         };
         SwapInfo::pack(obj, &mut swap_info.data.borrow_mut())?;
 
@@ -1761,17 +1675,17 @@ impl Processor {
         let mut quote_blance = FixedU64::new_from_fixed_u64(token_b.amount)?;
         let base_in_amount = FixedU64::new_from_fixed_u64(token_a_amount)?;
         let quote_in_amount = FixedU64::new_from_fixed_u64(token_b_amount)?;
-        let base_reserve = token_swap.base_reserve;
-        let quote_reserve = token_swap.quote_reserve;
-        let base_target = token_swap.base_target;
-        let quote_target = token_swap.quote_target;
+        let base_reserve = token_swap.pmm_state.b;
+        let quote_reserve = token_swap.pmm_state.q;
+        let base_target = token_swap.pmm_state.b_0;
+        let quote_target = token_swap.pmm_state.q_0;
 
         let (base_adjusted_in_amount, quote_adjusted_in_amount) = get_deposit_adjustment_amount(
             base_in_amount,
             quote_in_amount,
             base_reserve,
             quote_reserve,
-            token_swap.i,
+            token_swap.pmm_state.i,
         )?;
 
         base_blance = base_blance.checked_add(base_adjusted_in_amount)?;
@@ -1786,7 +1700,7 @@ impl Processor {
                 base_target,
                 quote_target,
                 FixedU64::new_from_fixed_u64(pool_mint.supply)?,
-                token_swap.i,
+                token_swap.pmm_state.i,
             )?;
 
         Self::token_transfer(
@@ -1826,13 +1740,13 @@ impl Processor {
             let time_elapsed = block_timestamp_last - token_swap.block_timestamp_last;
             if time_elapsed > 0 && new_base_reserve.inner() != 0 && new_quote_reserve.inner() != 0 {
                 let state = PMMState::new(
-                    token_swap.i,
-                    token_swap.k,
+                    token_swap.pmm_state.i,
+                    token_swap.pmm_state.k,
                     new_base_reserve,
                     new_quote_reserve,
                     new_base_target,
                     new_quote_target,
-                    token_swap.r,
+                    token_swap.pmm_state.r,
                 );
 
                 base_price_cumulative_last = base_price_cumulative_last.checked_add(
@@ -1862,19 +1776,19 @@ impl Processor {
             deltafi_mint: token_swap.deltafi_mint,
             fees: token_swap.fees,
             rewards: token_swap.rewards,
-            k: token_swap.k,
-            i: token_swap.i,
-            r: token_swap.r,
-            base_target: new_base_target,
-            quote_target: new_quote_target,
-            base_reserve: new_base_reserve,
-            quote_reserve: new_quote_reserve,
+            pmm_state: PMMState::new(
+                token_swap.pmm_state.i,
+                token_swap.pmm_state.k,
+                new_base_reserve,
+                new_base_target,
+                new_base_target,
+                new_quote_target,
+                token_swap.pmm_state.r,
+            ),
             is_open_twap: token_swap.is_open_twap,
             block_timestamp_last,
             base_price_cumulative_last,
             receive_amount,
-            base_balance: FixedU64::new_from_fixed_u64(token_a.amount)?,
-            quote_balance: FixedU64::new_from_fixed_u64(token_b.amount)?,
         };
         SwapInfo::pack(obj, &mut swap_info.data.borrow_mut())?;
 
@@ -1929,17 +1843,17 @@ impl Processor {
         let mut quote_blance = FixedU64::new_from_fixed_u64(token_b.amount)?;
         let base_in_amount = FixedU64::new_from_fixed_u64(token_a_amount)?;
         let quote_in_amount = FixedU64::new_from_fixed_u64(token_b_amount)?;
-        let base_reserve = token_swap.base_reserve;
-        let quote_reserve = token_swap.quote_reserve;
-        let base_target = token_swap.base_target;
-        let quote_target = token_swap.quote_target;
+        let base_reserve = token_swap.pmm_state.b;
+        let quote_reserve = token_swap.pmm_state.q;
+        let base_target = token_swap.pmm_state.b_0;
+        let quote_target = token_swap.pmm_state.q_0;
 
         let (base_adjusted_in_amount, quote_adjusted_in_amount) = get_deposit_adjustment_amount(
             base_in_amount,
             quote_in_amount,
             base_reserve,
             quote_reserve,
-            token_swap.i,
+            token_swap.pmm_state.i,
         )?;
 
         base_blance = base_blance.checked_add(base_adjusted_in_amount)?;
@@ -1954,7 +1868,7 @@ impl Processor {
                 base_target,
                 quote_target,
                 FixedU64::new_from_fixed_u64(pool_mint.supply)?,
-                token_swap.i,
+                token_swap.pmm_state.i,
             )?;
 
         if mint_amount.inner() < min_mint_amount {
@@ -1998,13 +1912,13 @@ impl Processor {
             let time_elapsed = block_timestamp_last - token_swap.block_timestamp_last;
             if time_elapsed > 0 && new_base_reserve.inner() != 0 && new_quote_reserve.inner() != 0 {
                 let state = PMMState::new(
-                    token_swap.i,
-                    token_swap.k,
+                    token_swap.pmm_state.i,
+                    token_swap.pmm_state.k,
                     new_base_reserve,
                     new_quote_reserve,
                     new_base_target,
                     new_quote_target,
-                    token_swap.r,
+                    token_swap.pmm_state.r,
                 );
 
                 base_price_cumulative_last = base_price_cumulative_last.checked_add(
@@ -2034,19 +1948,19 @@ impl Processor {
             deltafi_mint: token_swap.deltafi_mint,
             fees: token_swap.fees,
             rewards: token_swap.rewards,
-            k: token_swap.k,
-            i: token_swap.i,
-            r: token_swap.r,
-            base_target: new_base_target,
-            quote_target: new_quote_target,
-            base_reserve: new_base_reserve,
-            quote_reserve: new_quote_reserve,
+            pmm_state: PMMState::new(
+                token_swap.pmm_state.i,
+                token_swap.pmm_state.k,
+                new_base_reserve,
+                new_quote_reserve,
+                new_base_target,
+                new_quote_target,
+                token_swap.pmm_state.r,
+            ),
             is_open_twap: token_swap.is_open_twap,
             block_timestamp_last,
             base_price_cumulative_last,
             receive_amount,
-            base_balance: FixedU64::new_from_fixed_u64(token_a.amount)?,
-            quote_balance: FixedU64::new_from_fixed_u64(token_b.amount)?,
         };
         SwapInfo::pack(obj, &mut swap_info.data.borrow_mut())?;
 
@@ -2867,10 +2781,6 @@ impl Processor {
                     accounts,
                 )
             }
-            SwapInstruction::UpdateBalance() => {
-                msg!("Instruction: UpdateBalance");
-                Self::process_update_balance(program_id, accounts)
-            }
         }
     }
 
@@ -2982,11 +2892,8 @@ mod tests {
         let mut accounts = SwapAccountInfo::new(
             &user_key,
             &config_account,
-            amp_factor,
             token_a_amount,
             token_b_amount,
-            DEFAULT_TEST_FEES,
-            DEFAULT_TEST_REWARDS,
             default_k(),
             default_i(),
             utils::TWAP_OPENED,
@@ -3460,8 +3367,8 @@ mod tests {
         assert_eq!(swap_info.admin_fee_key_a, accounts.admin_fee_a_key);
         assert_eq!(swap_info.admin_fee_key_b, accounts.admin_fee_b_key);
         assert_eq!(swap_info.fees, DEFAULT_TEST_FEES);
-        assert_eq!(swap_info.k, default_k());
-        assert_eq!(swap_info.i, default_i());
+        assert_eq!(swap_info.pmm_state.k, default_k());
+        assert_eq!(swap_info.pmm_state.i, default_i());
         let token_a = utils::unpack_token_account(&accounts.token_a_account.data).unwrap();
         assert_eq!(token_a.amount, token_a_amount);
         let token_b = utils::unpack_token_account(&accounts.token_b_account.data).unwrap();
@@ -3485,11 +3392,8 @@ mod tests {
         let mut accounts = SwapAccountInfo::new(
             &user_key,
             &config_account,
-            amp_factor,
             token_a_amount,
             token_b_amount,
-            DEFAULT_TEST_FEES,
-            DEFAULT_TEST_REWARDS,
             default_k(),
             default_i(),
             utils::TWAP_OPENED,
@@ -3963,8 +3867,8 @@ mod tests {
         assert_eq!(swap_info.admin_fee_key_a, accounts.admin_fee_a_key);
         assert_eq!(swap_info.admin_fee_key_b, accounts.admin_fee_b_key);
         assert_eq!(swap_info.fees, DEFAULT_TEST_FEES);
-        assert_eq!(swap_info.k, default_k());
-        assert_eq!(swap_info.i, default_i());
+        assert_eq!(swap_info.pmm_state.k, default_k());
+        assert_eq!(swap_info.pmm_state.i, default_i());
         let token_a = utils::unpack_token_account(&accounts.token_a_account.data).unwrap();
         assert_eq!(token_a.amount, token_a_amount);
         let token_b = utils::unpack_token_account(&accounts.token_b_account.data).unwrap();
@@ -3987,11 +3891,8 @@ mod tests {
         let mut accounts = SwapAccountInfo::new(
             &user_key,
             &config_account,
-            amp_factor,
             token_a_amount,
             token_b_amount,
-            DEFAULT_TEST_FEES,
-            DEFAULT_TEST_REWARDS,
             default_k(),
             default_i(),
             utils::TWAP_OPENED,
@@ -4509,11 +4410,8 @@ mod tests {
         let mut accounts = SwapAccountInfo::new(
             &user_key,
             &config_account,
-            amp_factor,
             token_a_amount,
             token_b_amount,
-            DEFAULT_TEST_FEES,
-            DEFAULT_TEST_REWARDS,
             default_k(),
             default_i(),
             utils::TWAP_OPENED,
@@ -5030,11 +4928,8 @@ mod tests {
         let mut accounts = SwapAccountInfo::new(
             &user_key,
             &config_account,
-            amp_factor,
             token_a_amount,
             token_b_amount,
-            DEFAULT_TEST_FEES,
-            DEFAULT_TEST_REWARDS,
             default_k(),
             default_i(),
             utils::TWAP_OPENED,
@@ -5684,11 +5579,8 @@ mod tests {
         let mut accounts = SwapAccountInfo::new(
             &user_key,
             &config_account,
-            amp_factor,
             token_a_amount.inner(),
             token_b_amount.inner(),
-            swap_fees,
-            swap_rewards,
             k,
             i,
             is_open_twap,
@@ -5730,10 +5622,10 @@ mod tests {
         assert_eq!(token_admin_fee_a_amount, 0);
         assert_eq!(token_admin_fee_b_amount, 0);
         assert_eq!(deltafi_reward_amount, 0);
-        assert_eq!(initial_info.base_target.inner(), 1000000000);
-        assert_eq!(initial_info.quote_target.inner(), 1000000000);
-        assert_eq!(initial_info.base_reserve.inner(), 1000000000);
-        assert_eq!(initial_info.quote_reserve.inner(), 1000000000);
+        assert_eq!(initial_info.pmm_state.b_0.inner(), 1000000000);
+        assert_eq!(initial_info.pmm_state.q_0.inner(), 1000000000);
+        assert_eq!(initial_info.pmm_state.b.inner(), 1000000000);
+        assert_eq!(initial_info.pmm_state.q.inner(), 1000000000);
 
         let (
             token_a_key,
@@ -5805,10 +5697,10 @@ mod tests {
         assert_eq!(token_admin_fee_a_amount, 0);
         assert_eq!(token_admin_fee_b_amount, 49);
         assert_eq!(deltafi_reward_amount, 10000);
-        assert_eq!(swap_info.base_target.into_real_u64_ceil(), 1000);
-        assert_eq!(swap_info.quote_target.into_real_u64_ceil(), 1000);
-        assert_eq!(swap_info.base_reserve.into_real_u64_ceil(), 1100);
-        assert_eq!(swap_info.quote_reserve.into_real_u64_ceil(), 901);
+        assert_eq!(swap_info.pmm_state.b_0.into_real_u64_ceil(), 1000);
+        assert_eq!(swap_info.pmm_state.q_0.into_real_u64_ceil(), 1000);
+        assert_eq!(swap_info.pmm_state.b.into_real_u64_ceil(), 1100);
+        assert_eq!(swap_info.pmm_state.q.into_real_u64_ceil(), 901);
 
         swap_direction = SWAP_DIRECTION_SELL_QUOTE;
 
@@ -5870,10 +5762,10 @@ mod tests {
         assert_eq!(token_admin_fee_a_amount, 49);
         assert_eq!(token_admin_fee_b_amount, 49);
         assert_eq!(deltafi_reward_amount, 19891);
-        assert_eq!(swap_info.base_target.into_real_u64_ceil(), 1000);
-        assert_eq!(swap_info.quote_target.into_real_u64_ceil(), 995);
-        assert_eq!(swap_info.base_reserve.into_real_u64_ceil(), 1001);
-        assert_eq!(swap_info.quote_reserve.into_real_u64_ceil(), 1001);
+        assert_eq!(swap_info.pmm_state.b_0.into_real_u64_ceil(), 1000);
+        assert_eq!(swap_info.pmm_state.q_0.into_real_u64_ceil(), 995);
+        assert_eq!(swap_info.pmm_state.b.into_real_u64_ceil(), 1001);
+        assert_eq!(swap_info.pmm_state.q.into_real_u64_ceil(), 1001);
     }
 
     #[test]
@@ -5914,11 +5806,8 @@ mod tests {
         let mut accounts = SwapAccountInfo::new(
             &user_key,
             &config_account,
-            amp_factor,
             token_a_amount.inner(),
             token_b_amount.inner(),
-            swap_fees,
-            swap_rewards,
             k,
             i,
             is_open_twap,
@@ -5989,126 +5878,6 @@ mod tests {
     }
 
     #[test]
-    fn test_update_balance() {
-        let user_key = pubkey_rand();
-        let swapper_key = pubkey_rand();
-        let amp_factor = 85;
-        let token_a_amount = FixedU64::new_from_u64(1000).unwrap();
-        let token_b_amount = FixedU64::new_from_u64(1000).unwrap();
-        let k = FixedU64::one()
-            .checked_mul_floor(FixedU64::new(1))
-            .unwrap()
-            .checked_div_floor(FixedU64::new(10))
-            .unwrap();
-        let i = FixedU64::one();
-        let is_open_twap = utils::TWAP_OPENED;
-
-        let swap_fees: Fees = Fees {
-            admin_trade_fee_numerator: 1,
-            admin_trade_fee_denominator: 1000,
-            admin_withdraw_fee_numerator: 1,
-            admin_withdraw_fee_denominator: 1000,
-            trade_fee_numerator: 1,
-            trade_fee_denominator: 2000,
-            withdraw_fee_numerator: 1,
-            withdraw_fee_denominator: 2000,
-        };
-
-        let swap_rewards = Rewards {
-            trade_reward_numerator: 1,
-            trade_reward_denominator: 1000,
-            trade_reward_cap: 100,
-        };
-
-        let mut config_account =
-            ConfigAccountInfo::new(amp_factor, DEFAULT_TEST_FEES, DEFAULT_TEST_REWARDS);
-        config_account.initialize().unwrap();
-
-        let mut accounts = SwapAccountInfo::new(
-            &user_key,
-            &config_account,
-            amp_factor,
-            token_a_amount.inner(),
-            token_b_amount.inner(),
-            swap_fees,
-            swap_rewards,
-            k,
-            i,
-            is_open_twap,
-        );
-        accounts.initialize_swap().unwrap();
-
-        let initial_a = token_a_amount.checked_div_ceil(FixedU64::new(2)).unwrap();
-        let initial_b = token_b_amount.checked_div_ceil(FixedU64::new(2)).unwrap();
-        let pay_amount = FixedU64::new_from_u64(100).unwrap();
-        let minimum_b_amount = pay_amount.checked_div_ceil(FixedU64::new(2)).unwrap();
-
-        let swap_token_a_key = accounts.token_a_key;
-        let swap_token_b_key = accounts.token_b_key;
-
-        let (
-            token_a_key,
-            mut token_a_account,
-            token_b_key,
-            mut token_b_account,
-            _pool_key,
-            _pool_account,
-        ) = accounts.setup_token_accounts(
-            &user_key,
-            &swapper_key,
-            initial_a.inner(),
-            initial_b.inner(),
-            0,
-        );
-
-        accounts
-            .update_balance(
-                &token_a_key,
-                &mut token_a_account,
-                &swap_token_a_key,
-                &swap_token_b_key,
-                &token_b_key,
-                &mut token_b_account,
-            )
-            .unwrap();
-
-        let swap_info = SwapInfo::unpack(&accounts.swap_account.data).unwrap();
-
-        assert_eq!(swap_info.base_balance.into_real_u64_ceil(), 1000);
-        assert_eq!(swap_info.quote_balance.into_real_u64_ceil(), 1000);
-
-        accounts
-            .swap(
-                &swapper_key,
-                &token_a_key,
-                &mut token_a_account,
-                &swap_token_a_key,
-                &swap_token_b_key,
-                &token_b_key,
-                &mut token_b_account,
-                pay_amount.inner(),
-                minimum_b_amount.inner(),
-                SWAP_DIRECTION_SELL_QUOTE,
-            )
-            .unwrap();
-
-        accounts
-            .update_balance(
-                &token_a_key,
-                &mut token_a_account,
-                &swap_token_a_key,
-                &swap_token_b_key,
-                &token_b_key,
-                &mut token_b_account,
-            )
-            .unwrap();
-
-        let swap_info = SwapInfo::unpack(&accounts.swap_account.data).unwrap();
-        assert_eq!(swap_info.base_balance.into_real_u64_ceil(), 912);
-        assert_eq!(swap_info.quote_balance.into_real_u64_ceil(), 1100);
-    }
-
-    #[test]
     fn test_sell_buy() {
         let user_key = pubkey_rand();
         let swapper_key = pubkey_rand();
@@ -6146,11 +5915,8 @@ mod tests {
         let mut accounts = SwapAccountInfo::new(
             &user_key,
             &config_account,
-            amp_factor,
             token_a_amount.inner(),
             token_b_amount.inner(),
-            swap_fees,
-            swap_rewards,
             k,
             i,
             is_open_twap,
@@ -6192,10 +5958,10 @@ mod tests {
         assert_eq!(token_admin_fee_a_amount, 0);
         assert_eq!(token_admin_fee_b_amount, 0);
         assert_eq!(deltafi_reward_amount, 0);
-        assert_eq!(initial_info.base_target.inner(), 1000000000);
-        assert_eq!(initial_info.quote_target.inner(), 1000000000);
-        assert_eq!(initial_info.base_reserve.inner(), 1000000000);
-        assert_eq!(initial_info.quote_reserve.inner(), 1000000000);
+        assert_eq!(initial_info.pmm_state.b_0.inner(), 1000000000);
+        assert_eq!(initial_info.pmm_state.q_0.inner(), 1000000000);
+        assert_eq!(initial_info.pmm_state.b.inner(), 1000000000);
+        assert_eq!(initial_info.pmm_state.q.inner(), 1000000000);
 
         let (
             token_a_key,
@@ -6267,10 +6033,10 @@ mod tests {
         assert_eq!(token_admin_fee_a_amount, 0);
         assert_eq!(token_admin_fee_b_amount, 45);
         assert_eq!(deltafi_reward_amount, 10000);
-        assert_eq!(swap_info.base_target.into_real_u64_ceil(), 1000);
-        assert_eq!(swap_info.quote_target.into_real_u64_ceil(), 1000);
-        assert_eq!(swap_info.base_reserve.into_real_u64_ceil(), 1100);
-        assert_eq!(swap_info.quote_reserve.into_real_u64_ceil(), 910);
+        assert_eq!(swap_info.pmm_state.b_0.into_real_u64_ceil(), 1000);
+        assert_eq!(swap_info.pmm_state.q_0.into_real_u64_ceil(), 1000);
+        assert_eq!(swap_info.pmm_state.b.into_real_u64_ceil(), 1100);
+        assert_eq!(swap_info.pmm_state.q.into_real_u64_ceil(), 910);
 
         swap_direction = SWAP_DIRECTION_SELL_QUOTE;
 
@@ -6329,10 +6095,10 @@ mod tests {
         assert_eq!(token_admin_fee_a_amount, 52);
         assert_eq!(token_admin_fee_b_amount, 45);
         assert_eq!(deltafi_reward_amount, 19891);
-        assert_eq!(swap_info.base_target.into_real_u64_ceil(), 1000);
-        assert_eq!(swap_info.quote_target.into_real_u64_ceil(), 1005);
-        assert_eq!(swap_info.base_reserve.into_real_u64_ceil(), 996);
-        assert_eq!(swap_info.quote_reserve.into_real_u64_ceil(), 1010);
+        assert_eq!(swap_info.pmm_state.b_0.into_real_u64_ceil(), 1000);
+        assert_eq!(swap_info.pmm_state.q_0.into_real_u64_ceil(), 1005);
+        assert_eq!(swap_info.pmm_state.b.into_real_u64_ceil(), 996);
+        assert_eq!(swap_info.pmm_state.q.into_real_u64_ceil(), 1010);
     }
 
     #[test]
@@ -6348,11 +6114,8 @@ mod tests {
         let mut accounts = SwapAccountInfo::new(
             &user_key,
             &config_account,
-            amp_factor,
             token_a_amount,
             token_b_amount,
-            DEFAULT_TEST_FEES,
-            DEFAULT_TEST_REWARDS,
             default_k(),
             default_i(),
             utils::TWAP_OPENED,
@@ -6769,11 +6532,8 @@ mod tests {
         let mut accounts = SwapAccountInfo::new(
             &user_key,
             &config_account,
-            amp_factor,
             token_a_amount,
             token_b_amount,
-            DEFAULT_TEST_FEES,
-            DEFAULT_TEST_REWARDS,
             default_k(),
             default_i(),
             utils::TWAP_OPENED,
@@ -7189,11 +6949,8 @@ mod tests {
         let mut accounts = SwapAccountInfo::new(
             &user_key,
             &config_account,
-            amp_factor,
             token_a_amount,
             token_b_amount,
-            DEFAULT_TEST_FEES,
-            DEFAULT_TEST_REWARDS,
             default_k(),
             default_i(),
             utils::TWAP_OPENED,
