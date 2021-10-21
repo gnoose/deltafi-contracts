@@ -12,7 +12,6 @@ pub mod instruction;
 pub mod math2;
 pub mod pool_converter;
 pub mod processor;
-pub mod pyth_price;
 pub mod rewards;
 pub mod state;
 pub mod utils;

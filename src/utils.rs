@@ -6,10 +6,10 @@ use spl_token::state::Account;
 use crate::error::SwapError;
 
 /// swap directions - sell base
-pub const SWAP_DIRECTION_SELL_BASE: u64 = 0;
+pub const SWAP_DIRECTION_SELL_BASE: u8 = 0;
 
 /// swap directions - sell quote
-pub const SWAP_DIRECTION_SELL_QUOTE: u64 = 1;
+pub const SWAP_DIRECTION_SELL_QUOTE: u8 = 1;
 
 /// Default token decimals
 pub const DEFAULT_TOKEN_DECIMALS: u8 = 6;
@@ -18,10 +18,16 @@ pub const DEFAULT_TOKEN_DECIMALS: u8 = 6;
 pub const DEFAULT_BASE_POINT: u64 = 1000000;
 
 /// Open Twap Flag
-pub const TWAP_OPENED: u64 = 1;
+pub const TWAP_OPENED: u8 = 1;
 
 /// Close Twap Falg
-pub const TWAP_CLOSED: u64 = 0;
+pub const TWAP_CLOSED: u8 = 0;
+
+/// curve mode - pmm
+pub const CURVE_PMM: u8 = 0;
+
+/// curve mode - amm
+pub const CURVE_AMM: u8 = 1;
 
 /// Calculates the authority id by generating a program address.
 pub fn authority_id(program_id: &Pubkey, my_info: &Pubkey, nonce: u8) -> Result<Pubkey, SwapError> {
@@ -34,9 +40,17 @@ pub fn unpack_token_account(data: &[u8]) -> Result<Account, SwapError> {
     Account::unpack(data).map_err(|_| SwapError::ExpectedAccount)
 }
 
+/// check if the buf is consist of zero
+pub fn is_zero(buf: &[u8]) -> bool {
+    let (prefix, aligned, suffix) = unsafe { buf.align_to::<u128>() };
+
+    prefix.iter().all(|&x| x == 0)
+        && suffix.iter().all(|&x| x == 0)
+        && aligned.iter().all(|&x| x == 0)
+}
+
 #[cfg(test)]
 pub mod test_utils {
-    use std::time::{SystemTime, UNIX_EPOCH};
 
     use solana_program::{
         account_info::AccountInfo, clock::Clock, entrypoint::ProgramResult,
@@ -141,6 +155,8 @@ pub mod test_utils {
         pub admin_fee_a_account: Account,
         pub admin_fee_b_key: Pubkey,
         pub admin_fee_b_account: Account,
+        pub pyth_key: Pubkey,
+        pub pyth_account: Account,
         pub fees: Fees,
         pub rewards: Rewards,
         pub k: FixedU64,
@@ -149,7 +165,8 @@ pub mod test_utils {
         pub quote_target: FixedU64,
         pub base_reserve: FixedU64,
         pub quote_reserve: FixedU64,
-        pub is_open_twap: u64,
+        pub is_open_twap: u8,
+        pub curve_mode: u8,
         pub block_timestamp_last: i64,
         pub base_price_cumulative_last: FixedU64,
     }
@@ -162,10 +179,13 @@ pub mod test_utils {
             token_b_amount: u64,
             k: FixedU64,
             i: FixedU64,
-            is_open_twap: u64,
+            is_open_twap: u8,
+            curve_mode: u8,
         ) -> Self {
             let swap_key = pubkey_rand();
             let swap_account = Account::new(0, SwapInfo::get_packed_len(), &SWAP_PROGRAM_ID);
+            let pyth_key = pubkey_rand();
+            let pyth_account = Account::new(0, SplAccount::get_packed_len(), &SWAP_PROGRAM_ID);
             let (authority_key, nonce) =
                 Pubkey::find_program_address(&[&swap_key.to_bytes()[..]], &SWAP_PROGRAM_ID);
 
@@ -238,10 +258,7 @@ pub mod test_utils {
             let quote_target = FixedU64::zero();
             let base_reserve = FixedU64::zero();
             let quote_reserve = FixedU64::zero();
-            let block_timestamp_last = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs() as i64;
+            let block_timestamp_last: i64 = Clock::clone(&Default::default()).unix_timestamp;
             let base_price_cumulative_last = FixedU64::zero();
 
             SwapAccountInfo {
@@ -275,6 +292,8 @@ pub mod test_utils {
                 admin_fee_a_account,
                 admin_fee_b_key,
                 admin_fee_b_account,
+                pyth_key,
+                pyth_account,
                 fees: config.fees,
                 rewards: config.rewards,
                 k,
@@ -284,46 +303,10 @@ pub mod test_utils {
                 base_reserve,
                 quote_reserve,
                 is_open_twap,
+                curve_mode,
                 block_timestamp_last,
                 base_price_cumulative_last,
             }
-        }
-
-        pub fn initialize_stable_swap(&mut self) -> ProgramResult {
-            do_process_stable_instruction(
-                stable_initialize(
-                    &SWAP_PROGRAM_ID,
-                    &spl_token::id(),
-                    &self.config_key,
-                    &self.swap_key,
-                    &self.authority_key,
-                    &self.admin_fee_a_key,
-                    &self.admin_fee_b_key,
-                    &self.token_a_key,
-                    &self.token_b_key,
-                    &self.pool_mint_key,
-                    &self.pool_token_key,
-                    &self.deltafi_token_key,
-                    self.nonce,
-                    self.k.inner(),
-                    self.i.inner(),
-                    self.is_open_twap,
-                )
-                .unwrap(),
-                vec![
-                    &mut self.config_account,
-                    &mut self.swap_account,
-                    &mut Account::default(),
-                    &mut self.admin_fee_a_account,
-                    &mut self.admin_fee_b_account,
-                    &mut self.token_a_account,
-                    &mut self.token_b_account,
-                    &mut self.pool_mint_account,
-                    &mut self.pool_token_account,
-                    &mut self.deltafi_token_account,
-                    &mut Account::default(),
-                ],
-            )
         }
 
         pub fn initialize_swap(&mut self) -> ProgramResult {
@@ -341,10 +324,12 @@ pub mod test_utils {
                     &self.pool_mint_key,
                     &self.pool_token_key,
                     &self.deltafi_token_key,
+                    &self.pyth_key,
                     self.nonce,
                     self.k.inner(),
                     self.i.inner(),
                     self.is_open_twap,
+                    self.curve_mode,
                 )
                 .unwrap(),
                 vec![
@@ -358,6 +343,7 @@ pub mod test_utils {
                     &mut self.pool_mint_account,
                     &mut self.pool_token_account,
                     &mut self.deltafi_token_account,
+                    &mut self.pyth_account,
                     &mut Account::default(),
                 ],
             )
@@ -455,119 +441,6 @@ pub mod test_utils {
         }
 
         #[allow(clippy::too_many_arguments)]
-        pub fn stable_swap(
-            &mut self,
-            user_key: &Pubkey,
-            user_source_key: &Pubkey,
-            mut user_source_account: &mut Account,
-            swap_source_key: &Pubkey,
-            swap_destination_key: &Pubkey,
-            user_destination_key: &Pubkey,
-            mut user_destination_account: &mut Account,
-            amount_in: u64,
-            minimum_amount_out: u64,
-            swap_direction: u64,
-        ) -> ProgramResult {
-            // approve moving from user source account
-            let admin_destination_key;
-
-            match swap_direction {
-                SWAP_DIRECTION_SELL_BASE => {
-                    msg!("swap: swap direction sell base");
-                    do_process_stable_instruction(
-                        approve(
-                            &spl_token::id(),
-                            &user_source_key,
-                            &self.authority_key,
-                            &user_key,
-                            &[],
-                            amount_in,
-                        )
-                        .unwrap(),
-                        vec![
-                            &mut user_source_account,
-                            &mut Account::default(),
-                            &mut Account::default(),
-                        ],
-                    )
-                    .unwrap();
-
-                    admin_destination_key = self.get_admin_fee_key(swap_destination_key);
-                }
-                SWAP_DIRECTION_SELL_QUOTE => {
-                    msg!("swap: swap direction sell quote");
-                    do_process_stable_instruction(
-                        approve(
-                            &spl_token::id(),
-                            &user_destination_key,
-                            &self.authority_key,
-                            &user_key,
-                            &[],
-                            amount_in,
-                        )
-                        .unwrap(),
-                        vec![
-                            &mut user_destination_account,
-                            &mut Account::default(),
-                            &mut Account::default(),
-                        ],
-                    )
-                    .unwrap();
-
-                    admin_destination_key = self.get_admin_fee_key(swap_source_key);
-                }
-                _ => {
-                    admin_destination_key = self.get_admin_fee_key(swap_destination_key);
-                }
-            }
-
-            let mut admin_destination_account =
-                self.get_admin_fee_account(&admin_destination_key).clone();
-            let mut swap_source_account = self.get_token_account(swap_source_key).clone();
-            let mut swap_destination_account = self.get_token_account(swap_destination_key).clone();
-
-            // perform the swap
-            do_process_stable_instruction(
-                stable_swap(
-                    &SWAP_PROGRAM_ID,
-                    &spl_token::id(),
-                    &self.swap_key,
-                    &self.authority_key,
-                    &user_source_key,
-                    &swap_source_key,
-                    &swap_destination_key,
-                    &user_destination_key,
-                    &self.deltafi_token_key,
-                    &self.deltafi_mint_key,
-                    &admin_destination_key,
-                    amount_in,
-                    minimum_amount_out,
-                    swap_direction,
-                )
-                .unwrap(),
-                vec![
-                    &mut self.swap_account,
-                    &mut Account::default(),
-                    &mut user_source_account,
-                    &mut swap_source_account,
-                    &mut swap_destination_account,
-                    &mut user_destination_account,
-                    &mut self.deltafi_token_account,
-                    &mut self.deltafi_mint_account,
-                    &mut admin_destination_account,
-                    &mut Account::default(),
-                    &mut clock_account(ZERO_TS),
-                ],
-            )?;
-
-            self.set_admin_fee_account_(&admin_destination_key, admin_destination_account);
-            self.set_token_account(swap_source_key, swap_source_account);
-            self.set_token_account(swap_destination_key, swap_destination_account);
-
-            Ok(())
-        }
-
-        #[allow(clippy::too_many_arguments)]
         pub fn swap(
             &mut self,
             user_key: &Pubkey,
@@ -579,7 +452,8 @@ pub mod test_utils {
             mut user_destination_account: &mut Account,
             amount_in: u64,
             minimum_amount_out: u64,
-            swap_direction: u64,
+            swap_direction: u8,
+            curve_mode: u8,
         ) -> ProgramResult {
             // approve moving from user source account
             let admin_destination_key;
@@ -653,9 +527,11 @@ pub mod test_utils {
                     &self.deltafi_token_key,
                     &self.deltafi_mint_key,
                     &admin_destination_key,
+                    &self.pyth_key,
                     amount_in,
                     minimum_amount_out,
                     swap_direction,
+                    curve_mode,
                 )
                 .unwrap(),
                 vec![
@@ -668,6 +544,7 @@ pub mod test_utils {
                     &mut self.deltafi_token_account,
                     &mut self.deltafi_mint_account,
                     &mut admin_destination_account,
+                    &mut self.pyth_account,
                     &mut Account::default(),
                     &mut clock_account(ZERO_TS),
                 ],
@@ -683,15 +560,12 @@ pub mod test_utils {
         #[allow(clippy::too_many_arguments)]
         pub fn calc_receive_amount(
             &mut self,
-            user_source_key: &Pubkey,
-            mut user_source_account: &mut Account,
             swap_source_key: &Pubkey,
             swap_destination_key: &Pubkey,
-            user_destination_key: &Pubkey,
-            mut user_destination_account: &mut Account,
             amount_in: u64,
             minimum_amount_out: u64,
-            swap_direction: u64,
+            swap_direction: u8,
+            curve_mode: u8,
         ) -> ProgramResult {
             let admin_destination_key;
             match swap_direction {
@@ -716,32 +590,27 @@ pub mod test_utils {
             do_process_instruction(
                 calc_receive_amount(
                     &SWAP_PROGRAM_ID,
-                    &TOKEN_PROGRAM_ID,
                     &self.swap_key,
                     &self.authority_key,
-                    &user_source_key,
                     &swap_source_key,
                     &swap_destination_key,
-                    &user_destination_key,
                     &self.deltafi_token_key,
                     &self.deltafi_mint_key,
                     &admin_destination_key,
                     amount_in,
                     minimum_amount_out,
                     swap_direction,
+                    curve_mode,
                 )
                 .unwrap(),
                 vec![
                     &mut self.swap_account,
                     &mut Account::default(),
-                    &mut user_source_account,
                     &mut swap_source_account,
                     &mut swap_destination_account,
-                    &mut user_destination_account,
                     &mut self.deltafi_token_account,
                     &mut self.deltafi_mint_account,
                     &mut admin_destination_account,
-                    &mut Account::default(),
                     &mut clock_account(ZERO_TS),
                 ],
             )?;
@@ -751,89 +620,6 @@ pub mod test_utils {
             self.set_token_account(swap_destination_key, swap_destination_account);
 
             Ok(())
-        }
-
-        #[allow(clippy::too_many_arguments)]
-        pub fn stable_deposit(
-            &mut self,
-            depositor_key: &Pubkey,
-            depositor_token_a_key: &Pubkey,
-            mut depositor_token_a_account: &mut Account,
-            depositor_token_b_key: &Pubkey,
-            mut depositor_token_b_account: &mut Account,
-            depositor_pool_key: &Pubkey,
-            mut depositor_pool_account: &mut Account,
-            amount_a: u64,
-            amount_b: u64,
-            min_mint_amount: u64,
-        ) -> ProgramResult {
-            do_process_stable_instruction(
-                approve(
-                    &spl_token::id(),
-                    &depositor_token_a_key,
-                    &self.authority_key,
-                    &depositor_key,
-                    &[],
-                    amount_a,
-                )
-                .unwrap(),
-                vec![
-                    &mut depositor_token_a_account,
-                    &mut Account::default(),
-                    &mut Account::default(),
-                ],
-            )
-            .unwrap();
-
-            do_process_stable_instruction(
-                approve(
-                    &spl_token::id(),
-                    &depositor_token_b_key,
-                    &self.authority_key,
-                    &depositor_key,
-                    &[],
-                    amount_b,
-                )
-                .unwrap(),
-                vec![
-                    &mut depositor_token_b_account,
-                    &mut Account::default(),
-                    &mut Account::default(),
-                ],
-            )
-            .unwrap();
-
-            // perform deposit
-            do_process_stable_instruction(
-                stable_deposit(
-                    &SWAP_PROGRAM_ID,
-                    &spl_token::id(),
-                    &self.swap_key,
-                    &self.authority_key,
-                    &depositor_token_a_key,
-                    &depositor_token_b_key,
-                    &self.token_a_key,
-                    &self.token_b_key,
-                    &self.pool_mint_key,
-                    &depositor_pool_key,
-                    amount_a,
-                    amount_b,
-                    min_mint_amount,
-                )
-                .unwrap(),
-                vec![
-                    &mut self.swap_account,
-                    &mut Account::default(),
-                    &mut depositor_token_a_account,
-                    &mut depositor_token_b_account,
-                    &mut self.token_a_account,
-                    &mut self.token_b_account,
-                    &mut self.pool_mint_account,
-                    &mut depositor_pool_account,
-                    &mut Account::default(),
-                    &mut clock_account(ZERO_TS),
-                ],
-            )
         }
 
         #[allow(clippy::too_many_arguments)]
@@ -849,6 +635,7 @@ pub mod test_utils {
             amount_a: u64,
             amount_b: u64,
             min_mint_amount: u64,
+            curve_mode: u8,
         ) -> ProgramResult {
             do_process_instruction(
                 approve(
@@ -899,9 +686,11 @@ pub mod test_utils {
                     &self.token_b_key,
                     &self.pool_mint_key,
                     &depositor_pool_key,
+                    &self.pyth_key,
                     amount_a,
                     amount_b,
                     min_mint_amount,
+                    curve_mode,
                 )
                 .unwrap(),
                 vec![
@@ -913,6 +702,7 @@ pub mod test_utils {
                     &mut self.token_b_account,
                     &mut self.pool_mint_account,
                     &mut depositor_pool_account,
+                    &mut self.pyth_account,
                     &mut Account::default(),
                     &mut clock_account(ZERO_TS),
                 ],
@@ -1781,53 +1571,6 @@ pub mod test_utils {
         ONCE.call_once(|| {
             program_stubs::set_syscall_stubs(Box::new(TestSyscallStubs {}));
         });
-    }
-
-    pub fn do_process_stable_instruction(
-        instruction: Instruction,
-        accounts: Vec<&mut Account>,
-    ) -> ProgramResult {
-        test_syscall_stubs();
-
-        // approximate the logic in the actual runtime which runs the instruction
-        // and only updates accounts if the instruction is successful
-        let mut account_clones = accounts.iter().map(|x| (*x).clone()).collect::<Vec<_>>();
-        let mut meta = instruction
-            .accounts
-            .iter()
-            .zip(account_clones.iter_mut())
-            .map(|(account_meta, account)| (&account_meta.pubkey, account_meta.is_signer, account))
-            .collect::<Vec<_>>();
-        let mut account_infos = create_is_signer_account_infos(&mut meta);
-        let res = if instruction.program_id == SWAP_PROGRAM_ID {
-            Processor::process(&instruction.program_id, &account_infos, &instruction.data)
-        } else {
-            spl_token::processor::Processor::process(
-                &instruction.program_id,
-                &account_infos,
-                &instruction.data,
-            )
-        };
-
-        if res.is_ok() {
-            let mut account_metas = instruction
-                .accounts
-                .iter()
-                .zip(accounts)
-                .map(|(account_meta, account)| (&account_meta.pubkey, account))
-                .collect::<Vec<_>>();
-            for account_info in account_infos.iter_mut() {
-                for account_meta in account_metas.iter_mut() {
-                    if account_info.key == account_meta.0 {
-                        let account = &mut account_meta.1;
-                        account.owner = *account_info.owner;
-                        account.lamports = **account_info.lamports.borrow();
-                        account.data = account_info.data.borrow().to_vec();
-                    }
-                }
-            }
-        }
-        res
     }
 
     pub fn do_process_instruction(

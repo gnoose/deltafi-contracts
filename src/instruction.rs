@@ -21,8 +21,6 @@ pub enum InstructionType {
     Admin,
     /// Swap
     Swap,
-    /// Stable Swap
-    StableSwap,
     /// Farm
     Farm,
 }
@@ -34,7 +32,6 @@ impl InstructionType {
         match tag {
             100..=112 => Some(Self::Admin),
             0u8..=5u8 => Some(Self::Swap),
-            10u8..=15u8 => Some(Self::StableSwap),
             0x1Eu8..=0x22u8 => Some(Self::Farm),
             _ => None,
         }
@@ -53,7 +50,9 @@ pub struct InitializeData {
     /// mid price 0 ~ 10**6
     pub i: u64,
     /// flag to know about twap open
-    pub is_open_twap: u64,
+    pub is_open_twap: u8,
+    /// flag to know about curve mode
+    pub curve_mode: u8,
 }
 
 /// Swap instruction data
@@ -65,7 +64,9 @@ pub struct SwapData {
     /// Minimum amount of DESTINATION token to output, prevents excessive slippage
     pub minimum_amount_out: u64,
     /// Swap direction 0 -> Sell Base Token, 1 -> Sell Quote Token
-    pub swap_direction: u64,
+    pub swap_direction: u8,
+    /// flag to know about curve mode
+    pub curve_mode: u8,
 }
 
 /// Deposit instruction data
@@ -78,6 +79,8 @@ pub struct DepositData {
     pub token_b_amount: u64,
     /// Minimum LP tokens to mint, prevents excessive slippage
     pub min_mint_amount: u64,
+    /// flag to know about curve mode
+    pub curve_mode: u8,
 }
 
 /// Withdraw instruction data
@@ -657,231 +660,6 @@ pub fn set_farm(
     })
 }
 
-/// Instructions supported by the stableswap program.
-#[repr(C)]
-#[derive(Debug, PartialEq)]
-pub enum StableInstruction {
-    ///   Initializes a new SwapInfo.
-    ///
-    ///   0. `[writable, signer]` New Token-swap to create.
-    ///   1. `[]` $authority derived from `create_program_address(&[Token-swap account])`
-    ///   2. `[]` admin Account.
-    ///   3. `[]` admin_fee_a admin fee Account for token_a.
-    ///   4. `[]` admin_fee_b admin fee Account for token_b.
-    ///   5. `[]` token_a Account. Must be non zero, owned by $authority.
-    ///   6. `[]` token_b Account. Must be non zero, owned by $authority.
-    ///   7. `[writable]` Pool Token Mint. Must be empty, owned by $authority.
-    StableInitialize(InitializeData),
-
-    ///   Swap the tokens in the pool.
-    ///
-    ///   0. `[]` Token-swap
-    ///   1. `[]` $authority
-    ///   2. `[writable]` token_(A|B) SOURCE Account, amount is transferable by $authority,
-    ///   3. `[writable]` token_(A|B) Base Account to swap INTO.  Must be the SOURCE token.
-    ///   4. `[writable]` token_(A|B) Base Account to swap FROM.  Must be the DESTINATION token.
-    ///   5. `[writable]` token_(A|B) DESTINATION Account assigned to USER as the owner.
-    ///   6. `[writable]` token_(A|B) admin fee Account. Must have same mint as DESTINATION token.
-    ///   7. `[]` Token program id
-    ///   8. `[]` Clock sysvar
-    StableSwap(SwapData),
-
-    ///   Deposit some tokens into the pool.  The output is a "pool" token representing ownership
-    ///   into the pool. Inputs are converted to the current ratio.
-    ///
-    ///   0. `[]` Token-swap
-    ///   1. `[]` $authority
-    ///   2. `[writable]` token_a $authority can transfer amount,
-    ///   3. `[writable]` token_b $authority can transfer amount,
-    ///   4. `[writable]` token_a Base Account to deposit into.
-    ///   5. `[writable]` token_b Base Account to deposit into.
-    ///   6. `[writable]` Pool MINT account, $authority is the owner.
-    ///   7. `[writable]` Pool Account to deposit the generated tokens, user is the owner.
-    ///   8. `[]` Token program id
-    ///   9. `[]` Clock sysvar
-    StableDeposit(DepositData),
-
-    ///   Withdraw tokens from the pool at the current ratio.
-    ///
-    ///   0. `[]` Token-swap
-    ///   1. `[]` $authority
-    ///   2. `[writable]` Pool mint account, $authority is the owner
-    ///   3. `[writable]` SOURCE Pool account, amount is transferable by $authority.
-    ///   4. `[writable]` token_a Swap Account to withdraw FROM.
-    ///   5. `[writable]` token_b Swap Account to withdraw FROM.
-    ///   6. `[writable]` token_a user Account to credit.
-    ///   7. `[writable]` token_b user Account to credit.
-    ///   8. `[writable]` admin_fee_a admin fee Account for token_a.
-    ///   9. `[writable]` admin_fee_b admin fee Account for token_b.
-    ///   10. `[]` Token program id
-    StableWithdraw(WithdrawData),
-
-    ///   Withdraw one token from the pool at the current ratio.
-    ///
-    ///   0. `[]` Token-swap
-    ///   1. `[]` $authority
-    ///   2. `[writable]` Pool mint account, $authority is the owner
-    ///   3. `[writable]` SOURCE Pool account, amount is transferable by $authority.
-    ///   4. `[writable]` token_(A|B) BASE token Swap Account to withdraw FROM.
-    ///   5. `[writable]` token_(A|B) QUOTE token Swap Account to exchange to base token.
-    ///   6. `[writable]` token_(A|B) BASE token user Account to credit.
-    ///   7. `[writable]` token_(A|B) admin fee Account. Must have same mint as BASE token.
-    ///   8. `[]` Token program id
-    ///   9. `[]` Clock sysvar
-    StableWithdrawOne(WithdrawOneData),
-
-    ///   Calc the receive amount in the pool - stable.
-    ///
-    ///   0. `[]` Token-swap
-    ///   1. `[]` $authority
-    ///   2. `[writable]` token_(A|B) SOURCE Account, amount is transferable by $authority,
-    ///   3. `[writable]` token_(A|B) Base Account to swap INTO.  Must be the SOURCE token.
-    ///   4. `[writable]` token_(A|B) Base Account to swap FROM.  Must be the DESTINATION token.
-    ///   5. `[writable]` token_(A|B) DESTINATION Account assigned to USER as the owner.
-    ///   6. `[writable]` token_(A|B) admin fee Account. Must have same mint as DESTINATION token.
-    ///   7. `[]` Token program id
-    ///   8. `[]` Clock sysvar
-    StableCalcReceiveAmount(SwapData),
-}
-
-impl StableInstruction {
-    /// Unpacks a byte buffer into a [StableInstruction](enum.StableInstruction.html).
-    pub fn unpack(input: &[u8]) -> Result<Option<Self>, ProgramError> {
-        let (&tag, rest) = input.split_first().ok_or(SwapError::InvalidInstruction)?;
-        Ok(match tag {
-            10 => {
-                let (&nonce, rest) = rest.split_first().ok_or(SwapError::InvalidInstruction)?;
-                let (k, rest) = unpack_u64(rest)?;
-                let (i, rest) = unpack_u64(rest)?;
-                let (is_open_twap, _rest) = unpack_u64(rest)?;
-                Some(Self::StableInitialize(InitializeData {
-                    nonce,
-                    k,
-                    i,
-                    is_open_twap,
-                }))
-            }
-            11 => {
-                let (amount_in, rest) = unpack_u64(rest)?;
-                let (minimum_amount_out, rest) = unpack_u64(rest)?;
-                let (swap_direction, _rest) = unpack_u64(rest)?;
-                Some(Self::StableSwap(SwapData {
-                    amount_in,
-                    minimum_amount_out,
-                    swap_direction,
-                }))
-            }
-            12 => {
-                let (token_a_amount, rest) = unpack_u64(rest)?;
-                let (token_b_amount, rest) = unpack_u64(rest)?;
-                let (min_mint_amount, _rest) = unpack_u64(rest)?;
-                Some(Self::StableDeposit(DepositData {
-                    token_a_amount,
-                    token_b_amount,
-                    min_mint_amount,
-                }))
-            }
-            13 => {
-                let (pool_token_amount, rest) = unpack_u64(rest)?;
-                let (minimum_token_a_amount, rest) = unpack_u64(rest)?;
-                let (minimum_token_b_amount, _rest) = unpack_u64(rest)?;
-                Some(Self::StableWithdraw(WithdrawData {
-                    pool_token_amount,
-                    minimum_token_a_amount,
-                    minimum_token_b_amount,
-                }))
-            }
-            14 => {
-                let (pool_token_amount, rest) = unpack_u64(rest)?;
-                let (minimum_token_amount, _rest) = unpack_u64(rest)?;
-                Some(Self::StableWithdrawOne(WithdrawOneData {
-                    pool_token_amount,
-                    minimum_token_amount,
-                }))
-            }
-            15 => {
-                let (amount_in, rest) = unpack_u64(rest)?;
-                let (minimum_amount_out, rest) = unpack_u64(rest)?;
-                let (swap_direction, _rest) = unpack_u64(rest)?;
-                Some(Self::StableCalcReceiveAmount(SwapData {
-                    amount_in,
-                    minimum_amount_out,
-                    swap_direction,
-                }))
-            }
-            _ => None,
-        })
-    }
-
-    /// Packs a [SwapInstruction](enum.SwapInstruction.html) into a byte buffer.
-    pub fn pack(&self) -> Vec<u8> {
-        let mut buf = Vec::with_capacity(size_of::<Self>());
-        match *self {
-            Self::StableInitialize(InitializeData {
-                nonce,
-                k,
-                i,
-                is_open_twap,
-            }) => {
-                buf.push(10);
-                buf.push(nonce);
-                buf.extend_from_slice(&k.to_le_bytes());
-                buf.extend_from_slice(&i.to_le_bytes());
-                buf.extend_from_slice(&is_open_twap.to_le_bytes());
-            }
-            Self::StableSwap(SwapData {
-                amount_in,
-                minimum_amount_out,
-                swap_direction,
-            }) => {
-                buf.push(11);
-                buf.extend_from_slice(&amount_in.to_le_bytes());
-                buf.extend_from_slice(&minimum_amount_out.to_le_bytes());
-                buf.extend_from_slice(&swap_direction.to_le_bytes());
-            }
-            Self::StableDeposit(DepositData {
-                token_a_amount,
-                token_b_amount,
-                min_mint_amount,
-            }) => {
-                buf.push(12);
-                buf.extend_from_slice(&token_a_amount.to_le_bytes());
-                buf.extend_from_slice(&token_b_amount.to_le_bytes());
-                buf.extend_from_slice(&min_mint_amount.to_le_bytes());
-            }
-            Self::StableWithdraw(WithdrawData {
-                pool_token_amount,
-                minimum_token_a_amount,
-                minimum_token_b_amount,
-            }) => {
-                buf.push(13);
-                buf.extend_from_slice(&pool_token_amount.to_le_bytes());
-                buf.extend_from_slice(&minimum_token_a_amount.to_le_bytes());
-                buf.extend_from_slice(&minimum_token_b_amount.to_le_bytes());
-            }
-            Self::StableWithdrawOne(WithdrawOneData {
-                pool_token_amount,
-                minimum_token_amount,
-            }) => {
-                buf.push(14);
-                buf.extend_from_slice(&pool_token_amount.to_le_bytes());
-                buf.extend_from_slice(&minimum_token_amount.to_le_bytes());
-            }
-            Self::StableCalcReceiveAmount(SwapData {
-                amount_in,
-                minimum_amount_out,
-                swap_direction,
-            }) => {
-                buf.push(15);
-                buf.extend_from_slice(&amount_in.to_le_bytes());
-                buf.extend_from_slice(&minimum_amount_out.to_le_bytes());
-                buf.extend_from_slice(&swap_direction.to_le_bytes());
-            }
-        }
-        buf
-    }
-}
-
 /// Instructions supported by the pmm SwapInfo program.
 #[repr(C)]
 #[derive(Debug, PartialEq)]
@@ -978,32 +756,38 @@ impl SwapInstruction {
                 let (&nonce, rest) = rest.split_first().ok_or(SwapError::InvalidInstruction)?;
                 let (k, rest) = unpack_u64(rest)?;
                 let (i, rest) = unpack_u64(rest)?;
-                let (is_open_twap, _rest) = unpack_u64(rest)?;
+                let (is_open_twap, rest) = unpack_u8(rest)?;
+                let (curve_mode, _rest) = unpack_u8(rest)?;
                 Some(Self::Initialize(InitializeData {
                     nonce,
                     k,
                     i,
                     is_open_twap,
+                    curve_mode,
                 }))
             }
             0x1 => {
                 let (amount_in, rest) = unpack_u64(rest)?;
                 let (minimum_amount_out, rest) = unpack_u64(rest)?;
-                let (swap_direction, _rest) = unpack_u64(rest)?;
+                let (swap_direction, rest) = unpack_u8(rest)?;
+                let (curve_mode, _rest) = unpack_u8(rest)?;
                 Some(Self::Swap(SwapData {
                     amount_in,
                     minimum_amount_out,
                     swap_direction,
+                    curve_mode,
                 }))
             }
             0x2 => {
                 let (token_a_amount, rest) = unpack_u64(rest)?;
                 let (token_b_amount, rest) = unpack_u64(rest)?;
-                let (min_mint_amount, _rest) = unpack_u64(rest)?;
+                let (min_mint_amount, rest) = unpack_u64(rest)?;
+                let (curve_mode, _rest) = unpack_u8(rest)?;
                 Some(Self::Deposit(DepositData {
                     token_a_amount,
                     token_b_amount,
                     min_mint_amount,
+                    curve_mode,
                 }))
             }
             0x3 => {
@@ -1027,11 +811,13 @@ impl SwapInstruction {
             0x5 => {
                 let (amount_in, rest) = unpack_u64(rest)?;
                 let (minimum_amount_out, rest) = unpack_u64(rest)?;
-                let (swap_direction, _rest) = unpack_u64(rest)?;
+                let (swap_direction, rest) = unpack_u8(rest)?;
+                let (curve_mode, _rest) = unpack_u8(rest)?;
                 Some(Self::CalcReceiveAmount(SwapData {
                     amount_in,
                     minimum_amount_out,
                     swap_direction,
+                    curve_mode,
                 }))
             }
             _ => None,
@@ -1047,32 +833,38 @@ impl SwapInstruction {
                 k,
                 i,
                 is_open_twap,
+                curve_mode,
             }) => {
                 buf.push(0x0);
                 buf.push(nonce);
                 buf.extend_from_slice(&k.to_le_bytes());
                 buf.extend_from_slice(&i.to_le_bytes());
                 buf.extend_from_slice(&is_open_twap.to_le_bytes());
+                buf.extend_from_slice(&curve_mode.to_le_bytes());
             }
             Self::Swap(SwapData {
                 amount_in,
                 minimum_amount_out,
                 swap_direction,
+                curve_mode,
             }) => {
                 buf.push(0x1);
                 buf.extend_from_slice(&amount_in.to_le_bytes());
                 buf.extend_from_slice(&minimum_amount_out.to_le_bytes());
                 buf.extend_from_slice(&swap_direction.to_le_bytes());
+                buf.extend_from_slice(&curve_mode.to_le_bytes());
             }
             Self::Deposit(DepositData {
                 token_a_amount,
                 token_b_amount,
                 min_mint_amount,
+                curve_mode,
             }) => {
                 buf.push(0x2);
                 buf.extend_from_slice(&token_a_amount.to_le_bytes());
                 buf.extend_from_slice(&token_b_amount.to_le_bytes());
                 buf.extend_from_slice(&min_mint_amount.to_le_bytes());
+                buf.extend_from_slice(&curve_mode.to_le_bytes());
             }
             Self::Withdraw(WithdrawData {
                 pool_token_amount,
@@ -1096,63 +888,17 @@ impl SwapInstruction {
                 amount_in,
                 minimum_amount_out,
                 swap_direction,
+                curve_mode,
             }) => {
                 buf.push(0x5);
                 buf.extend_from_slice(&amount_in.to_le_bytes());
                 buf.extend_from_slice(&minimum_amount_out.to_le_bytes());
                 buf.extend_from_slice(&swap_direction.to_le_bytes());
+                buf.extend_from_slice(&curve_mode.to_le_bytes());
             }
         }
         buf
     }
-}
-
-/// Creates an 'stable_initialize' instruction.
-pub fn stable_initialize(
-    program_id: &Pubkey,
-    token_program_id: &Pubkey, // Token program used for the pool token
-    config_pubkey: &Pubkey,
-    swap_pubkey: &Pubkey,
-    authority_pubkey: &Pubkey,
-    admin_fee_a_pubkey: &Pubkey,
-    admin_fee_b_pubkey: &Pubkey,
-    token_a_pubkey: &Pubkey,
-    token_b_pubkey: &Pubkey,
-    pool_mint_pubkey: &Pubkey,
-    destination_pubkey: &Pubkey, // Desintation to mint pool tokens for bootstrapper
-    deltafi_token_pubkey: &Pubkey,
-    nonce: u8,
-    k: u64,
-    i: u64,
-    is_open_twap: u64,
-) -> Result<Instruction, ProgramError> {
-    let data = StableInstruction::StableInitialize(InitializeData {
-        nonce,
-        k,
-        i,
-        is_open_twap,
-    })
-    .pack();
-
-    let accounts = vec![
-        AccountMeta::new_readonly(*config_pubkey, false),
-        AccountMeta::new_readonly(*swap_pubkey, true),
-        AccountMeta::new_readonly(*authority_pubkey, false),
-        AccountMeta::new_readonly(*admin_fee_a_pubkey, false),
-        AccountMeta::new_readonly(*admin_fee_b_pubkey, false),
-        AccountMeta::new_readonly(*token_a_pubkey, false),
-        AccountMeta::new_readonly(*token_b_pubkey, false),
-        AccountMeta::new(*pool_mint_pubkey, false),
-        AccountMeta::new(*destination_pubkey, false),
-        AccountMeta::new_readonly(*deltafi_token_pubkey, false),
-        AccountMeta::new_readonly(*token_program_id, false),
-    ];
-
-    Ok(Instruction {
-        program_id: *program_id,
-        accounts,
-        data,
-    })
 }
 
 /// Creates an 'initialize' instruction.
@@ -1169,16 +915,19 @@ pub fn initialize(
     pool_mint_pubkey: &Pubkey,
     destination_pubkey: &Pubkey, // Desintation to mint pool tokens for bootstrapper
     deltafi_token_pubkey: &Pubkey,
+    pyth_key: &Pubkey,
     nonce: u8,
     k: u64,
     i: u64,
-    is_open_twap: u64,
+    is_open_twap: u8,
+    curve_mode: u8,
 ) -> Result<Instruction, ProgramError> {
     let data = SwapInstruction::Initialize(InitializeData {
         nonce,
         k,
         i,
         is_open_twap,
+        curve_mode,
     })
     .pack();
 
@@ -1193,50 +942,8 @@ pub fn initialize(
         AccountMeta::new(*pool_mint_pubkey, false),
         AccountMeta::new(*destination_pubkey, false),
         AccountMeta::new_readonly(*deltafi_token_pubkey, false),
+        AccountMeta::new_readonly(*pyth_key, false),
         AccountMeta::new_readonly(*token_program_id, false),
-    ];
-
-    Ok(Instruction {
-        program_id: *program_id,
-        accounts,
-        data,
-    })
-}
-
-/// Creates a 'stable_deposit' instruction.
-pub fn stable_deposit(
-    program_id: &Pubkey,
-    token_program_id: &Pubkey,
-    swap_pubkey: &Pubkey,
-    authority_pubkey: &Pubkey,
-    deposit_token_a_pubkey: &Pubkey,
-    deposit_token_b_pubkey: &Pubkey,
-    swap_token_a_pubkey: &Pubkey,
-    swap_token_b_pubkey: &Pubkey,
-    pool_mint_pubkey: &Pubkey,
-    destination_pubkey: &Pubkey,
-    token_a_amount: u64,
-    token_b_amount: u64,
-    min_mint_amount: u64,
-) -> Result<Instruction, ProgramError> {
-    let data = StableInstruction::StableDeposit(DepositData {
-        token_a_amount,
-        token_b_amount,
-        min_mint_amount,
-    })
-    .pack();
-
-    let accounts = vec![
-        AccountMeta::new(*swap_pubkey, false),
-        AccountMeta::new(*authority_pubkey, false),
-        AccountMeta::new(*deposit_token_a_pubkey, false),
-        AccountMeta::new(*deposit_token_b_pubkey, false),
-        AccountMeta::new(*swap_token_a_pubkey, false),
-        AccountMeta::new(*swap_token_b_pubkey, false),
-        AccountMeta::new(*pool_mint_pubkey, false),
-        AccountMeta::new(*destination_pubkey, false),
-        AccountMeta::new(*token_program_id, false),
-        AccountMeta::new(clock::id(), false),
     ];
 
     Ok(Instruction {
@@ -1258,14 +965,17 @@ pub fn deposit(
     swap_token_b_pubkey: &Pubkey,
     pool_mint_pubkey: &Pubkey,
     destination_pubkey: &Pubkey,
+    pyth_key: &Pubkey,
     token_a_amount: u64,
     token_b_amount: u64,
     min_mint_amount: u64,
+    curve_mode: u8,
 ) -> Result<Instruction, ProgramError> {
     let data = SwapInstruction::Deposit(DepositData {
         token_a_amount,
         token_b_amount,
         min_mint_amount,
+        curve_mode,
     })
     .pack();
 
@@ -1278,6 +988,7 @@ pub fn deposit(
         AccountMeta::new(*swap_token_b_pubkey, false),
         AccountMeta::new(*pool_mint_pubkey, false),
         AccountMeta::new(*destination_pubkey, false),
+        AccountMeta::new(*pyth_key, false),
         AccountMeta::new(*token_program_id, false),
         AccountMeta::new(clock::id(), false),
     ];
@@ -1335,87 +1046,38 @@ pub fn withdraw(
     })
 }
 
-/// Creates a 'swap' instruction.
-pub fn stable_swap(
-    program_id: &Pubkey,
-    token_program_id: &Pubkey,
-    swap_pubkey: &Pubkey,
-    authority_pubkey: &Pubkey,
-    source_pubkey: &Pubkey,
-    swap_source_pubkey: &Pubkey,
-    swap_destination_pubkey: &Pubkey,
-    destination_pubkey: &Pubkey,
-    reward_token_pubkey: &Pubkey,
-    reward_mint_pubkey: &Pubkey,
-    admin_fee_destination_pubkey: &Pubkey,
-    amount_in: u64,
-    minimum_amount_out: u64,
-    swap_direction: u64,
-) -> Result<Instruction, ProgramError> {
-    let data = StableInstruction::StableSwap(SwapData {
-        amount_in,
-        minimum_amount_out,
-        swap_direction,
-    })
-    .pack();
-
-    let accounts = vec![
-        AccountMeta::new(*swap_pubkey, false),
-        AccountMeta::new(*authority_pubkey, false),
-        AccountMeta::new(*source_pubkey, false),
-        AccountMeta::new(*swap_source_pubkey, false),
-        AccountMeta::new(*swap_destination_pubkey, false),
-        AccountMeta::new(*destination_pubkey, false),
-        AccountMeta::new(*reward_token_pubkey, false),
-        AccountMeta::new(*reward_mint_pubkey, false),
-        AccountMeta::new(*admin_fee_destination_pubkey, false),
-        AccountMeta::new(*token_program_id, false),
-        AccountMeta::new(clock::id(), false),
-    ];
-
-    Ok(Instruction {
-        program_id: *program_id,
-        accounts,
-        data,
-    })
-}
-
 /// Creates a 'calc_receive_amount' instruction.
 pub fn calc_receive_amount(
     program_id: &Pubkey,
-    token_program_id: &Pubkey,
     swap_pubkey: &Pubkey,
     authority_pubkey: &Pubkey,
-    source_pubkey: &Pubkey,
     swap_source_pubkey: &Pubkey,
     swap_destination_pubkey: &Pubkey,
-    destination_pubkey: &Pubkey,
     reward_token_pubkey: &Pubkey,
     reward_mint_pubkey: &Pubkey,
     admin_fee_destination_pubkey: &Pubkey,
     amount_in: u64,
     minimum_amount_out: u64,
-    swap_direction: u64,
+    swap_direction: u8,
+    curve_mode: u8,
 ) -> Result<Instruction, ProgramError> {
     let data = SwapInstruction::CalcReceiveAmount(SwapData {
         amount_in,
         minimum_amount_out,
         swap_direction,
+        curve_mode,
     })
     .pack();
 
     let accounts = vec![
         AccountMeta::new(*swap_pubkey, false),
         AccountMeta::new(*authority_pubkey, false),
-        AccountMeta::new(*source_pubkey, false),
         AccountMeta::new(*swap_source_pubkey, false),
         AccountMeta::new(*swap_destination_pubkey, false),
-        AccountMeta::new(*destination_pubkey, false),
         AccountMeta::new(*reward_token_pubkey, false),
         AccountMeta::new(*reward_mint_pubkey, false),
         AccountMeta::new(*admin_fee_destination_pubkey, false),
-        AccountMeta::new(*token_program_id, false),
-        AccountMeta::new(clock::id(), false),
+        AccountMeta::new_readonly(clock::id(), false),
     ];
 
     Ok(Instruction {
@@ -1438,14 +1100,17 @@ pub fn swap(
     reward_token_pubkey: &Pubkey,
     reward_mint_pubkey: &Pubkey,
     admin_fee_destination_pubkey: &Pubkey,
+    pyth_key: &Pubkey,
     amount_in: u64,
     minimum_amount_out: u64,
-    swap_direction: u64,
+    swap_direction: u8,
+    curve_mode: u8,
 ) -> Result<Instruction, ProgramError> {
     let data = SwapInstruction::Swap(SwapData {
         amount_in,
         minimum_amount_out,
         swap_direction,
+        curve_mode,
     })
     .pack();
 
@@ -1459,6 +1124,7 @@ pub fn swap(
         AccountMeta::new(*reward_token_pubkey, false),
         AccountMeta::new(*reward_mint_pubkey, false),
         AccountMeta::new(*admin_fee_destination_pubkey, false),
+        AccountMeta::new(*pyth_key, false),
         AccountMeta::new(*token_program_id, false),
         AccountMeta::new(clock::id(), false),
     ];
@@ -1882,7 +1548,7 @@ mod tests {
     use super::*;
     use crate::utils::{
         test_utils::{default_i, default_k},
-        SWAP_DIRECTION_SELL_BASE, TWAP_OPENED,
+        CURVE_PMM, SWAP_DIRECTION_SELL_BASE, TWAP_OPENED,
     };
 
     #[test]
@@ -2043,18 +1709,21 @@ mod tests {
             let k = default_k().inner();
             let i = default_i().inner();
             let is_open_twap = TWAP_OPENED;
+            let curve_mode = CURVE_PMM;
 
             let check = SwapInstruction::Initialize(InitializeData {
                 nonce,
                 k,
                 i,
                 is_open_twap,
+                curve_mode,
             });
             let packed = check.pack();
             let mut expect: Vec<u8> = vec![0, nonce];
             expect.extend_from_slice(&k.to_le_bytes());
             expect.extend_from_slice(&i.to_le_bytes());
             expect.extend_from_slice(&is_open_twap.to_le_bytes());
+            expect.extend_from_slice(&curve_mode.to_le_bytes());
             assert_eq!(packed, expect);
             let unpacked_result = SwapInstruction::unpack(&expect);
             match unpacked_result {
@@ -2072,17 +1741,20 @@ mod tests {
         {
             let amount_in: u64 = 2;
             let minimum_amount_out: u64 = 10;
-            let swap_direction: u64 = SWAP_DIRECTION_SELL_BASE;
+            let swap_direction: u8 = SWAP_DIRECTION_SELL_BASE;
+            let curve_mode: u8 = CURVE_PMM;
             let check = SwapInstruction::Swap(SwapData {
                 amount_in,
                 minimum_amount_out,
                 swap_direction,
+                curve_mode,
             });
             let packed = check.pack();
             let mut expect = vec![1];
             expect.extend_from_slice(&amount_in.to_le_bytes());
             expect.extend_from_slice(&minimum_amount_out.to_le_bytes());
             expect.extend_from_slice(&swap_direction.to_le_bytes());
+            expect.extend_from_slice(&curve_mode.to_le_bytes());
             assert_eq!(packed, expect);
             let unpacked_result = SwapInstruction::unpack(&expect);
             match unpacked_result {
@@ -2101,16 +1773,19 @@ mod tests {
             let token_a_amount: u64 = 10;
             let token_b_amount: u64 = 20;
             let min_mint_amount: u64 = 5;
+            let curve_mode: u8 = CURVE_PMM;
             let check = SwapInstruction::Deposit(DepositData {
                 token_a_amount,
                 token_b_amount,
                 min_mint_amount,
+                curve_mode,
             });
             let packed = check.pack();
             let mut expect = vec![2];
             expect.extend_from_slice(&token_a_amount.to_le_bytes());
             expect.extend_from_slice(&token_b_amount.to_le_bytes());
             expect.extend_from_slice(&min_mint_amount.to_le_bytes());
+            expect.extend_from_slice(&curve_mode.to_le_bytes());
             assert_eq!(packed, expect);
             let unpacked_result = SwapInstruction::unpack(&expect);
             match unpacked_result {

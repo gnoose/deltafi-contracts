@@ -164,7 +164,7 @@ pub struct SwapInfo {
     /// PMM object
     pub pmm_state: PMMState,
     /// twap open flag
-    pub is_open_twap: u64,
+    pub is_open_twap: u8,
     /// block timestamp last - twap
     pub block_timestamp_last: i64,
     /// base price cumulative last - twap
@@ -180,11 +180,11 @@ impl IsInitialized for SwapInfo {
     }
 }
 impl Pack for SwapInfo {
-    const LEN: usize = 500;
+    const LEN: usize = 493;
 
     /// Unpacks a byte buffer into a [SwapInfo](struct.SwapInfo.html).
     fn unpack_from_slice(input: &[u8]) -> Result<Self, ProgramError> {
-        let input = array_ref![input, 0, 500];
+        let input = array_ref![input, 0, 493];
         #[allow(clippy::ptr_offset_with_cast)]
         let (
             is_initialized,
@@ -211,7 +211,7 @@ impl Pack for SwapInfo {
             base_price_cumulative_last,
             receive_amount,
         ) = array_refs![
-            input, 1, 1, 1, 8, 8, 8, 8, 32, 32, 32, 32, 32, 32, 32, 32, 32, 64, 24, 55, 8, 8, 9, 9
+            input, 1, 1, 1, 8, 8, 8, 8, 32, 32, 32, 32, 32, 32, 32, 32, 32, 64, 24, 55, 1, 8, 9, 9
         ];
         Ok(Self {
             is_initialized: match is_initialized {
@@ -241,7 +241,7 @@ impl Pack for SwapInfo {
             fees: Fees::unpack_from_slice(fees)?,
             rewards: Rewards::unpack_from_slice(rewards)?,
             pmm_state: PMMState::unpack_from_slice(pmm_state)?,
-            is_open_twap: u64::from_le_bytes(*is_open_twap),
+            is_open_twap: u8::from_le_bytes(*is_open_twap),
             block_timestamp_last: i64::from_le_bytes(*block_timestamp_last),
             base_price_cumulative_last: FixedU64::unpack_from_slice(base_price_cumulative_last)?,
             receive_amount: FixedU64::unpack_from_slice(receive_amount)?,
@@ -249,7 +249,7 @@ impl Pack for SwapInfo {
     }
 
     fn pack_into_slice(&self, output: &mut [u8]) {
-        let output = array_mut_ref![output, 0, 500];
+        let output = array_mut_ref![output, 0, 493];
         let (
             is_initialized,
             is_paused,
@@ -275,7 +275,7 @@ impl Pack for SwapInfo {
             base_price_cumulative_last,
             receive_amount,
         ) = mut_array_refs![
-            output, 1, 1, 1, 8, 8, 8, 8, 32, 32, 32, 32, 32, 32, 32, 32, 32, 64, 24, 55, 8, 8, 9, 9
+            output, 1, 1, 1, 8, 8, 8, 8, 32, 32, 32, 32, 32, 32, 32, 32, 32, 64, 24, 55, 1, 8, 9, 9
         ];
         is_initialized[0] = self.is_initialized as u8;
         is_paused[0] = self.is_paused as u8;
@@ -531,10 +531,9 @@ impl Pack for FarmingUserInfo {
 
 #[cfg(test)]
 mod tests {
-    use std::time::{SystemTime, UNIX_EPOCH};
-
     use super::*;
     use crate::{
+        solana_program::clock::Clock,
         utils::{
             test_utils::{default_i, default_k, DEFAULT_TEST_FEES, DEFAULT_TEST_REWARDS},
             TWAP_OPENED,
@@ -612,10 +611,7 @@ mod tests {
             r,
         );
         let is_open_twap = TWAP_OPENED;
-        let block_timestamp_last: i64 = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i64;
+        let block_timestamp_last: i64 = Clock::clone(&Default::default()).unix_timestamp;
         let base_price_cumulative_last = FixedU64::zero();
         let receive_amount = FixedU64::zero();
 

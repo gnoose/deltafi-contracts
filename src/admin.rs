@@ -541,7 +541,7 @@ mod tests {
     use super::*;
     use crate::{
         curve::ZERO_TS,
-        utils::{test_utils::*, TWAP_OPENED},
+        utils::{test_utils::*, CURVE_PMM, TWAP_OPENED},
     };
 
     const DEFAULT_TOKEN_A_AMOUNT: u64 = 1_000_000_000;
@@ -633,6 +633,7 @@ mod tests {
             default_k(),
             default_i(),
             TWAP_OPENED,
+            CURVE_PMM,
         );
 
         // swap not initialized
@@ -734,6 +735,7 @@ mod tests {
             default_k(),
             default_i(),
             TWAP_OPENED,
+            CURVE_PMM,
         );
 
         // swap not initialized
@@ -785,6 +787,7 @@ mod tests {
             default_k(),
             default_i(),
             TWAP_OPENED,
+            CURVE_PMM,
         );
 
         // swap not initialized
@@ -830,6 +833,7 @@ mod tests {
             default_k(),
             default_i(),
             TWAP_OPENED,
+            CURVE_PMM,
         );
 
         // swap not initialized
@@ -878,6 +882,7 @@ mod tests {
             default_k(),
             default_i(),
             TWAP_OPENED,
+            CURVE_PMM,
         );
         let (
             admin_fee_key_a,
@@ -1093,6 +1098,7 @@ mod tests {
             default_k(),
             default_i(),
             TWAP_OPENED,
+            CURVE_PMM,
         );
 
         let new_fees: Fees = Fees {
@@ -1152,6 +1158,7 @@ mod tests {
             default_k(),
             default_i(),
             TWAP_OPENED,
+            CURVE_PMM,
         );
 
         let new_rewards: Rewards = Rewards {

@@ -32,10 +32,13 @@ pub struct Fees {
 
 impl Fees {
     /// Apply admin trade fee
-    pub fn admin_trade_fee(&self, fee_amount: u64) -> Option<u64> {
-        fee_amount
-            .checked_mul(self.admin_trade_fee_numerator)?
+    pub fn admin_trade_fee(&self, fee_amount: u64) -> Result<u64, ProgramError> {
+        let result = fee_amount
+            .checked_mul(self.admin_trade_fee_numerator)
+            .ok_or(ProgramError::InvalidArgument)?;
+        result
             .checked_div(self.admin_trade_fee_denominator)
+            .ok_or(ProgramError::InvalidArgument)
     }
 
     /// Apply admin withdraw fee
@@ -46,10 +49,13 @@ impl Fees {
     }
 
     /// Compute trade fee from amount
-    pub fn trade_fee(&self, trade_amount: u64) -> Option<u64> {
-        trade_amount
-            .checked_mul(self.trade_fee_numerator)?
+    pub fn trade_fee(&self, trade_amount: u64) -> Result<u64, ProgramError> {
+        let result = trade_amount
+            .checked_mul(self.trade_fee_numerator)
+            .ok_or(ProgramError::InvalidArgument)?;
+        result
             .checked_div(self.trade_fee_denominator)
+            .ok_or(ProgramError::InvalidArgument)
     }
 
     /// Compute withdraw fee from amount

@@ -25,10 +25,6 @@ thiserror = "1.0"
 log = "0.4"
 pyth-client = "0.2.2"
 
-[target.'cfg(unix)'.dependencies]
-solana-sdk = "=1.7.11"
-solana-client = "=1.7.11"
-
 [dev-dependencies]
 solana-sdk = "=1.7.11"
 proptest = { version = "0.10" }
