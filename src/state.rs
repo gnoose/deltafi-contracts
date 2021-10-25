@@ -2,16 +2,20 @@
 
 use arrayref::{array_mut_ref, array_ref, array_refs, mut_array_refs};
 use solana_program::{
+    clock::UnixTimestamp,
+    entrypoint::ProgramResult,
     program_error::ProgramError,
     program_pack::{IsInitialized, Pack, Sealed},
-    pubkey::Pubkey,
+    pubkey::{Pubkey, PUBKEY_BYTES},
 };
 
-use crate::{bn::FixedU64, fees::Fees, rewards::Rewards, v2curve::PMMState};
+use crate::{curve::PMMState, error::SwapError, fees::Fees, math::*, rewards::Rewards};
+
+use std::convert::TryFrom;
 
 /// Dex Default Configuration information
 #[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct ConfigInfo {
     /// Initialization state
     pub is_initialized: bool,
@@ -44,11 +48,14 @@ impl IsInitialized for ConfigInfo {
         self.is_initialized
     }
 }
+
+#[doc(hidden)]
+pub const CONFIG_INFO_SIZE: usize = 202;
 impl Pack for ConfigInfo {
-    const LEN: usize = 202;
+    const LEN: usize = CONFIG_INFO_SIZE;
     #[doc(hidden)]
     fn unpack_from_slice(src: &[u8]) -> Result<Self, ProgramError> {
-        let src = array_ref![src, 0, 202];
+        let src = array_ref![src, 0, CONFIG_INFO_SIZE];
         #[allow(clippy::ptr_offset_with_cast)]
         let (
             is_initialized,
@@ -84,7 +91,7 @@ impl Pack for ConfigInfo {
     }
     #[doc(hidden)]
     fn pack_into_slice(&self, dst: &mut [u8]) {
-        let dst = array_mut_ref![dst, 0, 202];
+        let dst = array_mut_ref![dst, 0, CONFIG_INFO_SIZE];
         let (
             is_initialized,
             is_paused,
@@ -110,7 +117,7 @@ impl Pack for ConfigInfo {
 
 /// Swap states.
 #[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct SwapInfo {
     /// Initialized state
     pub is_initialized: bool,
@@ -138,8 +145,6 @@ pub struct SwapInfo {
     pub token_a: Pubkey,
     /// Token B
     pub token_b: Pubkey,
-    /// Deltafi token
-    pub deltafi_token: Pubkey,
 
     /// Pool tokens are issued when A or B tokens are deposited.
     /// Pool tokens can be withdrawn back to the original A or B token.
@@ -148,9 +153,6 @@ pub struct SwapInfo {
     pub token_a_mint: Pubkey,
     /// Mint information for token B
     pub token_b_mint: Pubkey,
-    /// deltafi tokens are rewarded when swapping is successfully processed.
-    /// Mint deltafi token
-    pub deltafi_mint: Pubkey,
 
     /// Public key of the admin token account to receive trading and / or withdrawal fees for token a
     pub admin_fee_key_a: Pubkey,
@@ -168,9 +170,9 @@ pub struct SwapInfo {
     /// block timestamp last - twap
     pub block_timestamp_last: i64,
     /// base price cumulative last - twap
-    pub base_price_cumulative_last: FixedU64,
+    pub base_price_cumulative_last: Decimal,
     /// receive amount on swap
-    pub receive_amount: FixedU64,
+    pub receive_amount: Decimal,
 }
 
 impl Sealed for SwapInfo {}
@@ -179,12 +181,13 @@ impl IsInitialized for SwapInfo {
         self.is_initialized
     }
 }
+const SWAP_INFO_SIZE: usize = 501; // 1 + 1 + 1 + 8 + 8 + 8 + 8 + 32 + 32 + 32 + 32 + 32 + 32 + 32 + 64 + 24 + 97 + 1 + 8 + 16 + 16
 impl Pack for SwapInfo {
-    const LEN: usize = 493;
+    const LEN: usize = SWAP_INFO_SIZE;
 
     /// Unpacks a byte buffer into a [SwapInfo](struct.SwapInfo.html).
     fn unpack_from_slice(input: &[u8]) -> Result<Self, ProgramError> {
-        let input = array_ref![input, 0, 493];
+        let input = array_ref![input, 0, SWAP_INFO_SIZE];
         #[allow(clippy::ptr_offset_with_cast)]
         let (
             is_initialized,
@@ -196,11 +199,9 @@ impl Pack for SwapInfo {
             stop_ramp_ts,
             token_a,
             token_b,
-            deltafi_token,
             pool_mint,
             token_a_mint,
             token_b_mint,
-            deltafi_mint,
             admin_fee_key_a,
             admin_fee_key_b,
             fees,
@@ -211,7 +212,28 @@ impl Pack for SwapInfo {
             base_price_cumulative_last,
             receive_amount,
         ) = array_refs![
-            input, 1, 1, 1, 8, 8, 8, 8, 32, 32, 32, 32, 32, 32, 32, 32, 32, 64, 24, 55, 1, 8, 9, 9
+            input,
+            1,
+            1,
+            1,
+            8,
+            8,
+            8,
+            8,
+            PUBKEY_BYTES,
+            PUBKEY_BYTES,
+            PUBKEY_BYTES,
+            PUBKEY_BYTES,
+            PUBKEY_BYTES,
+            PUBKEY_BYTES,
+            PUBKEY_BYTES,
+            Fees::LEN,
+            Rewards::LEN,
+            PMMState::LEN,
+            1,
+            8,
+            16,
+            16
         ];
         Ok(Self {
             is_initialized: match is_initialized {
@@ -231,11 +253,9 @@ impl Pack for SwapInfo {
             stop_ramp_ts: i64::from_le_bytes(*stop_ramp_ts),
             token_a: Pubkey::new_from_array(*token_a),
             token_b: Pubkey::new_from_array(*token_b),
-            deltafi_token: Pubkey::new_from_array(*deltafi_token),
             pool_mint: Pubkey::new_from_array(*pool_mint),
             token_a_mint: Pubkey::new_from_array(*token_a_mint),
             token_b_mint: Pubkey::new_from_array(*token_b_mint),
-            deltafi_mint: Pubkey::new_from_array(*deltafi_mint),
             admin_fee_key_a: Pubkey::new_from_array(*admin_fee_key_a),
             admin_fee_key_b: Pubkey::new_from_array(*admin_fee_key_b),
             fees: Fees::unpack_from_slice(fees)?,
@@ -243,13 +263,14 @@ impl Pack for SwapInfo {
             pmm_state: PMMState::unpack_from_slice(pmm_state)?,
             is_open_twap: u8::from_le_bytes(*is_open_twap),
             block_timestamp_last: i64::from_le_bytes(*block_timestamp_last),
-            base_price_cumulative_last: FixedU64::unpack_from_slice(base_price_cumulative_last)?,
-            receive_amount: FixedU64::unpack_from_slice(receive_amount)?,
+            base_price_cumulative_last: unpack_decimal(base_price_cumulative_last),
+            receive_amount: unpack_decimal(receive_amount),
         })
     }
 
     fn pack_into_slice(&self, output: &mut [u8]) {
-        let output = array_mut_ref![output, 0, 493];
+        let output = array_mut_ref![output, 0, SWAP_INFO_SIZE];
+        #[allow(clippy::ptr_offset_with_cast)]
         let (
             is_initialized,
             is_paused,
@@ -260,11 +281,9 @@ impl Pack for SwapInfo {
             stop_ramp_ts,
             token_a,
             token_b,
-            deltafi_token,
             pool_mint,
             token_a_mint,
             token_b_mint,
-            deltafi_mint,
             admin_fee_key_a,
             admin_fee_key_b,
             fees,
@@ -275,7 +294,28 @@ impl Pack for SwapInfo {
             base_price_cumulative_last,
             receive_amount,
         ) = mut_array_refs![
-            output, 1, 1, 1, 8, 8, 8, 8, 32, 32, 32, 32, 32, 32, 32, 32, 32, 64, 24, 55, 1, 8, 9, 9
+            output,
+            1,
+            1,
+            1,
+            8,
+            8,
+            8,
+            8,
+            PUBKEY_BYTES,
+            PUBKEY_BYTES,
+            PUBKEY_BYTES,
+            PUBKEY_BYTES,
+            PUBKEY_BYTES,
+            PUBKEY_BYTES,
+            PUBKEY_BYTES,
+            Fees::LEN,
+            Rewards::LEN,
+            PMMState::LEN,
+            1,
+            8,
+            16,
+            16
         ];
         is_initialized[0] = self.is_initialized as u8;
         is_paused[0] = self.is_paused as u8;
@@ -286,11 +326,9 @@ impl Pack for SwapInfo {
         *stop_ramp_ts = self.stop_ramp_ts.to_le_bytes();
         token_a.copy_from_slice(self.token_a.as_ref());
         token_b.copy_from_slice(self.token_b.as_ref());
-        deltafi_token.copy_from_slice(self.deltafi_token.as_ref());
         pool_mint.copy_from_slice(self.pool_mint.as_ref());
         token_a_mint.copy_from_slice(self.token_a_mint.as_ref());
         token_b_mint.copy_from_slice(self.token_b_mint.as_ref());
-        deltafi_mint.copy_from_slice(self.deltafi_mint.as_ref());
         admin_fee_key_a.copy_from_slice(self.admin_fee_key_a.as_ref());
         admin_fee_key_b.copy_from_slice(self.admin_fee_key_b.as_ref());
         self.fees.pack_into_slice(&mut fees[..]);
@@ -298,238 +336,312 @@ impl Pack for SwapInfo {
         self.pmm_state.pack_into_slice(&mut pmm_state[..]);
         *is_open_twap = self.is_open_twap.to_le_bytes();
         *block_timestamp_last = self.block_timestamp_last.to_le_bytes();
-        self.base_price_cumulative_last
-            .pack_into_slice(&mut base_price_cumulative_last[..]);
-        self.receive_amount.pack_into_slice(&mut receive_amount[..]);
+        pack_decimal(self.base_price_cumulative_last, base_price_cumulative_last);
+        pack_decimal(self.receive_amount, receive_amount);
     }
 }
 
-/// Farm's base information
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct FarmBaseInfo {
-    /// whether initialized
+/// Max number of positions
+pub const MAX_LIQUIDITY_POSITIONS: usize = 10;
+/// Min period towards next claim
+pub const MIN_CLAIM_PERIOD: UnixTimestamp = 2592000;
+
+/// Liquidity user info
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct LiquidityProvider {
+    /// Initialization status
     pub is_initialized: bool,
-    /// Total allocation points
-    pub total_alloc_point: u64,
-    /// reward unit
-    pub reward_unit: u64,
+    /// Owner authority
+    pub owner: Pubkey,
+    /// Liquidity positions owned by this user
+    pub positions: Vec<LiquidityPosition>,
 }
 
-impl Sealed for FarmBaseInfo {}
-impl IsInitialized for FarmBaseInfo {
-    fn is_initialized(&self) -> bool {
-        self.is_initialized
+impl LiquidityProvider {
+    /// Create new provider
+    pub fn new(owner: Pubkey, positions: Vec<LiquidityPosition>) -> Self {
+        let mut provider = Self::default();
+        provider.init(owner, positions);
+        provider
+    }
+
+    /// Initialize a liquidity provider
+    pub fn init(&mut self, owner: Pubkey, positions: Vec<LiquidityPosition>) {
+        self.is_initialized = true;
+        self.owner = owner;
+        self.positions = positions;
+    }
+
+    /// Find position by pool
+    pub fn find_position(
+        &mut self,
+        pool: Pubkey,
+    ) -> Result<(&mut LiquidityPosition, usize), ProgramError> {
+        if self.positions.is_empty() {
+            return Err(SwapError::LiquidityPositionEmpty.into());
+        }
+        let position_index = self
+            .find_position_index(pool)
+            .ok_or(SwapError::InvalidPositionKey)?;
+        Ok((
+            self.positions.get_mut(position_index).unwrap(),
+            position_index,
+        ))
+    }
+
+    /// Find or add position by pool
+    pub fn find_or_add_position(
+        &mut self,
+        pool: Pubkey,
+        current_ts: UnixTimestamp,
+    ) -> Result<&mut LiquidityPosition, ProgramError> {
+        if let Some(position_index) = self.find_position_index(pool) {
+            return Ok(&mut self.positions[position_index]);
+        }
+        let position = LiquidityPosition::new(pool, current_ts).unwrap();
+        self.positions.push(position);
+        Ok(self.positions.last_mut().unwrap())
+    }
+
+    fn find_position_index(&self, pool: Pubkey) -> Option<usize> {
+        self.positions
+            .iter()
+            .position(|position| position.pool == pool)
+    }
+
+    /// Withdraw liquidity and remove it from deposits if zeroed out
+    pub fn withdraw(&mut self, withdraw_amount: u64, position_index: usize) -> ProgramResult {
+        let position = &mut self.positions[position_index];
+        if withdraw_amount == position.liquidity_amount {
+            self.positions.remove(position_index);
+        } else {
+            position.withdraw(withdraw_amount)?;
+        }
+        Ok(())
     }
 }
 
-impl Pack for FarmBaseInfo {
-    const LEN: usize = 17;
+/// Liquidity position of a pool
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct LiquidityPosition {
+    /// Swap pool address
+    pub pool: Pubkey,
+    /// Amount of liquidity owned by this position
+    pub liquidity_amount: u64,
+    /// Rewards amount owed
+    pub rewards_owed: u64,
+    /// Rewards amount estimated in new claim period
+    pub rewards_estimated: u64,
+    /// Cumulative interest
+    pub cumulative_interest: u64,
+    /// Last updated timestamp
+    pub last_update_ts: UnixTimestamp,
+    /// Next claim timestamp
+    pub next_claim_ts: UnixTimestamp,
+}
 
-    /// Unpacks a byte buffer into a [FarmInfo](struct.FarmInfo.html).
-    fn unpack_from_slice(input: &[u8]) -> Result<Self, ProgramError> {
-        let input = array_ref![input, 0, 17];
-        #[allow(clippy::ptr_offset_with_cast)]
-        let (is_initialized, total_alloc_point, reward_unit) = array_refs![input, 1, 8, 8];
+impl LiquidityPosition {
+    /// Create new liquidity
+    pub fn new(pool: Pubkey, current_ts: UnixTimestamp) -> Result<Self, ProgramError> {
         Ok(Self {
-            is_initialized: match is_initialized {
-                [0] => false,
-                [1] => true,
-                _ => return Err(ProgramError::InvalidAccountData),
-            },
-            total_alloc_point: u64::from_le_bytes(*total_alloc_point),
-            reward_unit: u64::from_le_bytes(*reward_unit),
+            pool,
+            liquidity_amount: 0,
+            rewards_owed: 0,
+            rewards_estimated: 0,
+            cumulative_interest: 0,
+            last_update_ts: current_ts,
+            next_claim_ts: current_ts
+                .checked_add(MIN_CLAIM_PERIOD)
+                .ok_or(SwapError::CalculationFailure)?,
         })
     }
 
-    fn pack_into_slice(&self, output: &mut [u8]) {
-        let output = array_mut_ref![output, 0, 17];
-        let (is_initialized, total_alloc_point, reward_unit) = mut_array_refs![output, 1, 8, 8];
-        is_initialized[0] = self.is_initialized as u8;
-        *total_alloc_point = self.total_alloc_point.to_le_bytes();
-        *reward_unit = self.reward_unit.to_le_bytes();
+    /// Deposit liquidity
+    pub fn deposit(&mut self, deposit_amount: u64) -> ProgramResult {
+        self.liquidity_amount = self
+            .liquidity_amount
+            .checked_add(deposit_amount)
+            .ok_or(SwapError::CalculationFailure)?;
+        Ok(())
+    }
+
+    /// Withdraw liquidity
+    pub fn withdraw(&mut self, withdraw_amount: u64) -> ProgramResult {
+        if withdraw_amount > self.liquidity_amount {
+            return Err(SwapError::InsufficientLiquidity.into());
+        }
+        self.liquidity_amount = self
+            .liquidity_amount
+            .checked_sub(withdraw_amount)
+            .ok_or(SwapError::CalculationFailure)?;
+        Ok(())
+    }
+
+    /// Update next claim timestamp
+    pub fn update_claim_ts(&mut self) -> ProgramResult {
+        if self.liquidity_amount == 0 {
+            return Err(SwapError::LiquidityPositionEmpty.into());
+        }
+        self.next_claim_ts = self
+            .next_claim_ts
+            .checked_add(MIN_CLAIM_PERIOD)
+            .ok_or(SwapError::CalculationFailure)?;
+        Ok(())
+    }
+
+    /// Calculate and update rewards
+    pub fn calc_and_update_rewards(
+        &mut self,
+        rewards_unit: u64,
+        current_ts: UnixTimestamp,
+    ) -> ProgramResult {
+        let calc_period = current_ts
+            .checked_sub(self.last_update_ts)
+            .ok_or(SwapError::CalculationFailure)?;
+        if calc_period > 0 {
+            self.rewards_estimated = self
+                .rewards_estimated
+                .checked_add(
+                    rewards_unit
+                        .checked_mul(u64::try_from(calc_period).unwrap())
+                        .ok_or(SwapError::CalculationFailure)?
+                        .checked_div(u64::try_from(MIN_CLAIM_PERIOD).unwrap())
+                        .ok_or(SwapError::CalculationFailure)?,
+                )
+                .ok_or(SwapError::CalculationFailure)?;
+            self.last_update_ts = current_ts;
+        }
+
+        if current_ts.gt(&self.next_claim_ts) {
+            self.rewards_owed = self
+                .rewards_owed
+                .checked_add(self.rewards_estimated)
+                .ok_or(SwapError::CalculationFailure)?;
+            self.rewards_estimated = 0;
+            self.update_claim_ts()?;
+        }
+        Ok(())
+    }
+
+    /// Claim rewards owed
+    pub fn claim_rewards(&mut self) -> ProgramResult {
+        if self.rewards_owed == 0 {
+            return Err(SwapError::InsufficientClaimAmount.into());
+        }
+        self.cumulative_interest = self
+            .cumulative_interest
+            .checked_add(self.rewards_owed)
+            .ok_or(SwapError::CalculationFailure)?;
+        self.rewards_owed = 0;
+        Ok(())
     }
 }
 
-/// Farm state
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct FarmInfo {
-    /// Initialized state
-    pub is_initialized: bool,
-
-    /// Paused state
-    pub is_paused: bool,
-
-    /// Nonce used in program address
-    /// The program address is created deterministically with the nonce,
-    /// swap program id, and swap account pubkey.  This program address has
-    /// authority over the swap's token A account, token B account, and pool
-    /// token mint.
-    pub nonce: u8,
-
-    /// Deadline to transfer admin control to future_admin_key
-    pub future_admin_deadline: i64,
-    /// Public key of the admin account to be applied
-    pub future_admin_key: Pubkey,
-    /// Public key of admin account to execute admin instructions
-    pub admin_key: Pubkey,
-
-    /// Mint information for lp token
-    pub pool_mint: Pubkey,
-    /// Mint information for deltafi
-    pub token_deltafi_mint: Pubkey,
-    /// Fees
-    pub fees: Fees,
-    /// the value corresponding accDeltafiPerShare parameter to use in farming
-    pub acc_deltafi_per_share: u64,
-    /// Timestamp when calculate reward last     
-    pub last_reward_timestamp: i64,
-    /// allocation point
-    pub alloc_point: u64,
-}
-impl Sealed for FarmInfo {}
-impl IsInitialized for FarmInfo {
+impl Sealed for LiquidityProvider {}
+impl IsInitialized for LiquidityProvider {
     fn is_initialized(&self) -> bool {
         self.is_initialized
     }
 }
 
-impl Pack for FarmInfo {
-    const LEN: usize = 227;
+#[doc(hidden)]
+const LIQUIDITY_POSITION_SIZE: usize = 80; // 32 + 8 + 8 + 8 + 8 + 8 + 8
+const LIQUIDITY_PROVIDER_SIZE: usize = 834; // 1 + 32 + 1 + (80 * 10)
 
-    /// Unpacks a byte buffer into a [FarmInfo](struct.FarmInfo.html).
-    fn unpack_from_slice(input: &[u8]) -> Result<Self, ProgramError> {
-        let input = array_ref![input, 0, 227];
+impl Pack for LiquidityProvider {
+    const LEN: usize = LIQUIDITY_PROVIDER_SIZE;
+
+    fn pack_into_slice(&self, output: &mut [u8]) {
+        let output = array_mut_ref![output, 0, LIQUIDITY_PROVIDER_SIZE];
         #[allow(clippy::ptr_offset_with_cast)]
-        let (
+        let (is_initialized, owner, positions_len, data_flat) = mut_array_refs![
+            output,
+            1,
+            PUBKEY_BYTES,
+            1,
+            LIQUIDITY_POSITION_SIZE * MAX_LIQUIDITY_POSITIONS
+        ];
+        is_initialized[0] = self.is_initialized as u8;
+        owner.copy_from_slice(self.owner.as_ref());
+        *positions_len = u8::try_from(self.positions.len()).unwrap().to_le_bytes();
+
+        let mut offset = 0;
+        for position in &self.positions {
+            let position_flat = array_mut_ref![data_flat, offset, LIQUIDITY_POSITION_SIZE];
+            #[allow(clippy::ptr_offset_with_cast)]
+            let (
+                pool,
+                liquidity_amount,
+                rewards_owed,
+                rewards_estimated,
+                cumulative_interest,
+                last_update_ts,
+                next_claim_ts,
+            ) = mut_array_refs![position_flat, PUBKEY_BYTES, 8, 8, 8, 8, 8, 8];
+
+            pool.copy_from_slice(position.pool.as_ref());
+            *liquidity_amount = position.liquidity_amount.to_le_bytes();
+            *rewards_owed = position.rewards_owed.to_le_bytes();
+            *rewards_estimated = position.rewards_estimated.to_le_bytes();
+            *cumulative_interest = position.cumulative_interest.to_le_bytes();
+            *last_update_ts = position.last_update_ts.to_le_bytes();
+            *next_claim_ts = position.next_claim_ts.to_le_bytes();
+            offset += LIQUIDITY_POSITION_SIZE;
+        }
+    }
+
+    fn unpack_from_slice(input: &[u8]) -> Result<Self, ProgramError> {
+        let input = array_ref![input, 0, LIQUIDITY_PROVIDER_SIZE];
+        #[allow(clippy::ptr_offset_with_cast)]
+        let (is_initialized, owner, positions_len, data_flat) = array_refs![
+            input,
+            1,
+            PUBKEY_BYTES,
+            1,
+            LIQUIDITY_POSITION_SIZE * MAX_LIQUIDITY_POSITIONS
+        ];
+
+        let is_initialized = match is_initialized {
+            [0] => false,
+            [1] => true,
+            _ => return Err(ProgramError::InvalidAccountData),
+        };
+        let positions_len = u8::from_le_bytes(*positions_len);
+        let mut positions = Vec::with_capacity(positions_len as usize + 1);
+
+        let mut offset = 0;
+        for _ in 0..positions_len {
+            let positions_flat = array_ref![data_flat, offset, LIQUIDITY_POSITION_SIZE];
+            #[allow(clippy::ptr_offset_with_cast)]
+            let (
+                pool,
+                liquidity_amount,
+                rewards_owed,
+                rewards_estimated,
+                cumulative_interest,
+                last_update_ts,
+                next_claim_ts,
+            ) = array_refs![positions_flat, PUBKEY_BYTES, 8, 8, 8, 8, 8, 8];
+            positions.push(LiquidityPosition {
+                pool: Pubkey::new(pool),
+                liquidity_amount: u64::from_le_bytes(*liquidity_amount),
+                rewards_owed: u64::from_le_bytes(*rewards_owed),
+                rewards_estimated: u64::from_le_bytes(*rewards_estimated),
+                cumulative_interest: u64::from_le_bytes(*cumulative_interest),
+                last_update_ts: i64::from_le_bytes(*last_update_ts),
+                next_claim_ts: i64::from_le_bytes(*next_claim_ts),
+            });
+            offset += LIQUIDITY_POSITION_SIZE;
+        }
+        Ok(Self {
             is_initialized,
-            is_paused,
-            nonce,
-            future_admin_deadline,
-            future_admin_key,
-            admin_key,
-            pool_mint,
-            token_deltafi_mint,
-            fees,
-            acc_deltafi_per_share,
-            last_reward_timestamp,
-            alloc_point,
-        ) = array_refs![input, 1, 1, 1, 8, 32, 32, 32, 32, 64, 8, 8, 8];
-        Ok(Self {
-            is_initialized: match is_initialized {
-                [0] => false,
-                [1] => true,
-                _ => return Err(ProgramError::InvalidAccountData),
-            },
-            is_paused: match is_paused {
-                [0] => false,
-                [1] => true,
-                _ => return Err(ProgramError::InvalidAccountData),
-            },
-            nonce: nonce[0],
-            future_admin_deadline: i64::from_le_bytes(*future_admin_deadline),
-            future_admin_key: Pubkey::new_from_array(*future_admin_key),
-            admin_key: Pubkey::new_from_array(*admin_key),
-            pool_mint: Pubkey::new_from_array(*pool_mint),
-            token_deltafi_mint: Pubkey::new_from_array(*token_deltafi_mint),
-            fees: Fees::unpack_from_slice(fees)?,
-            acc_deltafi_per_share: u64::from_le_bytes(*acc_deltafi_per_share),
-            last_reward_timestamp: i64::from_le_bytes(*last_reward_timestamp),
-            alloc_point: u64::from_le_bytes(*alloc_point),
+            owner: Pubkey::new(owner),
+            positions,
         })
     }
-
-    fn pack_into_slice(&self, output: &mut [u8]) {
-        let output = array_mut_ref![output, 0, 227];
-        let (
-            is_initialized,
-            is_paused,
-            nonce,
-            future_admin_deadline,
-            future_admin_key,
-            admin_key,
-            pool_mint,
-            token_deltafi_mint,
-            fees,
-            acc_deltafi_per_share,
-            last_reward_timestamp,
-            alloc_point,
-        ) = mut_array_refs![output, 1, 1, 1, 8, 32, 32, 32, 32, 64, 8, 8, 8];
-        is_initialized[0] = self.is_initialized as u8;
-        is_paused[0] = self.is_paused as u8;
-        nonce[0] = self.nonce;
-        *future_admin_deadline = self.future_admin_deadline.to_le_bytes();
-        future_admin_key.copy_from_slice(self.future_admin_key.as_ref());
-        admin_key.copy_from_slice(self.admin_key.as_ref());
-        pool_mint.copy_from_slice(self.pool_mint.as_ref());
-        token_deltafi_mint.copy_from_slice(self.token_deltafi_mint.as_ref());
-        self.fees.pack_into_slice(&mut fees[..]);
-        *acc_deltafi_per_share = self.acc_deltafi_per_share.to_le_bytes();
-        *last_reward_timestamp = self.last_reward_timestamp.to_le_bytes();
-        *alloc_point = self.alloc_point.to_le_bytes();
-    }
 }
 
-/// User's farming information
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct FarmingUserInfo {
-    /// whether initialized
-    pub is_initialized: bool,
-    /// user's amount
-    pub amount: u64,
-    /// user's reward debt
-    pub reward_debt: u64,
-    /// last update timestamp
-    pub timestamp: i64,
-    /// pending deltafi
-    pub pending_deltafi: u64,
-}
-
-impl Sealed for FarmingUserInfo {}
-impl IsInitialized for FarmingUserInfo {
-    fn is_initialized(&self) -> bool {
-        self.is_initialized
-    }
-}
-
-impl Pack for FarmingUserInfo {
-    const LEN: usize = 33;
-
-    /// Unpacks a byte buffer into a [FarmInfo](struct.FarmInfo.html).
-    fn unpack_from_slice(input: &[u8]) -> Result<Self, ProgramError> {
-        let input = array_ref![input, 0, 33];
-        #[allow(clippy::ptr_offset_with_cast)]
-        let (is_initialized, amount, reward_debt, timestamp, pending_deltafi) =
-            array_refs![input, 1, 8, 8, 8, 8];
-
-        Ok(Self {
-            is_initialized: match is_initialized {
-                [0] => false,
-                [1] => true,
-                _ => return Err(ProgramError::InvalidAccountData),
-            },
-            amount: u64::from_le_bytes(*amount),
-            reward_debt: u64::from_le_bytes(*reward_debt),
-            timestamp: i64::from_le_bytes(*timestamp),
-            pending_deltafi: u64::from_le_bytes(*pending_deltafi),
-        })
-    }
-
-    fn pack_into_slice(&self, output: &mut [u8]) {
-        let output = array_mut_ref![output, 0, 33];
-        let (is_initialized, amount, reward_debt, timestamp, pending_deltafi) =
-            mut_array_refs![output, 1, 8, 8, 8, 8];
-        is_initialized[0] = self.is_initialized as u8;
-        *amount = self.amount.to_le_bytes();
-        *reward_debt = self.reward_debt.to_le_bytes();
-        *timestamp = self.timestamp.to_le_bytes();
-        *pending_deltafi = self.pending_deltafi.to_le_bytes();
-    }
-}
-
-#[cfg(test)]
+#[cfg(feature = "test-bpf")]
 mod tests {
     use super::*;
     use crate::{
@@ -589,10 +701,14 @@ mod tests {
         let trade_reward_numerator = 1;
         let trade_reward_denominator = 2;
         let trade_reward_cap = 100;
+        let liquidity_reward_numerator = 1;
+        let liquidity_reward_denominator = 1000;
         let rewards = Rewards {
             trade_reward_numerator,
             trade_reward_denominator,
             trade_reward_cap,
+            liquidity_reward_numerator,
+            liquidity_reward_denominator,
         };
         let k = default_k();
         let i = default_i();
@@ -642,7 +758,7 @@ mod tests {
         };
 
         let mut packed = [0u8; SwapInfo::LEN];
-        SwapInfo::pack(swap_info, &mut packed).unwrap();
+        SwapInfo::pack_into_slice(&swap_info, &mut packed);
         let unpacked = SwapInfo::unpack(&packed).unwrap();
         assert_eq!(swap_info, unpacked);
 

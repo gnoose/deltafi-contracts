@@ -374,7 +374,7 @@ impl Pack for PMMState {
     }
 }
 
-#[cfg(test)]
+#[cfg(feature = "test-bpf")]
 mod tests {
     use crate::{
         bn::FixedU64,

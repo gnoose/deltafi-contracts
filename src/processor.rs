@@ -2,389 +2,247 @@
 
 #![allow(clippy::too_many_arguments)]
 
+use std::{cmp::Ordering, convert::TryInto};
+
 use solana_program::{
     account_info::{next_account_info, AccountInfo},
     entrypoint::ProgramResult,
     msg,
     program::invoke_signed,
     program_error::ProgramError,
-    program_pack::Pack,
+    program_pack::{IsInitialized, Pack},
     pubkey::Pubkey,
-    sysvar::{clock::Clock, Sysvar},
+    sysvar::{clock::Clock, rent::Rent, Sysvar},
 };
 use spl_token::state::Mint;
 
 use crate::{
     admin::process_admin_instruction,
-    bn::{FixedU64, U256},
-    curve::{Farm, StableSwap, ZERO_TS},
+    bn::U256,
+    curve::{PMMState, RState},
+    curve_1::{StableSwap, ZERO_TS},
     error::SwapError,
     instruction::{
-        DepositData, FarmingDepositData, FarmingInstruction, FarmingWithdrawData, InitializeData,
-        InstructionType, SwapData, SwapInstruction, WithdrawData, WithdrawOneData,
+        DepositData, InitializeData, InstructionType, SwapData, SwapInstruction, WithdrawData,
+        WithdrawOneData,
     },
-    math2::{get_buy_shares, get_deposit_adjustment_amount},
+    math::{Decimal, TryAdd, TryDiv, TryMul, TrySub},
     pool_converter::PoolTokenConverter,
-    state::{ConfigInfo, FarmBaseInfo, FarmInfo, FarmingUserInfo, SwapInfo},
+    pyth,
+    state::{ConfigInfo, LiquidityProvider, SwapInfo},
     utils,
-    utils::is_zero,
-    v2curve::{PMMState, RState},
 };
 
-/// Program state handler. (and general curve params)
-pub struct Processor {}
-
-impl Processor {
-    /// Unpacks a spl_token `Mint`.
-    pub fn unpack_mint(data: &[u8]) -> Result<Mint, SwapError> {
-        Mint::unpack(data).map_err(|_| SwapError::ExpectedMint)
+/// Processes an [Instruction](enum.Instruction.html).
+pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], input: &[u8]) -> ProgramResult {
+    match InstructionType::check(input) {
+        Some(InstructionType::Admin) => process_admin_instruction(program_id, accounts, input),
+        Some(InstructionType::Swap) => process_swap_instruction(program_id, accounts, input),
+        _ => Err(ProgramError::InvalidInstructionData),
     }
+}
 
-    /// Issue a spl_token `Burn` instruction.
-    pub fn token_burn<'a>(
-        swap: &Pubkey,
-        token_program: AccountInfo<'a>,
-        burn_account: AccountInfo<'a>,
-        mint: AccountInfo<'a>,
-        authority: AccountInfo<'a>,
-        nonce: u8,
-        amount: u64,
-    ) -> Result<(), ProgramError> {
-        let swap_bytes = swap.to_bytes();
-        let authority_signature_seeds = [&swap_bytes[..32], &[nonce]];
-        let signers = &[&authority_signature_seeds[..]];
-        let ix = spl_token::instruction::burn(
-            token_program.key,
-            burn_account.key,
-            mint.key,
-            authority.key,
-            &[],
-            amount,
-        )?;
-
-        invoke_signed(
-            &ix,
-            &[burn_account, mint, authority, token_program],
-            signers,
-        )
-    }
-
-    /// Issue a spl_token `MintTo` instruction.
-    pub fn token_mint_to<'a>(
-        swap: &Pubkey,
-        token_program: AccountInfo<'a>,
-        mint: AccountInfo<'a>,
-        destination: AccountInfo<'a>,
-        authority: AccountInfo<'a>,
-        nonce: u8,
-        amount: u64,
-    ) -> Result<(), ProgramError> {
-        let swap_bytes = swap.to_bytes();
-        let authority_signature_seeds = [&swap_bytes[..32], &[nonce]];
-        let signers = &[&authority_signature_seeds[..]];
-        let ix = spl_token::instruction::mint_to(
-            token_program.key,
-            mint.key,
-            destination.key,
-            authority.key,
-            &[],
-            amount,
-        )?;
-
-        invoke_signed(&ix, &[mint, destination, authority, token_program], signers)
-    }
-
-    /// Issue a spl_token `Transfer` instruction.
-    pub fn token_transfer<'a>(
-        swap: &Pubkey,
-        token_program: AccountInfo<'a>,
-        source: AccountInfo<'a>,
-        destination: AccountInfo<'a>,
-        authority: AccountInfo<'a>,
-        nonce: u8,
-        amount: u64,
-    ) -> Result<(), ProgramError> {
-        let swap_bytes = swap.to_bytes();
-        let authority_signature_seeds = [&swap_bytes[..32], &[nonce]];
-        let signers = &[&authority_signature_seeds[..]];
-        let ix = spl_token::instruction::transfer(
-            token_program.key,
-            source.key,
-            destination.key,
-            authority.key,
-            &[],
-            amount,
-        )?;
-
-        invoke_signed(
-            &ix,
-            &[source, destination, authority, token_program],
-            signers,
-        )
-    }
-
-    /// Update deltafi pool
-    #[allow(clippy::too_many_arguments)]
-    pub fn update_pool<'a>(
-        farm: &mut FarmInfo,
-        farm_key: &Pubkey,
-        reward_unit: u64,
-        user_farming: &FarmingUserInfo,
-        current_ts: i64,
-        supply: u64,
-        total_alloc_point: u64,
-        token_program_info: AccountInfo<'a>,
-        admin_fee_info: AccountInfo<'a>,
-        deltafi_mint_info: AccountInfo<'a>,
-        user_deltafi_info: AccountInfo<'a>,
-        authority_info: AccountInfo<'a>,
-    ) -> ProgramResult {
-        if current_ts <= farm.last_reward_timestamp {
-            return Ok(());
-        }
-
-        if supply == 0 {
-            farm.last_reward_timestamp = current_ts;
-            return Ok(());
-        }
-        let base: u128 = 10;
-        let invariant = Farm::new(current_ts, base.pow(36));
-
-        let reward: u64 = U256::to_u64(
-            invariant
-                .compute_pending_reward(
-                    U256::from(farm.acc_deltafi_per_share),
-                    U256::from(user_farming.amount),
-                    U256::from(user_farming.reward_debt),
-                )
-                .ok_or(SwapError::CalculationFailure)?,
-        )?;
-
-        Self::token_mint_to(
-            farm_key,
-            token_program_info.clone(),
-            deltafi_mint_info.clone(),
-            admin_fee_info.clone(),
-            authority_info.clone(),
-            farm.nonce,
-            reward / 10,
-        )?;
-
-        Self::token_mint_to(
-            farm_key,
-            token_program_info.clone(),
-            deltafi_mint_info.clone(),
-            user_deltafi_info.clone(),
-            authority_info.clone(),
-            farm.nonce,
-            reward,
-        )?;
-
-        farm.acc_deltafi_per_share = U256::to_u64(
-            invariant
-                .compute_acc_deltafi_per_share(
-                    U256::from(farm.acc_deltafi_per_share),
-                    U256::from(farm.alloc_point),
-                    U256::from(total_alloc_point),
-                    U256::from(0), // supply,
-                    U256::from(current_ts - farm.last_reward_timestamp),
-                    U256::from(reward_unit),
-                )
-                .ok_or(SwapError::CalculationFailure)?,
-        )?;
-        farm.last_reward_timestamp = current_ts;
-
-        Ok(())
-    }
-
-    /// Processes an [Initialize](enum.Instruction.html).
-    pub fn process_initialize(
-        program_id: &Pubkey,
-        nonce: u8,
-        k_v: u64,
-        i_v: u64,
-        is_open_twap: u8,
-        curve_mode: u8,
-        accounts: &[AccountInfo],
-    ) -> ProgramResult {
-        let account_info_iter = &mut accounts.iter();
-        let config_info = next_account_info(account_info_iter)?;
-        let swap_info = next_account_info(account_info_iter)?;
-        let authority_info = next_account_info(account_info_iter)?;
-        let admin_fee_a_info = next_account_info(account_info_iter)?;
-        let admin_fee_b_info = next_account_info(account_info_iter)?;
-        let token_a_info = next_account_info(account_info_iter)?;
-        let token_b_info = next_account_info(account_info_iter)?;
-        let pool_mint_info = next_account_info(account_info_iter)?;
-        let destination_info = next_account_info(account_info_iter)?; // Destination account to mint LP tokens to
-        let deltafi_token_info = next_account_info(account_info_iter)?;
-        let pyth_price_info = next_account_info(account_info_iter)?; // pyth price account added : 2021.10.21
-        let token_program_info = next_account_info(account_info_iter)?;
-
-        let token_swap = SwapInfo::unpack_unchecked(&swap_info.data.borrow())?;
-        if token_swap.is_initialized {
-            return Err(SwapError::AlreadyInUse.into());
-        }
-        if *authority_info.key != utils::authority_id(program_id, swap_info.key, nonce)? {
-            return Err(SwapError::InvalidProgramAddress.into());
-        }
-        let destination = utils::unpack_token_account(&destination_info.data.borrow())?;
-        let token_a = utils::unpack_token_account(&token_a_info.data.borrow())?;
-        let token_b = utils::unpack_token_account(&token_b_info.data.borrow())?;
-        let deltafi_token = utils::unpack_token_account(&deltafi_token_info.data.borrow())?;
-        if *authority_info.key != token_a.owner {
-            return Err(SwapError::InvalidOwner.into());
-        }
-        if *authority_info.key != token_b.owner {
-            return Err(SwapError::InvalidOwner.into());
-        }
-        if *authority_info.key == destination.owner {
-            return Err(SwapError::InvalidOutputOwner.into());
-        }
-        if *authority_info.key == deltafi_token.owner {
-            return Err(SwapError::InvalidOutputOwner.into());
-        }
-        if token_a.mint == token_b.mint {
-            return Err(SwapError::RepeatedMint.into());
-        }
-        if token_b.amount == 0 {
-            return Err(SwapError::EmptySupply.into());
-        }
-        if token_a.amount == 0 {
-            return Err(SwapError::EmptySupply.into());
-        }
-        if token_a.delegate.is_some() {
-            return Err(SwapError::InvalidDelegate.into());
-        }
-        if token_b.delegate.is_some() {
-            return Err(SwapError::InvalidDelegate.into());
-        }
-        if token_a.close_authority.is_some() {
-            return Err(SwapError::InvalidCloseAuthority.into());
-        }
-        if token_b.close_authority.is_some() {
-            return Err(SwapError::InvalidCloseAuthority.into());
-        }
-        if deltafi_token.close_authority.is_some() {
-            return Err(SwapError::InvalidCloseAuthority.into());
-        }
-        let pool_mint = Self::unpack_mint(&pool_mint_info.data.borrow())?;
-        if pool_mint.mint_authority.is_some()
-            && *authority_info.key != pool_mint.mint_authority.unwrap()
-        {
-            return Err(SwapError::InvalidOwner.into());
-        }
-        if pool_mint.freeze_authority.is_some() {
-            return Err(SwapError::InvalidFreezeAuthority.into());
-        }
-        if pool_mint.supply != 0 {
-            return Err(SwapError::InvalidSupply.into());
-        }
-        let admin_fee_key_a = utils::unpack_token_account(&admin_fee_a_info.data.borrow())?;
-        let admin_fee_key_b = utils::unpack_token_account(&admin_fee_b_info.data.borrow())?;
-        if token_a.mint != admin_fee_key_a.mint {
-            return Err(SwapError::InvalidAdmin.into());
-        }
-        if token_b.mint != admin_fee_key_b.mint {
-            return Err(SwapError::InvalidAdmin.into());
-        }
-
-        // calc mint amount with pmm - lp token amount
-
-        let base_balance = FixedU64::new_from_fixed_u64(token_a.amount)?;
-        let quote_balance = FixedU64::new_from_fixed_u64(token_b.amount)?;
-        let base_reserve = FixedU64::zero();
-        let quote_reserve = FixedU64::zero();
-        let total_supply = FixedU64::new_from_fixed_u64(pool_mint.supply)?;
-        let base_target = FixedU64::zero();
-        let quote_target = FixedU64::zero();
-        let k = FixedU64::new_from_fixed_u64(k_v)?;
-
-        // getting price from pyth
-        let pyth_price_data = &pyth_price_info.try_borrow_data()?;
-        let i;
-        if is_zero(pyth_price_data) {
-            i = FixedU64::new_from_fixed_u64(i_v)?;
-        } else {
-            let pyth_price = pyth_client::cast::<pyth_client::Price>(pyth_price_data);
-            i = FixedU64::new_from_fixed_u64(pyth_price.agg.price as u64)?;
-        }
-
-        let (
-            mut mint_amount,
-            new_base_target,
-            new_quote_target,
-            new_base_reserve,
-            new_quote_reserve,
-        ) = get_buy_shares(
-            base_balance,
-            quote_balance,
-            base_reserve,
-            quote_reserve,
-            base_target,
-            quote_target,
-            total_supply,
-            i,
-        )?;
-
-        let block_timestamp_last: i64 = Clock::clone(&Default::default()).epoch_start_timestamp;
-        // let new_block_timestamp_last: i64 = SystemTime::now()
-        //     .duration_since(UNIX_EPOCH)
-        //     .unwrap()
-        //     .as_secs() as i64;
-        let new_block_timestamp_last = Clock::clone(&Default::default()).unix_timestamp;
-        let mut base_price_cumulative_last = FixedU64::zero();
-        if is_open_twap == utils::TWAP_OPENED {
-            let time_elapsed = new_block_timestamp_last - block_timestamp_last;
-            if time_elapsed > 0 && new_base_reserve.inner() != 0 && new_quote_reserve.inner() != 0 {
-                let state = PMMState::new(
-                    i,
-                    k,
-                    new_base_reserve,
-                    new_quote_reserve,
-                    new_base_target,
-                    new_quote_target,
-                    token_swap.pmm_state.r,
-                );
-
-                base_price_cumulative_last = base_price_cumulative_last.checked_add(
-                    state
-                        .get_mid_price()?
-                        .checked_mul_floor(FixedU64::new_from_u64(time_elapsed as u64)?)?,
-                )?;
-            }
-        }
-        let receive_amount = FixedU64::zero();
-
-        if curve_mode == utils::CURVE_AMM {
-            // amp_factor == intial_amp_factor == target_amp_factor on init
-            let invariant = StableSwap::new(
-                token_swap.initial_amp_factor,
-                token_swap.target_amp_factor,
-                ZERO_TS,
-                ZERO_TS,
-                ZERO_TS,
-            );
-            // Compute amount of LP tokens to mint for bootstrapper
-            let mint_amount_u256 = invariant
-                .compute_d(U256::from(token_a.amount), U256::from(token_b.amount))
-                .ok_or(SwapError::CalculationFailure)?;
-            mint_amount = FixedU64::new_from_fixed_u64(U256::to_u64(mint_amount_u256)?)?;
-        }
-
-        Self::token_mint_to(
-            swap_info.key,
-            token_program_info.clone(),
-            pool_mint_info.clone(),
-            destination_info.clone(),
-            authority_info.clone(),
+fn process_swap_instruction(
+    program_id: &Pubkey,
+    accounts: &[AccountInfo],
+    input: &[u8],
+) -> ProgramResult {
+    let instruction = SwapInstruction::unpack(input)?;
+    match instruction {
+        SwapInstruction::Initialize(InitializeData {
             nonce,
-            mint_amount.inner(),
-        )?;
+            slop,
+            mid_price,
+            is_open_twap,
+        }) => {
+            msg!("Instruction: Initialize");
+            process_initialize(program_id, nonce, slop, mid_price, is_open_twap, accounts)
+        }
+        SwapInstruction::Swap(SwapData {
+            amount_in,
+            minimum_amount_out,
+            swap_direction,
+        }) => {
+            msg!("Instruction: Swap");
+            process_swap(
+                program_id,
+                amount_in,
+                minimum_amount_out,
+                swap_direction,
+                accounts,
+            )
+        }
+        SwapInstruction::Deposit(DepositData {
+            token_a_amount,
+            token_b_amount,
+            min_mint_amount,
+        }) => {
+            msg!("Instruction: Deposit");
+            process_deposit(
+                program_id,
+                token_a_amount,
+                token_b_amount,
+                min_mint_amount,
+                accounts,
+            )
+        }
+        SwapInstruction::Withdraw(WithdrawData {
+            pool_token_amount,
+            minimum_token_a_amount,
+            minimum_token_b_amount,
+        }) => {
+            msg!("Instruction: Withdraw");
+            process_withdraw(
+                program_id,
+                pool_token_amount,
+                minimum_token_a_amount,
+                minimum_token_b_amount,
+                accounts,
+            )
+        }
+        SwapInstruction::WithdrawOne(WithdrawOneData {
+            pool_token_amount,
+            minimum_token_amount,
+        }) => {
+            msg!("Instruction: Withdraw One");
+            process_withdraw_one(
+                program_id,
+                pool_token_amount,
+                minimum_token_amount,
+                accounts,
+            )
+        }
+        SwapInstruction::InitializeLiquidityProvider => {
+            msg!("Instruction: Initialize Liquidity user");
+            process_init_liquidity_provider(program_id, accounts)
+        }
+        SwapInstruction::RefreshLiquidityObligation => {
+            msg!("Instruction: Refresh liquidity obligation");
+            process_refresh_liquidity_obligation(program_id, accounts)
+        }
+        SwapInstruction::ClaimLiquidityRewards => {
+            msg!("Instruction: Claim Liquidity Rewards");
+            process_claim_liquidity_rewards(program_id, accounts)
+        }
+    }
+}
 
-        let config = ConfigInfo::unpack(&config_info.data.borrow())?;
+fn process_initialize(
+    program_id: &Pubkey,
+    nonce: u8,
+    slop: u64,
+    mid_price: u64,
+    is_open_twap: u8,
+    accounts: &[AccountInfo],
+) -> ProgramResult {
+    let account_info_iter = &mut accounts.iter();
+    let config_info = next_account_info(account_info_iter)?;
+    let swap_info = next_account_info(account_info_iter)?;
+    let authority_info = next_account_info(account_info_iter)?;
+    let admin_fee_a_info = next_account_info(account_info_iter)?;
+    let admin_fee_b_info = next_account_info(account_info_iter)?;
+    let token_a_info = next_account_info(account_info_iter)?;
+    let token_b_info = next_account_info(account_info_iter)?;
+    let pool_mint_info = next_account_info(account_info_iter)?;
+    let destination_info = next_account_info(account_info_iter)?; // Destination account to mint LP tokens to
+    let pyth_price_info = next_account_info(account_info_iter)?; // pyth price account added : 2021.10.21
+    let clock = &Clock::from_account_info(next_account_info(account_info_iter)?)?;
+    let token_program_info = next_account_info(account_info_iter)?;
 
-        let obj = SwapInfo {
+    let token_swap = SwapInfo::unpack_unchecked(&swap_info.data.borrow())?;
+    if token_swap.is_initialized {
+        return Err(SwapError::AlreadyInUse.into());
+    }
+    if *authority_info.key != utils::authority_id(program_id, swap_info.key, nonce)? {
+        return Err(SwapError::InvalidProgramAddress.into());
+    }
+    let destination = utils::unpack_token_account(&destination_info.data.borrow())?;
+    let token_a = utils::unpack_token_account(&token_a_info.data.borrow())?;
+    let token_b = utils::unpack_token_account(&token_b_info.data.borrow())?;
+    if *authority_info.key != token_a.owner {
+        return Err(SwapError::InvalidOwner.into());
+    }
+    if *authority_info.key != token_b.owner {
+        return Err(SwapError::InvalidOwner.into());
+    }
+    if *authority_info.key == destination.owner {
+        return Err(SwapError::InvalidOutputOwner.into());
+    }
+    if token_a.mint == token_b.mint {
+        return Err(SwapError::RepeatedMint.into());
+    }
+    if token_b.amount == 0 {
+        return Err(SwapError::EmptySupply.into());
+    }
+    if token_a.amount == 0 {
+        return Err(SwapError::EmptySupply.into());
+    }
+    if token_a.delegate.is_some() {
+        return Err(SwapError::InvalidDelegate.into());
+    }
+    if token_b.delegate.is_some() {
+        return Err(SwapError::InvalidDelegate.into());
+    }
+    if token_a.close_authority.is_some() {
+        return Err(SwapError::InvalidCloseAuthority.into());
+    }
+    if token_b.close_authority.is_some() {
+        return Err(SwapError::InvalidCloseAuthority.into());
+    }
+    let pool_mint = unpack_mint(&pool_mint_info.data.borrow())?;
+    if pool_mint.mint_authority.is_some()
+        && *authority_info.key != pool_mint.mint_authority.unwrap()
+    {
+        return Err(SwapError::InvalidOwner.into());
+    }
+    if pool_mint.freeze_authority.is_some() {
+        return Err(SwapError::InvalidFreezeAuthority.into());
+    }
+    if pool_mint.supply != 0 {
+        return Err(SwapError::InvalidSupply.into());
+    }
+    let admin_fee_key_a = utils::unpack_token_account(&admin_fee_a_info.data.borrow())?;
+    let admin_fee_key_b = utils::unpack_token_account(&admin_fee_b_info.data.borrow())?;
+    if token_a.mint != admin_fee_key_a.mint {
+        return Err(SwapError::InvalidAdmin.into());
+    }
+    if token_b.mint != admin_fee_key_b.mint {
+        return Err(SwapError::InvalidAdmin.into());
+    }
+
+    // getting price from pyth or with initial mid_price
+    let market_price = match get_pyth_price(pyth_price_info, clock) {
+        Ok(price) => price,
+        Err(_) => Decimal::from(mid_price),
+    };
+
+    let mut pmm_state = PMMState::new(PMMState {
+        market_price,
+        slop: Decimal::from_scaled_val(slop.into()),
+        base_target: Decimal::zero(),
+        quote_target: Decimal::zero(),
+        base_reserve: Decimal::zero(),
+        quote_reserve: Decimal::zero(),
+        r: RState::One,
+    })?;
+
+    let mint_amount = pmm_state.buy_shares(token_a.amount, token_b.amount, pool_mint.supply)?;
+    let block_timestamp_last: i64 = Clock::clone(&Default::default()).unix_timestamp;
+
+    token_mint_to(
+        swap_info.key,
+        token_program_info.clone(),
+        pool_mint_info.clone(),
+        destination_info.clone(),
+        authority_info.clone(),
+        nonce,
+        mint_amount,
+    )?;
+
+    let config = ConfigInfo::unpack(&config_info.data.borrow())?;
+
+    SwapInfo::pack(
+        SwapInfo {
             is_initialized: true,
             is_paused: false,
             nonce,
@@ -394,1653 +252,1281 @@ impl Processor {
             stop_ramp_ts: ZERO_TS,
             token_a: *token_a_info.key,
             token_b: *token_b_info.key,
-            deltafi_token: *deltafi_token_info.key,
             pool_mint: *pool_mint_info.key,
             token_a_mint: token_a.mint,
             token_b_mint: token_b.mint,
-            deltafi_mint: deltafi_token.mint,
             admin_fee_key_a: *admin_fee_a_info.key,
             admin_fee_key_b: *admin_fee_b_info.key,
             fees: config.fees,
             rewards: config.rewards,
-            pmm_state: PMMState::new(
-                i,
-                k,
-                new_base_reserve,
-                new_quote_reserve,
-                new_base_target,
-                new_quote_target,
-                token_swap.pmm_state.r,
-            ),
+            pmm_state,
             is_open_twap,
-            block_timestamp_last: new_block_timestamp_last,
-            base_price_cumulative_last,
-            receive_amount,
-        };
-        SwapInfo::pack(obj, &mut swap_info.data.borrow_mut())?;
-        Ok(())
+            block_timestamp_last,
+            base_price_cumulative_last: Decimal::zero(),
+            receive_amount: Decimal::zero(),
+        },
+        &mut swap_info.data.borrow_mut(),
+    )?;
+    Ok(())
+}
+
+fn process_swap(
+    program_id: &Pubkey,
+    amount_in: u64,
+    minimum_amount_out: u64,
+    swap_direction: u8,
+    accounts: &[AccountInfo],
+) -> ProgramResult {
+    msg!("pmm_swap_direction ................ {}", swap_direction);
+    let account_info_iter = &mut accounts.iter();
+    let swap_info = next_account_info(account_info_iter)?;
+    let authority_info = next_account_info(account_info_iter)?;
+    let source_info = next_account_info(account_info_iter)?;
+    let swap_source_info = next_account_info(account_info_iter)?;
+    let swap_destination_info = next_account_info(account_info_iter)?;
+    let destination_info = next_account_info(account_info_iter)?;
+    let reward_token_info = next_account_info(account_info_iter)?;
+    let reward_mint_info = next_account_info(account_info_iter)?;
+    let admin_destination_info = next_account_info(account_info_iter)?;
+    let pyth_price_info = next_account_info(account_info_iter)?; // pyth price account added : 2021.10.21
+    let clock = &Clock::from_account_info(next_account_info(account_info_iter)?)?;
+    let token_program_info = next_account_info(account_info_iter)?;
+
+    let mut token_swap = SwapInfo::unpack(&swap_info.data.borrow())?;
+    if token_swap.is_paused {
+        return Err(SwapError::IsPaused.into());
+    }
+    if *authority_info.key != utils::authority_id(program_id, swap_info.key, token_swap.nonce)? {
+        return Err(SwapError::InvalidProgramAddress.into());
+    }
+    if !(*swap_source_info.key == token_swap.token_a || *swap_source_info.key == token_swap.token_b)
+    {
+        return Err(SwapError::IncorrectSwapAccount.into());
+    }
+    if !(*swap_destination_info.key == token_swap.token_a
+        || *swap_destination_info.key == token_swap.token_b)
+    {
+        return Err(SwapError::IncorrectSwapAccount.into());
+    }
+    if *swap_source_info.key == *swap_destination_info.key {
+        return Err(SwapError::InvalidInput.into());
     }
 
-    /// Processes an [CalcReceiveAmount](enum.Instruction.html).
-    pub fn process_calc_receive_amount(
-        program_id: &Pubkey,
-        amount_in: u64,
-        minimum_amount_out: u64,
-        swap_direction: u8,
-        curve_mode: u8,
-        accounts: &[AccountInfo],
-    ) -> ProgramResult {
-        let account_info_iter = &mut accounts.iter();
-        let swap_info = next_account_info(account_info_iter)?;
-        let authority_info = next_account_info(account_info_iter)?;
-        let swap_source_info = next_account_info(account_info_iter)?;
-        let swap_destination_info = next_account_info(account_info_iter)?;
-        let reward_token_info = next_account_info(account_info_iter)?;
-        let reward_mint_info = next_account_info(account_info_iter)?;
-        let admin_destination_info = next_account_info(account_info_iter)?;
-        let clock_sysvar_info = next_account_info(account_info_iter)?;
+    let token_a = utils::unpack_token_account(&swap_source_info.data.borrow())?;
+    let token_b = utils::unpack_token_account(&swap_destination_info.data.borrow())?;
+    let reward_token = utils::unpack_token_account(&reward_token_info.data.borrow())?;
 
-        let token_swap = SwapInfo::unpack(&swap_info.data.borrow())?;
-        if token_swap.is_paused {
-            return Err(SwapError::IsPaused.into());
-        }
-        if *authority_info.key != utils::authority_id(program_id, swap_info.key, token_swap.nonce)?
-        {
-            return Err(SwapError::InvalidProgramAddress.into());
-        }
-        if !(*swap_source_info.key == token_swap.token_a
-            || *swap_source_info.key == token_swap.token_b)
-        {
-            return Err(SwapError::IncorrectSwapAccount.into());
-        }
-        if !(*swap_destination_info.key == token_swap.token_a
-            || *swap_destination_info.key == token_swap.token_b)
-        {
-            return Err(SwapError::IncorrectSwapAccount.into());
-        }
-        match swap_direction {
-            utils::SWAP_DIRECTION_SELL_BASE => {
-                if *swap_destination_info.key == token_swap.token_a
-                    && *admin_destination_info.key != token_swap.admin_fee_key_a
-                {
-                    return Err(SwapError::InvalidAdmin.into());
-                }
-                if *swap_destination_info.key == token_swap.token_b
-                    && *admin_destination_info.key != token_swap.admin_fee_key_b
-                {
-                    return Err(SwapError::InvalidAdmin.into());
-                }
-            }
-            utils::SWAP_DIRECTION_SELL_QUOTE => {
-                if *swap_destination_info.key == token_swap.token_a
-                    && *admin_destination_info.key != token_swap.admin_fee_key_b
-                {
-                    return Err(SwapError::InvalidAdmin.into());
-                }
-                if *swap_destination_info.key == token_swap.token_b
-                    && *admin_destination_info.key != token_swap.admin_fee_key_a
-                {
-                    return Err(SwapError::InvalidAdmin.into());
-                }
-            }
-            _ => {
-                return Err(ProgramError::InvalidArgument);
-            }
-        }
-        if *swap_source_info.key == *swap_destination_info.key {
-            return Err(SwapError::InvalidInput.into());
-        }
-        if *reward_mint_info.key != token_swap.deltafi_mint {
-            return Err(SwapError::IncorrectMint.into());
-        }
-        if *reward_token_info.key != token_swap.deltafi_token {
-            return Err(SwapError::IncorrectRewardAccount.into());
-        }
-        let clock = Clock::from_account_info(clock_sysvar_info)?;
-        let token_a = utils::unpack_token_account(&swap_source_info.data.borrow())?;
-        let token_b = utils::unpack_token_account(&swap_destination_info.data.borrow())?;
-
-        // calculate swap amount with pmm
-
-        let base_balance = FixedU64::new_from_fixed_u64(token_a.amount)?;
-        let quote_balance = FixedU64::new_from_fixed_u64(token_b.amount)?;
-        let pay_amount = FixedU64::new_from_fixed_u64(amount_in)?;
-
-        match swap_direction {
-            utils::SWAP_DIRECTION_SELL_BASE => {
-                if base_balance.inner() < pay_amount.inner() {
-                    return Err(ProgramError::InsufficientFunds);
-                }
-            }
-            utils::SWAP_DIRECTION_SELL_QUOTE => {
-                if quote_balance.inner() < pay_amount.inner() {
-                    return Err(ProgramError::InsufficientFunds);
-                }
-            }
-            _ => {
-                return Err(ProgramError::InvalidArgument);
-            }
-        }
-
-        let base_reserve = token_swap.pmm_state.b;
-        let quote_reserve = token_swap.pmm_state.q;
-        let base_target = token_swap.pmm_state.b_0;
-        let quote_target = token_swap.pmm_state.q_0;
-
-        let state = PMMState::new(
-            token_swap.pmm_state.i,
-            token_swap.pmm_state.k,
-            base_reserve,
-            quote_reserve,
-            base_target,
-            quote_target,
-            token_swap.pmm_state.r,
-        );
-        msg!("Pmm on calc receive amount ----------------{:?}", state);
-
-        let state = state.adjusted_target()?;
-        let mut dy_swap_amount = FixedU64::zero();
-        if curve_mode == utils::CURVE_AMM {
-            let (mut _receive_amount, mut _new_r) = (FixedU64::zero(), RState::One);
-            match swap_direction {
-                utils::SWAP_DIRECTION_SELL_BASE => {
-                    let (r_a, n_r) = state.sell_base_token(pay_amount)?;
-                    _receive_amount = r_a;
-                    _new_r = n_r;
-                }
-                utils::SWAP_DIRECTION_SELL_QUOTE => {
-                    let (r_a, n_r) = state.sell_quote_token(pay_amount)?;
-                    _receive_amount = r_a;
-                    _new_r = n_r;
-                }
-                _ => {
-                    return Err(ProgramError::InvalidArgument);
-                }
-            }
-
-            let fees = &token_swap.fees;
-            let dy_fee = FixedU64::new_from_fixed_u64(fees.trade_fee(_receive_amount.inner())?)?;
-            dy_swap_amount = _receive_amount.checked_sub(dy_fee)?;
-        } else if curve_mode == utils::CURVE_PMM {
-            let invariant = StableSwap::new(
-                token_swap.initial_amp_factor,
-                token_swap.target_amp_factor,
-                clock.unix_timestamp,
-                token_swap.start_ramp_ts,
-                token_swap.stop_ramp_ts,
-            );
-            let result = invariant
-                .swap_to(
-                    U256::from(amount_in),
-                    U256::from(token_a.amount),
-                    U256::from(token_b.amount),
-                    &token_swap.fees,
-                )
-                .ok_or(SwapError::CalculationFailure)?;
-            dy_swap_amount = FixedU64::new_from_fixed_u64(U256::to_u64(result.amount_swapped)?)?;
-        }
-
-        if dy_swap_amount.inner() < minimum_amount_out {
-            return Err(SwapError::ExceededSlippage.into());
-        }
-
-        let obj = SwapInfo {
-            is_initialized: token_swap.is_initialized,
-            is_paused: token_swap.is_paused,
-            nonce: token_swap.nonce,
-            initial_amp_factor: token_swap.initial_amp_factor,
-            target_amp_factor: token_swap.target_amp_factor,
-            start_ramp_ts: token_swap.start_ramp_ts,
-            stop_ramp_ts: token_swap.stop_ramp_ts,
-            token_a: token_swap.token_a,
-            token_b: token_swap.token_b,
-            pool_mint: token_swap.pool_mint,
-            token_a_mint: token_swap.token_a_mint,
-            token_b_mint: token_swap.token_b_mint,
-            admin_fee_key_a: token_swap.admin_fee_key_a,
-            admin_fee_key_b: token_swap.admin_fee_key_b,
-            deltafi_token: token_swap.deltafi_token,
-            deltafi_mint: token_swap.deltafi_mint,
-            fees: token_swap.fees,
-            rewards: token_swap.rewards,
-            pmm_state: PMMState::new(
-                token_swap.pmm_state.i,
-                token_swap.pmm_state.k,
-                token_swap.pmm_state.b,
-                token_swap.pmm_state.q,
-                token_swap.pmm_state.b_0,
-                token_swap.pmm_state.q_0,
-                token_swap.pmm_state.r,
-            ),
-            is_open_twap: token_swap.is_open_twap,
-            block_timestamp_last: token_swap.block_timestamp_last,
-            base_price_cumulative_last: token_swap.base_price_cumulative_last,
-            receive_amount: dy_swap_amount,
-        };
-        SwapInfo::pack(obj, &mut swap_info.data.borrow_mut())?;
-
-        Ok(())
+    let reward_mint = unpack_mint(&reward_mint_info.data.borrow())?;
+    if reward_mint.mint_authority.is_some()
+        && *authority_info.key != reward_mint.mint_authority.unwrap()
+    {
+        return Err(SwapError::InvalidOwner.into());
+    }
+    if &reward_token.mint != reward_mint_info.key {
+        return Err(SwapError::IncorrectMint.into());
     }
 
-    /// Processes an [Swap](enum.Instruction.html).
-    pub fn process_swap(
-        program_id: &Pubkey,
-        amount_in: u64,
-        minimum_amount_out: u64,
-        swap_direction: u8,
-        curve_mode: u8,
-        accounts: &[AccountInfo],
-    ) -> ProgramResult {
-        msg!("pmm_swap_direction ................ {}", swap_direction);
-        let account_info_iter = &mut accounts.iter();
-        let swap_info = next_account_info(account_info_iter)?;
-        let authority_info = next_account_info(account_info_iter)?;
-        let source_info = next_account_info(account_info_iter)?;
-        let swap_source_info = next_account_info(account_info_iter)?;
-        let swap_destination_info = next_account_info(account_info_iter)?;
-        let destination_info = next_account_info(account_info_iter)?;
-        let reward_token_info = next_account_info(account_info_iter)?;
-        let reward_mint_info = next_account_info(account_info_iter)?;
-        let admin_destination_info = next_account_info(account_info_iter)?;
-        let pyth_price_info = next_account_info(account_info_iter)?; // pyth price account added : 2021.10.21
-        let token_program_info = next_account_info(account_info_iter)?;
-        let clock_sysvar_info = next_account_info(account_info_iter)?;
-
-        let token_swap = SwapInfo::unpack(&swap_info.data.borrow())?;
-        if token_swap.is_paused {
-            return Err(SwapError::IsPaused.into());
-        }
-        if *authority_info.key != utils::authority_id(program_id, swap_info.key, token_swap.nonce)?
-        {
-            return Err(SwapError::InvalidProgramAddress.into());
-        }
-        if !(*swap_source_info.key == token_swap.token_a
-            || *swap_source_info.key == token_swap.token_b)
-        {
-            return Err(SwapError::IncorrectSwapAccount.into());
-        }
-        if !(*swap_destination_info.key == token_swap.token_a
-            || *swap_destination_info.key == token_swap.token_b)
-        {
-            return Err(SwapError::IncorrectSwapAccount.into());
-        }
-        match swap_direction {
-            utils::SWAP_DIRECTION_SELL_BASE => {
-                if *swap_destination_info.key == token_swap.token_a
-                    && *admin_destination_info.key != token_swap.admin_fee_key_a
-                {
-                    return Err(SwapError::InvalidAdmin.into());
-                }
-                if *swap_destination_info.key == token_swap.token_b
-                    && *admin_destination_info.key != token_swap.admin_fee_key_b
-                {
-                    return Err(SwapError::InvalidAdmin.into());
-                }
-            }
-            utils::SWAP_DIRECTION_SELL_QUOTE => {
-                if *swap_destination_info.key == token_swap.token_a
-                    && *admin_destination_info.key != token_swap.admin_fee_key_b
-                {
-                    return Err(SwapError::InvalidAdmin.into());
-                }
-                if *swap_destination_info.key == token_swap.token_b
-                    && *admin_destination_info.key != token_swap.admin_fee_key_a
-                {
-                    return Err(SwapError::InvalidAdmin.into());
-                }
-            }
-            _ => {
-                return Err(ProgramError::InvalidArgument);
-            }
-        }
-        if *swap_source_info.key == *swap_destination_info.key {
-            return Err(SwapError::InvalidInput.into());
-        }
-        if *reward_mint_info.key != token_swap.deltafi_mint {
-            return Err(SwapError::IncorrectMint.into());
-        }
-        if *reward_token_info.key != token_swap.deltafi_token {
-            return Err(SwapError::IncorrectRewardAccount.into());
-        }
-        let clock = Clock::from_account_info(clock_sysvar_info)?;
-        let token_a = utils::unpack_token_account(&swap_source_info.data.borrow())?;
-        let token_b = utils::unpack_token_account(&swap_destination_info.data.borrow())?;
-
-        match swap_direction {
-            utils::SWAP_DIRECTION_SELL_BASE => {
-                if token_a.amount < amount_in {
-                    return Err(ProgramError::InsufficientFunds);
-                }
-            }
-            utils::SWAP_DIRECTION_SELL_QUOTE => {
-                if token_b.amount < amount_in {
-                    return Err(ProgramError::InsufficientFunds);
-                }
-            }
-            _ => {
-                return Err(ProgramError::InvalidArgument);
-            }
-        }
-        // calculate swap amount with pmm
-        let base_balance = FixedU64::new_from_fixed_u64(token_a.amount)?;
-        let quote_balance = FixedU64::new_from_fixed_u64(token_b.amount)?;
-        let pay_amount = FixedU64::new_from_fixed_u64(amount_in)?;
-
-        match swap_direction {
-            utils::SWAP_DIRECTION_SELL_BASE => {
-                if base_balance.inner() < pay_amount.inner() {
-                    return Err(ProgramError::InsufficientFunds);
-                }
-            }
-            utils::SWAP_DIRECTION_SELL_QUOTE => {
-                if quote_balance.inner() < pay_amount.inner() {
-                    return Err(ProgramError::InsufficientFunds);
-                }
-            }
-            _ => {
-                return Err(ProgramError::InvalidArgument);
-            }
-        }
-
-        let base_reserve = token_swap.pmm_state.b;
-        let quote_reserve = token_swap.pmm_state.q;
-        let base_target = token_swap.pmm_state.b_0;
-        let quote_target = token_swap.pmm_state.q_0;
-
-        // updating price from pyth price
-        let pyth_price_data = &pyth_price_info.try_borrow_data()?;
-        let pyth_price;
-        if is_zero(pyth_price_data) {
-            pyth_price = token_swap.pmm_state.i.inner();
-        } else {
-            let pyth_price_obj = pyth_client::cast::<pyth_client::Price>(pyth_price_data);
-            pyth_price = pyth_price_obj.agg.price as u64;
-        }
-        // let mut new_i = token_swap.pmm_state.i;
-        let new_i;
-        let deviation;
-        if token_swap.pmm_state.i.inner() > pyth_price {
-            deviation = token_swap
-                .pmm_state
-                .i
-                .inner()
-                .checked_sub(pyth_price)
-                .ok_or(ProgramError::InvalidArgument)?;
-        } else {
-            deviation = pyth_price
-                .checked_sub(token_swap.pmm_state.i.inner())
-                .ok_or(ProgramError::InvalidArgument)?;
-        }
-
-        if deviation.checked_mul(100u64).unwrap() > token_swap.pmm_state.i.inner() {
-            new_i = token_swap.base_price_cumulative_last;
-        } else {
-            new_i = FixedU64::new_from_fixed_u64(pyth_price)?;
-        }
-
-        let state = PMMState::new(
-            new_i,
-            token_swap.pmm_state.k,
-            base_reserve,
-            quote_reserve,
-            base_target,
-            quote_target,
-            token_swap.pmm_state.r,
-        );
-        let state = state.adjusted_target()?;
-
-        let (mut _receive_amount, mut _new_r) = (FixedU64::zero(), RState::One);
-        match swap_direction {
-            utils::SWAP_DIRECTION_SELL_BASE => {
-                let (r_a, n_r) = state.sell_base_token(pay_amount)?;
-                _receive_amount = r_a;
-                _new_r = n_r;
-            }
-            utils::SWAP_DIRECTION_SELL_QUOTE => {
-                let (r_a, n_r) = state.sell_quote_token(pay_amount)?;
-                _receive_amount = r_a;
-                _new_r = n_r;
-            }
-            _ => {
-                return Err(ProgramError::InvalidArgument);
-            }
-        }
-
-        let fees = &token_swap.fees;
-        let dy_fee = FixedU64::new_from_fixed_u64(fees.trade_fee(_receive_amount.inner())?)?;
-        let mut admin_fee = FixedU64::new_from_fixed_u64(fees.admin_trade_fee(dy_fee.inner())?)?;
-        let mid_price = state.get_mid_price().unwrap();
-        let rewards = &token_swap.rewards;
-        let amount_to_reward = rewards
-            .trade_reward_fixed_u256(pay_amount.checked_mul_floor(mid_price)?)
-            .unwrap();
-        let mut dy_swap_amount = _receive_amount.checked_sub(dy_fee)?;
-
-        let mut new_base_target = base_target;
-        let mut new_quote_target = quote_target;
-        match swap_direction {
-            utils::SWAP_DIRECTION_SELL_BASE => {
-                new_base_target = state.b_0;
-            }
-            utils::SWAP_DIRECTION_SELL_QUOTE => {
-                new_quote_target = state.q_0;
-            }
-            _ => {
-                return Err(ProgramError::InvalidArgument);
-            }
-        }
-
-        if curve_mode == utils::CURVE_AMM {
-            let invariant = StableSwap::new(
-                token_swap.initial_amp_factor,
-                token_swap.target_amp_factor,
-                clock.unix_timestamp,
-                token_swap.start_ramp_ts,
-                token_swap.stop_ramp_ts,
-            );
-            let result = invariant
-                .swap_to(
-                    U256::from(amount_in),
-                    U256::from(token_b.amount),
-                    U256::from(token_b.amount),
-                    &token_swap.fees,
-                )
-                .ok_or(SwapError::CalculationFailure)?;
-            dy_swap_amount = FixedU64::new_from_fixed_u64(U256::to_u64(result.amount_swapped)?)?;
-            admin_fee = FixedU64::new_from_fixed_u64(U256::to_u64(result.admin_fee)?)?;
-        }
-
-        if dy_swap_amount.inner() < minimum_amount_out {
-            return Err(SwapError::ExceededSlippage.into());
-        }
-
-        let mut _new_base_reserve = FixedU64::zero();
-        let mut _new_quote_reserve = FixedU64::zero();
-        match swap_direction {
-            utils::SWAP_DIRECTION_SELL_BASE => {
-                Self::token_transfer(
-                    swap_info.key,
-                    token_program_info.clone(),
-                    source_info.clone(),
-                    swap_source_info.clone(),
-                    authority_info.clone(),
-                    token_swap.nonce,
-                    amount_in,
-                )?;
-                Self::token_transfer(
-                    swap_info.key,
-                    token_program_info.clone(),
-                    swap_destination_info.clone(),
-                    destination_info.clone(),
-                    authority_info.clone(),
-                    token_swap.nonce,
-                    dy_swap_amount.inner(),
-                )?;
-                Self::token_transfer(
-                    swap_info.key,
-                    token_program_info.clone(),
-                    swap_destination_info.clone(),
-                    admin_destination_info.clone(),
-                    authority_info.clone(),
-                    token_swap.nonce,
-                    admin_fee.inner(),
-                )?;
-                Self::token_mint_to(
-                    swap_info.key,
-                    token_program_info.clone(),
-                    reward_mint_info.clone(),
-                    reward_token_info.clone(),
-                    authority_info.clone(),
-                    token_swap.nonce,
-                    amount_to_reward.inner(),
-                )?;
-
-                _new_base_reserve = base_balance.checked_add(pay_amount)?;
-                _new_quote_reserve = quote_balance.checked_sub(dy_swap_amount)?;
-            }
-            utils::SWAP_DIRECTION_SELL_QUOTE => {
-                Self::token_transfer(
-                    swap_info.key,
-                    token_program_info.clone(),
-                    destination_info.clone(),
-                    swap_destination_info.clone(),
-                    authority_info.clone(),
-                    token_swap.nonce,
-                    amount_in,
-                )?;
-                Self::token_transfer(
-                    swap_info.key,
-                    token_program_info.clone(),
-                    swap_source_info.clone(),
-                    source_info.clone(),
-                    authority_info.clone(),
-                    token_swap.nonce,
-                    dy_swap_amount.inner(),
-                )?;
-                Self::token_transfer(
-                    swap_info.key,
-                    token_program_info.clone(),
-                    swap_source_info.clone(),
-                    admin_destination_info.clone(),
-                    authority_info.clone(),
-                    token_swap.nonce,
-                    admin_fee.inner(),
-                )?;
-                Self::token_mint_to(
-                    swap_info.key,
-                    token_program_info.clone(),
-                    reward_mint_info.clone(),
-                    reward_token_info.clone(),
-                    authority_info.clone(),
-                    token_swap.nonce,
-                    amount_to_reward.inner(),
-                )?;
-
-                _new_base_reserve = base_balance.checked_sub(dy_swap_amount)?;
-                _new_quote_reserve = quote_balance.checked_add(pay_amount)?;
-            }
-            _ => {
-                return Err(ProgramError::InvalidArgument);
-            }
-        }
-
-        let block_timestamp_last: i64 = clock.unix_timestamp;
-        let mut base_price_cumulative_last = token_swap.base_price_cumulative_last;
-        if token_swap.is_open_twap == utils::TWAP_OPENED {
-            let time_elapsed = block_timestamp_last - token_swap.block_timestamp_last;
-            if time_elapsed > 0 && _new_base_reserve.inner() != 0 && _new_quote_reserve.inner() != 0
+    match swap_direction {
+        utils::SWAP_DIRECTION_SELL_BASE => {
+            if *swap_destination_info.key == token_swap.token_a
+                && *admin_destination_info.key != token_swap.admin_fee_key_a
             {
-                let state = PMMState::new(
-                    new_i,
-                    token_swap.pmm_state.k,
-                    _new_base_reserve,
-                    _new_quote_reserve,
-                    new_base_target,
-                    new_quote_target,
-                    token_swap.pmm_state.r,
-                );
-
-                base_price_cumulative_last = base_price_cumulative_last.checked_add(
-                    state
-                        .get_mid_price()?
-                        .checked_mul_floor(FixedU64::new_from_u64(time_elapsed as u64)?)?,
-                )?;
+                return Err(SwapError::InvalidAdmin.into());
+            }
+            if *swap_destination_info.key == token_swap.token_b
+                && *admin_destination_info.key != token_swap.admin_fee_key_b
+            {
+                return Err(SwapError::InvalidAdmin.into());
+            }
+            if token_a.amount < amount_in {
+                return Err(ProgramError::InsufficientFunds);
             }
         }
-        let receive_amount = dy_swap_amount;
-
-        let obj = SwapInfo {
-            is_initialized: token_swap.is_initialized,
-            is_paused: token_swap.is_paused,
-            nonce: token_swap.nonce,
-            initial_amp_factor: token_swap.initial_amp_factor,
-            target_amp_factor: token_swap.target_amp_factor,
-            start_ramp_ts: token_swap.start_ramp_ts,
-            stop_ramp_ts: token_swap.stop_ramp_ts,
-            token_a: token_swap.token_a,
-            token_b: token_swap.token_b,
-            pool_mint: token_swap.pool_mint,
-            token_a_mint: token_swap.token_a_mint,
-            token_b_mint: token_swap.token_b_mint,
-            admin_fee_key_a: token_swap.admin_fee_key_a,
-            admin_fee_key_b: token_swap.admin_fee_key_b,
-            deltafi_token: token_swap.deltafi_token,
-            deltafi_mint: token_swap.deltafi_mint,
-            fees: token_swap.fees,
-            rewards: token_swap.rewards,
-            pmm_state: PMMState::new(
-                new_i,
-                token_swap.pmm_state.k,
-                _new_base_reserve,
-                _new_quote_reserve,
-                new_base_target,
-                new_quote_target,
-                _new_r,
-            ),
-            is_open_twap: token_swap.is_open_twap,
-            block_timestamp_last,
-            base_price_cumulative_last,
-            receive_amount,
-        };
-        SwapInfo::pack(obj, &mut swap_info.data.borrow_mut())?;
-
-        Ok(())
-    }
-
-    /// Processes an [Deposit](enum.Instruction.html).
-    pub fn process_deposit(
-        program_id: &Pubkey,
-        token_a_amount: u64,
-        token_b_amount: u64,
-        min_mint_amount: u64,
-        curve_mode: u8,
-        accounts: &[AccountInfo],
-    ) -> ProgramResult {
-        let account_info_iter = &mut accounts.iter();
-        let swap_info = next_account_info(account_info_iter)?;
-        let authority_info = next_account_info(account_info_iter)?;
-        let source_a_info = next_account_info(account_info_iter)?;
-        let source_b_info = next_account_info(account_info_iter)?;
-        let token_a_info = next_account_info(account_info_iter)?;
-        let token_b_info = next_account_info(account_info_iter)?;
-        let pool_mint_info = next_account_info(account_info_iter)?;
-        let dest_info = next_account_info(account_info_iter)?;
-        let pyth_price_info = next_account_info(account_info_iter)?; // pyth price account added : 2021.10.21
-        let token_program_info = next_account_info(account_info_iter)?;
-        let clock_sysvar_info = next_account_info(account_info_iter)?;
-
-        let token_swap = SwapInfo::unpack(&swap_info.data.borrow())?;
-        if token_swap.is_paused {
-            return Err(SwapError::IsPaused.into());
-        }
-        if *authority_info.key != utils::authority_id(program_id, swap_info.key, token_swap.nonce)?
-        {
-            return Err(SwapError::InvalidProgramAddress.into());
-        }
-        if *token_a_info.key != token_swap.token_a {
-            return Err(SwapError::IncorrectSwapAccount.into());
-        }
-        if *token_b_info.key != token_swap.token_b {
-            return Err(SwapError::IncorrectSwapAccount.into());
-        }
-        if *pool_mint_info.key != token_swap.pool_mint {
-            return Err(SwapError::IncorrectMint.into());
-        }
-
-        let clock = Clock::from_account_info(clock_sysvar_info)?;
-        let token_a = utils::unpack_token_account(&token_a_info.data.borrow())?;
-        let token_b = utils::unpack_token_account(&token_b_info.data.borrow())?;
-        let pool_mint = Self::unpack_mint(&pool_mint_info.data.borrow())?;
-
-        // impl pmm into deposit process
-        let mut base_blance = FixedU64::new_from_fixed_u64(token_a.amount)?;
-        let mut quote_blance = FixedU64::new_from_fixed_u64(token_b.amount)?;
-        let base_in_amount = FixedU64::new_from_fixed_u64(token_a_amount)?;
-        let quote_in_amount = FixedU64::new_from_fixed_u64(token_b_amount)?;
-        let base_reserve = token_swap.pmm_state.b;
-        let quote_reserve = token_swap.pmm_state.q;
-        let base_target = token_swap.pmm_state.b_0;
-        let quote_target = token_swap.pmm_state.q_0;
-
-        let (mut base_adjusted_in_amount, mut quote_adjusted_in_amount) = (
-            FixedU64::new_from_fixed_u64(token_a_amount)?,
-            FixedU64::new_from_fixed_u64(token_b_amount)?,
-        );
-        let (
-            mut mint_amount,
-            mut new_base_target,
-            mut new_quote_target,
-            mut new_base_reserve,
-            mut new_quote_reserve,
-        ) = (
-            FixedU64::zero(),
-            base_target,
-            quote_target,
-            base_reserve,
-            quote_reserve,
-        );
-
-        // updating price from pyth price
-        let pyth_price_data = &pyth_price_info.try_borrow_data()?;
-        let pyth_price;
-        if is_zero(pyth_price_data) {
-            pyth_price = token_swap.pmm_state.i.inner();
-        } else {
-            let pyth_price_obj = pyth_client::cast::<pyth_client::Price>(pyth_price_data);
-            pyth_price = pyth_price_obj.agg.price as u64;
-        }
-        // let mut new_i = token_swap.pmm_state.i;
-        let new_i;
-        let deviation;
-        if token_swap.pmm_state.i.inner() > pyth_price {
-            deviation = token_swap
-                .pmm_state
-                .i
-                .inner()
-                .checked_sub(pyth_price)
-                .ok_or(ProgramError::InvalidArgument)?;
-        } else {
-            deviation = pyth_price
-                .checked_sub(token_swap.pmm_state.i.inner())
-                .ok_or(ProgramError::InvalidArgument)?;
-        }
-
-        if deviation.checked_mul(100u64).unwrap() > token_swap.pmm_state.i.inner() {
-            new_i = token_swap.base_price_cumulative_last;
-        } else {
-            new_i = FixedU64::new_from_fixed_u64(pyth_price)?;
-        }
-
-        if curve_mode == utils::CURVE_PMM {
-            let (pmm_base_in_amount, pmm_quote_in_amount) = get_deposit_adjustment_amount(
-                base_in_amount,
-                quote_in_amount,
-                base_reserve,
-                quote_reserve,
-                new_i,
-            )?;
-            base_adjusted_in_amount = pmm_base_in_amount;
-            quote_adjusted_in_amount = pmm_quote_in_amount;
-
-            base_blance = base_blance.checked_add(base_adjusted_in_amount)?;
-            quote_blance = quote_blance.checked_add(quote_adjusted_in_amount)?;
-
-            let (
-                pmm_mint_amount,
-                pmm_new_base_target,
-                pmm_new_quote_target,
-                pmm_new_base_reserve,
-                pmm_new_quote_reserve,
-            ) = get_buy_shares(
-                base_blance,
-                quote_blance,
-                base_reserve,
-                quote_reserve,
-                base_target,
-                quote_target,
-                FixedU64::new_from_fixed_u64(pool_mint.supply)?,
-                new_i,
-            )?;
-            mint_amount = pmm_mint_amount;
-            new_base_target = pmm_new_base_target;
-            new_quote_target = pmm_new_quote_target;
-            new_base_reserve = pmm_new_base_reserve;
-            new_quote_reserve = pmm_new_quote_reserve;
-        } else if curve_mode == utils::CURVE_AMM {
-            let invariant = StableSwap::new(
-                token_swap.initial_amp_factor,
-                token_swap.target_amp_factor,
-                clock.unix_timestamp,
-                token_swap.start_ramp_ts,
-                token_swap.stop_ramp_ts,
-            );
-            let mint_amount_u256 = invariant
-                .compute_mint_amount_for_deposit(
-                    U256::from(token_a_amount),
-                    U256::from(token_b_amount),
-                    U256::from(token_a.amount),
-                    U256::from(token_b.amount),
-                    U256::from(pool_mint.supply),
-                    &token_swap.fees,
-                )
-                .ok_or(SwapError::CalculationFailure)?;
-            mint_amount = FixedU64::new_from_fixed_u64(U256::to_u64(mint_amount_u256)?)?;
-        }
-
-        if mint_amount.inner() < min_mint_amount {
-            return Err(SwapError::ExceededSlippage.into());
-        }
-
-        Self::token_transfer(
-            swap_info.key,
-            token_program_info.clone(),
-            source_a_info.clone(),
-            token_a_info.clone(),
-            authority_info.clone(),
-            token_swap.nonce,
-            base_adjusted_in_amount.inner(),
-        )?;
-        Self::token_transfer(
-            swap_info.key,
-            token_program_info.clone(),
-            source_b_info.clone(),
-            token_b_info.clone(),
-            authority_info.clone(),
-            token_swap.nonce,
-            quote_adjusted_in_amount.inner(),
-        )?;
-        Self::token_mint_to(
-            swap_info.key,
-            token_program_info.clone(),
-            pool_mint_info.clone(),
-            dest_info.clone(),
-            authority_info.clone(),
-            token_swap.nonce,
-            mint_amount.inner(),
-        )?;
-
-        let block_timestamp_last: i64 = clock.unix_timestamp;
-        let mut base_price_cumulative_last = token_swap.base_price_cumulative_last;
-        if token_swap.is_open_twap == utils::TWAP_OPENED {
-            let time_elapsed = block_timestamp_last - token_swap.block_timestamp_last;
-            if time_elapsed > 0 && new_base_reserve.inner() != 0 && new_quote_reserve.inner() != 0 {
-                let state = PMMState::new(
-                    new_i,
-                    token_swap.pmm_state.k,
-                    new_base_reserve,
-                    new_quote_reserve,
-                    new_base_target,
-                    new_quote_target,
-                    token_swap.pmm_state.r,
-                );
-
-                base_price_cumulative_last = base_price_cumulative_last.checked_add(
-                    state
-                        .get_mid_price()?
-                        .checked_mul_floor(FixedU64::new_from_u64(time_elapsed as u64)?)?,
-                )?;
+        utils::SWAP_DIRECTION_SELL_QUOTE => {
+            if *swap_destination_info.key == token_swap.token_a
+                && *admin_destination_info.key != token_swap.admin_fee_key_b
+            {
+                return Err(SwapError::InvalidAdmin.into());
+            }
+            if *swap_destination_info.key == token_swap.token_b
+                && *admin_destination_info.key != token_swap.admin_fee_key_a
+            {
+                return Err(SwapError::InvalidAdmin.into());
+            }
+            if token_b.amount < amount_in {
+                return Err(ProgramError::InsufficientFunds);
             }
         }
-        let receive_amount = FixedU64::zero();
-
-        let obj = SwapInfo {
-            is_initialized: token_swap.is_initialized,
-            is_paused: token_swap.is_paused,
-            nonce: token_swap.nonce,
-            initial_amp_factor: token_swap.initial_amp_factor,
-            target_amp_factor: token_swap.target_amp_factor,
-            start_ramp_ts: token_swap.start_ramp_ts,
-            stop_ramp_ts: token_swap.stop_ramp_ts,
-            token_a: token_swap.token_a,
-            token_b: token_swap.token_b,
-            pool_mint: token_swap.pool_mint,
-            token_a_mint: token_swap.token_a_mint,
-            token_b_mint: token_swap.token_b_mint,
-            admin_fee_key_a: token_swap.admin_fee_key_a,
-            admin_fee_key_b: token_swap.admin_fee_key_b,
-            deltafi_token: token_swap.deltafi_token,
-            deltafi_mint: token_swap.deltafi_mint,
-            fees: token_swap.fees,
-            rewards: token_swap.rewards,
-            pmm_state: PMMState::new(
-                new_i,
-                token_swap.pmm_state.k,
-                new_base_reserve,
-                new_quote_reserve,
-                new_base_target,
-                new_quote_target,
-                token_swap.pmm_state.r,
-            ),
-            is_open_twap: token_swap.is_open_twap,
-            block_timestamp_last,
-            base_price_cumulative_last,
-            receive_amount,
-        };
-        SwapInfo::pack(obj, &mut swap_info.data.borrow_mut())?;
-
-        Ok(())
+        _ => {
+            return Err(ProgramError::InvalidArgument);
+        }
     }
 
-    /// Processes an [Withdraw](enum.Instruction.html).
-    pub fn process_withdraw(
-        program_id: &Pubkey,
-        pool_token_amount: u64,
-        minimum_token_a_amount: u64,
-        minimum_token_b_amount: u64,
-        accounts: &[AccountInfo],
-    ) -> ProgramResult {
-        let account_info_iter = &mut accounts.iter();
-        let swap_info = next_account_info(account_info_iter)?;
-        let authority_info = next_account_info(account_info_iter)?;
-        let pool_mint_info = next_account_info(account_info_iter)?;
-        let source_info = next_account_info(account_info_iter)?;
-        let token_a_info = next_account_info(account_info_iter)?;
-        let token_b_info = next_account_info(account_info_iter)?;
-        let dest_token_a_info = next_account_info(account_info_iter)?;
-        let dest_token_b_info = next_account_info(account_info_iter)?;
-        let admin_fee_dest_a_info = next_account_info(account_info_iter)?;
-        let admin_fee_dest_b_info = next_account_info(account_info_iter)?;
-        let token_program_info = next_account_info(account_info_iter)?;
+    let pmm_state = token_swap.pmm_state.clone();
+    let pyth_price = get_pyth_price(pyth_price_info, clock)?;
 
-        let token_swap = SwapInfo::unpack(&swap_info.data.borrow())?;
-        if *authority_info.key != utils::authority_id(program_id, swap_info.key, token_swap.nonce)?
-        {
-            return Err(SwapError::InvalidProgramAddress.into());
-        }
-        if *token_a_info.key != token_swap.token_a {
-            return Err(SwapError::IncorrectSwapAccount.into());
-        }
-        if *token_b_info.key != token_swap.token_b {
-            return Err(SwapError::IncorrectSwapAccount.into());
-        }
-        if *pool_mint_info.key != token_swap.pool_mint {
-            return Err(SwapError::IncorrectMint.into());
-        }
-        if *admin_fee_dest_a_info.key != token_swap.admin_fee_key_a {
-            return Err(SwapError::InvalidAdmin.into());
-        }
-        if *admin_fee_dest_b_info.key != token_swap.admin_fee_key_b {
-            return Err(SwapError::InvalidAdmin.into());
-        }
-        let pool_mint = Self::unpack_mint(&pool_mint_info.data.borrow())?;
-        if pool_mint.supply == 0 {
-            return Err(SwapError::EmptyPool.into());
-        }
+    let deviation = match pmm_state.market_price.cmp(&pyth_price) {
+        Ordering::Greater => pmm_state.market_price.try_sub(pyth_price)?,
+        _ => pyth_price.try_sub(pmm_state.market_price)?,
+    };
 
-        let token_a = utils::unpack_token_account(&token_a_info.data.borrow())?;
-        let token_b = utils::unpack_token_account(&token_b_info.data.borrow())?;
+    let new_market_price = if deviation.try_mul(100u64)? > pmm_state.market_price {
+        token_swap.base_price_cumulative_last
+    } else {
+        pyth_price
+    };
 
-        let converter = PoolTokenConverter {
-            supply: U256::from(pool_mint.supply),
-            token_a: U256::from(token_a.amount),
-            token_b: U256::from(token_b.amount),
-            fees: &token_swap.fees,
-        };
-        let pool_token_amount_u256 = U256::from(pool_token_amount);
-        let (a_amount_u256, a_admin_fee_u256) = converter
-            .token_a_rate(pool_token_amount_u256)
-            .ok_or(SwapError::CalculationFailure)?;
-        let (a_amount, a_admin_fee) = (
-            U256::to_u64(a_amount_u256)?,
-            U256::to_u64(a_admin_fee_u256)?,
-        );
-        if a_amount < minimum_token_a_amount {
-            return Err(SwapError::ExceededSlippage.into());
-        }
-        let (b_amount_u256, b_admin_fee_u256) = converter
-            .token_b_rate(pool_token_amount_u256)
-            .ok_or(SwapError::CalculationFailure)?;
-        let (b_amount, b_admin_fee) = (
-            U256::to_u64(b_amount_u256)?,
-            U256::to_u64(b_admin_fee_u256)?,
-        );
-        if b_amount < minimum_token_b_amount {
-            return Err(SwapError::ExceededSlippage.into());
-        }
+    let state = PMMState::new(PMMState {
+        market_price: new_market_price,
+        ..pmm_state
+    })?;
 
-        Self::token_transfer(
-            swap_info.key,
-            token_program_info.clone(),
-            token_a_info.clone(),
-            dest_token_a_info.clone(),
-            authority_info.clone(),
-            token_swap.nonce,
-            a_amount,
-        )?;
-        Self::token_transfer(
-            swap_info.key,
-            token_program_info.clone(),
-            token_a_info.clone(),
-            admin_fee_dest_a_info.clone(),
-            authority_info.clone(),
-            token_swap.nonce,
-            a_admin_fee,
-        )?;
-        Self::token_transfer(
-            swap_info.key,
-            token_program_info.clone(),
-            token_b_info.clone(),
-            dest_token_b_info.clone(),
-            authority_info.clone(),
-            token_swap.nonce,
-            b_amount,
-        )?;
-        Self::token_transfer(
-            swap_info.key,
-            token_program_info.clone(),
-            token_b_info.clone(),
-            admin_fee_dest_b_info.clone(),
-            authority_info.clone(),
-            token_swap.nonce,
-            b_admin_fee,
-        )?;
-        Self::token_burn(
-            swap_info.key,
-            token_program_info.clone(),
-            source_info.clone(),
-            pool_mint_info.clone(),
-            authority_info.clone(),
-            token_swap.nonce,
-            pool_token_amount,
-        )?;
-        Ok(())
+    let (receive_amount, new_r) = match swap_direction {
+        utils::SWAP_DIRECTION_SELL_BASE => state.sell_base_token(amount_in)?,
+        utils::SWAP_DIRECTION_SELL_QUOTE => state.sell_quote_token(amount_in)?,
+        _ => {
+            return Err(ProgramError::InvalidArgument);
+        }
+    };
+
+    let fees = &token_swap.fees;
+    let dy_fee = fees.trade_fee(receive_amount)?;
+    let admin_fee = fees.admin_trade_fee(dy_fee)?;
+    let rewards = &token_swap.rewards;
+    let amount_to_reward = rewards.trade_reward_u64(amount_in)?;
+    let dy_swap_amount = receive_amount
+        .checked_sub(dy_fee)
+        .ok_or(SwapError::CalculationFailure)?;
+
+    if dy_swap_amount < minimum_amount_out {
+        return Err(SwapError::ExceededSlippage.into());
     }
 
-    /// Processes an [WithdrawOne](enum.Instruction.html).
-    pub fn process_withdraw_one(
-        program_id: &Pubkey,
-        pool_token_amount: u64,
-        minimum_token_amount: u64,
-        accounts: &[AccountInfo],
-    ) -> ProgramResult {
-        let account_info_iter = &mut accounts.iter();
-        let swap_info = next_account_info(account_info_iter)?;
-        let authority_info = next_account_info(account_info_iter)?;
-        let pool_mint_info = next_account_info(account_info_iter)?;
-        let source_info = next_account_info(account_info_iter)?;
-        let base_token_info = next_account_info(account_info_iter)?;
-        let quote_token_info = next_account_info(account_info_iter)?;
-        let destination_info = next_account_info(account_info_iter)?;
-        let admin_destination_info = next_account_info(account_info_iter)?;
-        let token_program_info = next_account_info(account_info_iter)?;
-        let clock_sysvar_info = next_account_info(account_info_iter)?;
-
-        if *base_token_info.key == *quote_token_info.key {
-            return Err(SwapError::InvalidInput.into());
-        }
-        let token_swap = SwapInfo::unpack(&swap_info.data.borrow())?;
-        if token_swap.is_paused {
-            return Err(SwapError::IsPaused.into());
-        }
-        if *authority_info.key != utils::authority_id(program_id, swap_info.key, token_swap.nonce)?
-        {
-            return Err(SwapError::InvalidProgramAddress.into());
-        }
-        if *base_token_info.key != token_swap.token_b && *base_token_info.key != token_swap.token_a
-        {
-            return Err(SwapError::IncorrectSwapAccount.into());
-        }
-        if *quote_token_info.key != token_swap.token_b
-            && *quote_token_info.key != token_swap.token_a
-        {
-            return Err(SwapError::IncorrectSwapAccount.into());
-        }
-        if *base_token_info.key == token_swap.token_a
-            && *admin_destination_info.key != token_swap.admin_fee_key_a
-        {
-            return Err(SwapError::InvalidAdmin.into());
-        }
-        if *base_token_info.key == token_swap.token_b
-            && *admin_destination_info.key != token_swap.admin_fee_key_b
-        {
-            return Err(SwapError::InvalidAdmin.into());
-        }
-        if *pool_mint_info.key != token_swap.pool_mint {
-            return Err(SwapError::IncorrectMint.into());
-        }
-        let pool_mint = Self::unpack_mint(&pool_mint_info.data.borrow())?;
-        if pool_token_amount > pool_mint.supply {
-            return Err(SwapError::InvalidInput.into());
-        }
-
-        let clock = Clock::from_account_info(clock_sysvar_info)?;
-        let base_token = utils::unpack_token_account(&base_token_info.data.borrow())?;
-        let quote_token = utils::unpack_token_account(&quote_token_info.data.borrow())?;
-
-        let invariant = StableSwap::new(
-            token_swap.initial_amp_factor,
-            token_swap.target_amp_factor,
-            clock.unix_timestamp,
-            token_swap.start_ramp_ts,
-            token_swap.stop_ramp_ts,
-        );
-        let (dy, dy_fee) = invariant
-            .compute_withdraw_one(
-                U256::from(pool_token_amount),
-                U256::from(pool_mint.supply),
-                U256::from(base_token.amount),
-                U256::from(quote_token.amount),
-                &token_swap.fees,
-            )
-            .ok_or(SwapError::CalculationFailure)?;
-        let withdraw_fee = token_swap
-            .fees
-            .withdraw_fee_256(dy)
-            .ok_or(SwapError::CalculationFailure)?;
-        let token_amount = U256::to_u64(
-            dy.checked_sub(withdraw_fee)
-                .ok_or(SwapError::CalculationFailure)?,
-        )?;
-        if token_amount < minimum_token_amount {
-            return Err(SwapError::ExceededSlippage.into());
-        }
-
-        let admin_trade_fee = token_swap
-            .fees
-            .admin_trade_fee_256(dy_fee)
-            .ok_or(SwapError::CalculationFailure)?;
-        let admin_withdraw_fee = token_swap
-            .fees
-            .admin_withdraw_fee_256(withdraw_fee)
-            .ok_or(SwapError::CalculationFailure)?;
-        let admin_fee = admin_trade_fee
-            .checked_add(admin_withdraw_fee)
-            .ok_or(SwapError::CalculationFailure)?;
-
-        Self::token_transfer(
-            swap_info.key,
-            token_program_info.clone(),
-            base_token_info.clone(),
-            destination_info.clone(),
-            authority_info.clone(),
-            token_swap.nonce,
-            token_amount,
-        )?;
-        Self::token_transfer(
-            swap_info.key,
-            token_program_info.clone(),
-            base_token_info.clone(),
-            admin_destination_info.clone(),
-            authority_info.clone(),
-            token_swap.nonce,
-            U256::to_u64(admin_fee)?,
-        )?;
-        Self::token_burn(
-            swap_info.key,
-            token_program_info.clone(),
-            source_info.clone(),
-            pool_mint_info.clone(),
-            authority_info.clone(),
-            token_swap.nonce,
-            pool_token_amount,
-        )?;
-        Ok(())
-    }
-
-    ///Process an [Farm's EnableUser]
-    pub fn process_farming_enable_user(
-        program_id: &Pubkey,
-        accounts: &[AccountInfo],
-    ) -> ProgramResult {
-        let account_info_iter = &mut accounts.iter();
-        let farm_info = next_account_info(account_info_iter)?;
-        let authority_info = next_account_info(account_info_iter)?;
-        let user_farming_info = next_account_info(account_info_iter)?;
-        // let _owner = next_account_info(account_info_iter)?;
-
-        let farm = FarmInfo::unpack(&farm_info.data.borrow())?;
-        if farm.is_paused {
-            return Err(SwapError::IsPaused.into());
-        }
-        if *authority_info.key != utils::authority_id(program_id, farm_info.key, farm.nonce)? {
-            return Err(SwapError::InvalidProgramAddress.into());
-        }
-        let mut user_farming = FarmingUserInfo::unpack_unchecked(&user_farming_info.data.borrow())?;
-        user_farming.is_initialized = true;
-        user_farming.amount = 0;
-        user_farming.reward_debt = 0;
-        user_farming.timestamp = 0;
-        user_farming.pending_deltafi = 0;
-        FarmingUserInfo::pack(user_farming, &mut user_farming_info.data.borrow_mut())?;
-        Ok(())
-    }
-
-    /// Processes an [Farm's Deposit](enum.Instruction.html).
-    pub fn process_farming_deposit(
-        program_id: &Pubkey,
-        pool_token_amount: u64,
-        accounts: &[AccountInfo],
-    ) -> ProgramResult {
-        let account_info_iter = &mut accounts.iter();
-        let farm_base_info = next_account_info(account_info_iter)?;
-        let farm_info = next_account_info(account_info_iter)?;
-        let authority_info = next_account_info(account_info_iter)?;
-        let admin_fee_account = next_account_info(account_info_iter)?;
-        let source_info = next_account_info(account_info_iter)?;
-        let user_farming_info = next_account_info(account_info_iter)?;
-        let pool_token_info = next_account_info(account_info_iter)?;
-        let deltafi_mint_info = next_account_info(account_info_iter)?;
-        let dest_info = next_account_info(account_info_iter)?;
-        let token_program_info = next_account_info(account_info_iter)?;
-        let clock_sysvar_info = next_account_info(account_info_iter)?;
-
-        let mut farm = FarmInfo::unpack(&farm_info.data.borrow_mut())?;
-        if farm.is_paused {
-            return Err(SwapError::IsPaused.into());
-        }
-        if *authority_info.key != utils::authority_id(program_id, farm_info.key, farm.nonce)? {
-            return Err(SwapError::InvalidProgramAddress.into());
-        }
-        let pool_token = utils::unpack_token_account(&pool_token_info.data.borrow())?;
-        if pool_token.mint != farm.pool_mint {
-            return Err(SwapError::IncorrectMint.into());
-        }
-
-        if *deltafi_mint_info.key != farm.token_deltafi_mint {
-            return Err(SwapError::IncorrectMint.into());
-        }
-
-        let farm_base = FarmBaseInfo::unpack(&farm_base_info.data.borrow())?;
-        let clock = Clock::from_account_info(clock_sysvar_info)?;
-        let mut user_farming = FarmingUserInfo::unpack(&user_farming_info.data.borrow())?;
-        let deltafi_mint = Self::unpack_mint(&deltafi_mint_info.data.borrow())?;
-        let base: u128 = 10;
-        let invariant = Farm::new(clock.unix_timestamp, base.pow(36));
-        // calc reward and mint deltafi token
-        Self::update_pool(
-            &mut farm,
-            farm_info.key,
-            farm_base.reward_unit,
-            &user_farming,
-            clock.unix_timestamp,
-            deltafi_mint.supply,
-            farm_base.total_alloc_point,
-            token_program_info.clone(),
-            admin_fee_account.clone(),
-            deltafi_mint_info.clone(),
-            dest_info.clone(),
-            // dest_info.clone(),
-            authority_info.clone(),
-        )?;
-        // save farm's updated value
-        FarmInfo::pack(farm, &mut farm_info.data.borrow_mut())?;
-
-        if user_farming.amount > 0 {
-            let pending = U256::to_u64(
-                invariant
-                    .compute_pending_reward(
-                        U256::from(farm.acc_deltafi_per_share),
-                        U256::from(user_farming.amount),
-                        U256::from(user_farming.reward_debt),
-                    )
-                    .ok_or(SwapError::CalculationFailure)?,
-            )?;
-            if pending > 0 {
-                Self::token_transfer(
-                    farm_info.key,
-                    token_program_info.clone(),
-                    deltafi_mint_info.clone(),
-                    dest_info.clone(),
-                    authority_info.clone(),
-                    farm.nonce,
-                    pending,
-                )?;
-            }
-        }
-
-        // msg!(
-        //     "deposit: {:2X?} {:2X?} {:2X?} {:2X?} {:2X?} {:2X?}",
-        //     farm_info,
-        //     token_program_info,
-        //     source_info,
-        //     pool_token_info,
-        //     authority_info,
-        //     farm.nonce
-        // );
-
-        Self::token_transfer(
-            farm_info.key,
-            token_program_info.clone(),
-            source_info.clone(),
-            pool_token_info.clone(),
-            authority_info.clone(),
-            farm.nonce,
-            pool_token_amount,
-        )?;
-
-        user_farming.timestamp = clock.unix_timestamp;
-        user_farming.amount += pool_token_amount;
-        user_farming.reward_debt = U256::to_u64(
-            invariant
-                .compute_reward_debt(
-                    farm.acc_deltafi_per_share.into(),
-                    user_farming.amount.into(),
-                )
-                .ok_or(SwapError::CalculationFailure)?,
-        )?;
-        FarmingUserInfo::pack(user_farming, &mut user_farming_info.data.borrow_mut())?;
-        Ok(())
-    }
-
-    /// Processes an [Farm's Withdraw](enum.Instruction.html).
-    pub fn process_farming_withdraw(
-        program_id: &Pubkey,
-        pool_token_amount: u64,
-        accounts: &[AccountInfo],
-    ) -> ProgramResult {
-        let account_info_iter = &mut accounts.iter();
-        let farm_base_info = next_account_info(account_info_iter)?;
-        let farm_info = next_account_info(account_info_iter)?;
-        let authority_info = next_account_info(account_info_iter)?;
-        let admin_fee_account = next_account_info(account_info_iter)?;
-        let source_info = next_account_info(account_info_iter)?;
-        let user_farming_info = next_account_info(account_info_iter)?;
-        let pool_token_info = next_account_info(account_info_iter)?;
-        let deltafi_mint_info = next_account_info(account_info_iter)?;
-        let dest_info = next_account_info(account_info_iter)?;
-        let token_program_info = next_account_info(account_info_iter)?;
-        let clock_sysvar_info = next_account_info(account_info_iter)?;
-
-        let mut farm = FarmInfo::unpack(&farm_info.data.borrow_mut())?;
-        if farm.is_paused {
-            return Err(SwapError::IsPaused.into());
-        }
-        if *authority_info.key != utils::authority_id(program_id, farm_info.key, farm.nonce)? {
-            return Err(SwapError::InvalidProgramAddress.into());
-        }
-
-        let pool_token = utils::unpack_token_account(&pool_token_info.data.borrow())?;
-        if pool_token.mint != farm.pool_mint {
-            return Err(SwapError::IncorrectMint.into());
-        }
-
-        // msg!("{:2X?} {:2X?}", deltafi_mint_info.key, farm.token_deltafi_mint);
-        if *deltafi_mint_info.key != farm.token_deltafi_mint {
-            return Err(SwapError::IncorrectMint.into());
-        }
-
-        let farm_base = FarmBaseInfo::unpack(&farm_base_info.data.borrow())?;
-        let clock = Clock::from_account_info(clock_sysvar_info)?;
-        let mut user_farming = FarmingUserInfo::unpack(&user_farming_info.data.borrow())?;
-        if user_farming.amount < pool_token_amount {
-            return Err(SwapError::InvalidInput.into());
-        }
-
-        let deltafi_mint = Self::unpack_mint(&deltafi_mint_info.data.borrow())?;
-        let base: u128 = 10;
-        let invariant = Farm::new(clock.unix_timestamp, base.pow(36));
-        // calc reward and mint deltafi token
-        Self::update_pool(
-            &mut farm,
-            farm_info.key,
-            farm_base.reward_unit,
-            &user_farming,
-            clock.unix_timestamp,
-            deltafi_mint.supply,
-            farm_base.total_alloc_point,
-            token_program_info.clone(),
-            admin_fee_account.clone(),
-            deltafi_mint_info.clone(),
-            dest_info.clone(),
-            authority_info.clone(),
-        )?;
-        // save farm's updated value
-        FarmInfo::pack(farm, &mut farm_info.data.borrow_mut())?;
-
-        let pending = U256::to_u64(
-            invariant
-                .compute_pending_reward(
-                    U256::from(farm.acc_deltafi_per_share),
-                    U256::from(user_farming.amount),
-                    U256::from(user_farming.reward_debt),
-                )
-                .ok_or(SwapError::CalculationFailure)?,
-        )?;
-        if pending > 0 {
-            Self::token_transfer(
-                farm_info.key,
+    let base_balance = token_a.amount;
+    let quote_balance = token_b.amount;
+    let (new_base_reserve, new_quote_reserve) = match swap_direction {
+        utils::SWAP_DIRECTION_SELL_BASE => {
+            token_transfer(
+                swap_info.key,
                 token_program_info.clone(),
-                deltafi_mint_info.clone(),
-                dest_info.clone(),
+                source_info.clone(),
+                swap_source_info.clone(),
                 authority_info.clone(),
-                farm.nonce,
-                pending,
+                token_swap.nonce,
+                amount_in,
             )?;
+            token_transfer(
+                swap_info.key,
+                token_program_info.clone(),
+                swap_destination_info.clone(),
+                destination_info.clone(),
+                authority_info.clone(),
+                token_swap.nonce,
+                dy_swap_amount,
+            )?;
+            token_transfer(
+                swap_info.key,
+                token_program_info.clone(),
+                swap_destination_info.clone(),
+                admin_destination_info.clone(),
+                authority_info.clone(),
+                token_swap.nonce,
+                admin_fee,
+            )?;
+            token_mint_to(
+                swap_info.key,
+                token_program_info.clone(),
+                reward_mint_info.clone(),
+                reward_token_info.clone(),
+                authority_info.clone(),
+                token_swap.nonce,
+                amount_to_reward,
+            )?;
+
+            (
+                base_balance
+                    .checked_add(amount_in)
+                    .ok_or(SwapError::CalculationFailure)?,
+                quote_balance
+                    .checked_sub(dy_swap_amount)
+                    .ok_or(SwapError::CalculationFailure)?,
+            )
         }
-
-        Self::token_transfer(
-            farm_info.key,
-            token_program_info.clone(),
-            pool_token_info.clone(),
-            source_info.clone(),
-            authority_info.clone(),
-            farm.nonce,
-            pool_token_amount,
-        )?;
-
-        user_farming.amount -= pool_token_amount;
-        user_farming.reward_debt = U256::to_u64(
-            invariant
-                .compute_reward_debt(
-                    farm.acc_deltafi_per_share.into(),
-                    user_farming.amount.into(),
-                )
-                .ok_or(SwapError::CalculationFailure)?,
-        )?;
-        FarmingUserInfo::pack(user_farming, &mut user_farming_info.data.borrow_mut())?;
-
-        Ok(())
-    }
-
-    /// Processes an [Farm's EmergencyWithdraw](enum.Instruction.html).
-    pub fn process_farming_emergency_withdraw(
-        program_id: &Pubkey,
-        accounts: &[AccountInfo],
-    ) -> ProgramResult {
-        let account_info_iter = &mut accounts.iter();
-        let farm_info = next_account_info(account_info_iter)?;
-        let authority_info = next_account_info(account_info_iter)?;
-        let source_info = next_account_info(account_info_iter)?;
-        let user_farming_info = next_account_info(account_info_iter)?;
-        let pool_token_info = next_account_info(account_info_iter)?;
-        let token_program_info = next_account_info(account_info_iter)?;
-        let clock_sysvar_info = next_account_info(account_info_iter)?;
-
-        let farm = FarmInfo::unpack(&farm_info.data.borrow())?;
-        if farm.is_paused {
-            return Err(SwapError::IsPaused.into());
-        }
-        if *authority_info.key != utils::authority_id(program_id, farm_info.key, farm.nonce)? {
-            return Err(SwapError::InvalidProgramAddress.into());
-        }
-        let pool_token = utils::unpack_token_account(&pool_token_info.data.borrow())?;
-        if pool_token.mint != farm.pool_mint {
-            return Err(SwapError::IncorrectMint.into());
-        }
-
-        let _clock = Clock::from_account_info(clock_sysvar_info)?;
-        // let token_lp = utils::unpack_token_account(&pool_token_info.data.borrow())?;
-        let mut user_farming = FarmingUserInfo::unpack(&user_farming_info.data.borrow())?;
-        if user_farming.amount == 0 {
-            return Err(SwapError::EmptyPool.into());
-        }
-
-        // msg!("emergency withdraw=== {:2X?}", user_farming);
-
-        Self::token_transfer(
-            farm_info.key,
-            token_program_info.clone(),
-            pool_token_info.clone(),
-            source_info.clone(),
-            authority_info.clone(),
-            farm.nonce,
-            user_farming.amount,
-        )?;
-        user_farming.amount = 0;
-        user_farming.reward_debt = 0;
-        FarmingUserInfo::pack(user_farming, &mut user_farming_info.data.borrow_mut())?;
-
-        Ok(())
-    }
-
-    /// Processes an [Farm's PrintPendingDeltafi]
-    pub fn process_farming_pending_deltafi(
-        _program_id: &Pubkey,
-        accounts: &[AccountInfo],
-    ) -> ProgramResult {
-        let account_info_iter = &mut accounts.iter();
-        let farm_base_info = next_account_info(account_info_iter)?;
-        let farm_info = next_account_info(account_info_iter)?;
-        let user_farming_info = next_account_info(account_info_iter)?;
-        let pool_token_info = next_account_info(account_info_iter)?;
-        let pool_mint_info = next_account_info(account_info_iter)?;
-        let clock_sysvar_info = next_account_info(account_info_iter)?;
-
-        let mut farm = FarmInfo::unpack(&farm_info.data.borrow_mut())?;
-        if farm.is_paused {
-            return Err(SwapError::IsPaused.into());
-        }
-
-        let farm_base = FarmBaseInfo::unpack(&farm_base_info.data.borrow())?;
-        let clock = Clock::from_account_info(clock_sysvar_info)?;
-        let mut user_farming = FarmingUserInfo::unpack(&user_farming_info.data.borrow_mut())?;
-        // !!This can be resolved after complete deltafi token.
-        // ...
-        // let pool_mint = Self::unpack_deltafi(&deltafi_mint_info.data.borrow())?;
-        let pool_token = utils::unpack_token_account(&pool_token_info.data.borrow())?;
-        if pool_token.mint != farm.pool_mint {
-            return Err(SwapError::IncorrectMint.into());
-        }
-
-        let pool_mint = Self::unpack_mint(&pool_mint_info.data.borrow())?;
-        let base: u128 = 10;
-        let invariant = Farm::new(clock.unix_timestamp, base.pow(36));
-
-        farm.acc_deltafi_per_share = U256::to_u64(
-            invariant
-                .compute_acc_deltafi_per_share(
-                    U256::from(farm.acc_deltafi_per_share),
-                    U256::from(farm.alloc_point),
-                    U256::from(farm_base.total_alloc_point),
-                    U256::from(pool_mint.supply),
-                    U256::from(clock.unix_timestamp - farm.last_reward_timestamp),
-                    U256::from(farm_base.reward_unit),
-                )
-                .ok_or(SwapError::CalculationFailure)?,
-        )?;
-        farm.last_reward_timestamp = clock.unix_timestamp;
-        FarmInfo::pack(farm, &mut farm_info.data.borrow_mut())?;
-
-        user_farming.pending_deltafi = U256::to_u64(
-            invariant
-                .compute_pending_reward(
-                    U256::from(farm.acc_deltafi_per_share),
-                    U256::from(user_farming.amount),
-                    U256::from(user_farming.reward_debt),
-                )
-                .ok_or(SwapError::CalculationFailure)?,
-        )?;
-
-        // update pending deltafi amount for output.
-        FarmingUserInfo::pack(user_farming, &mut user_farming_info.data.borrow_mut())?;
-
-        Ok(())
-    }
-
-    /// Processes an [Instruction](enum.Instruction.html).
-    pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], input: &[u8]) -> ProgramResult {
-        match InstructionType::check(input) {
-            Some(InstructionType::Admin) => process_admin_instruction(program_id, accounts, input),
-            Some(InstructionType::Swap) => {
-                Self::process_swap_instruction(program_id, accounts, input)
-            }
-            Some(InstructionType::Farm) => {
-                Self::process_farming_instruction(program_id, accounts, input)
-            }
-            _ => Err(ProgramError::InvalidInstructionData),
-        }
-    }
-
-    fn process_swap_instruction(
-        program_id: &Pubkey,
-        accounts: &[AccountInfo],
-        input: &[u8],
-    ) -> ProgramResult {
-        let instruction = SwapInstruction::unpack(input)?.ok_or(ProgramError::InvalidArgument)?;
-        match instruction {
-            SwapInstruction::Initialize(InitializeData {
-                nonce,
-                k,
-                i,
-                is_open_twap,
-                curve_mode,
-            }) => {
-                msg!("Instruction: Init");
-                Self::process_initialize(
-                    program_id,
-                    nonce,
-                    k,
-                    i,
-                    is_open_twap,
-                    curve_mode,
-                    accounts,
-                )
-            }
-            SwapInstruction::Swap(SwapData {
+        utils::SWAP_DIRECTION_SELL_QUOTE => {
+            token_transfer(
+                swap_info.key,
+                token_program_info.clone(),
+                destination_info.clone(),
+                swap_destination_info.clone(),
+                authority_info.clone(),
+                token_swap.nonce,
                 amount_in,
-                minimum_amount_out,
-                swap_direction,
-                curve_mode,
-            }) => {
-                msg!("Instruction: Swap");
-                Self::process_swap(
-                    program_id,
-                    amount_in,
-                    minimum_amount_out,
-                    swap_direction,
-                    curve_mode,
-                    accounts,
-                )
-            }
-            SwapInstruction::Deposit(DepositData {
-                token_a_amount,
-                token_b_amount,
-                min_mint_amount,
-                curve_mode,
-            }) => {
-                msg!("Instruction: Deposit");
-                Self::process_deposit(
-                    program_id,
-                    token_a_amount,
-                    token_b_amount,
-                    min_mint_amount,
-                    curve_mode,
-                    accounts,
-                )
-            }
-            SwapInstruction::Withdraw(WithdrawData {
-                pool_token_amount,
-                minimum_token_a_amount,
-                minimum_token_b_amount,
-            }) => {
-                msg!("Instruction: Withdraw");
-                Self::process_withdraw(
-                    program_id,
-                    pool_token_amount,
-                    minimum_token_a_amount,
-                    minimum_token_b_amount,
-                    accounts,
-                )
-            }
-            SwapInstruction::WithdrawOne(WithdrawOneData {
-                pool_token_amount,
-                minimum_token_amount,
-            }) => {
-                msg!("Instruction: Withdraw One");
-                Self::process_withdraw_one(
-                    program_id,
-                    pool_token_amount,
-                    minimum_token_amount,
-                    accounts,
-                )
-            }
-            SwapInstruction::CalcReceiveAmount(SwapData {
-                amount_in,
-                minimum_amount_out,
-                swap_direction,
-                curve_mode,
-            }) => {
-                msg!("Instruction: CalcReceiveAmount");
-                Self::process_calc_receive_amount(
-                    program_id,
-                    amount_in,
-                    minimum_amount_out,
-                    swap_direction,
-                    curve_mode,
-                    accounts,
-                )
-            }
+            )?;
+            token_transfer(
+                swap_info.key,
+                token_program_info.clone(),
+                swap_source_info.clone(),
+                source_info.clone(),
+                authority_info.clone(),
+                token_swap.nonce,
+                dy_swap_amount,
+            )?;
+            token_transfer(
+                swap_info.key,
+                token_program_info.clone(),
+                swap_source_info.clone(),
+                admin_destination_info.clone(),
+                authority_info.clone(),
+                token_swap.nonce,
+                admin_fee,
+            )?;
+            token_mint_to(
+                swap_info.key,
+                token_program_info.clone(),
+                reward_mint_info.clone(),
+                reward_token_info.clone(),
+                authority_info.clone(),
+                token_swap.nonce,
+                amount_to_reward,
+            )?;
+
+            (
+                base_balance
+                    .checked_sub(dy_swap_amount)
+                    .ok_or(SwapError::CalculationFailure)?,
+                quote_balance
+                    .checked_add(amount_in)
+                    .ok_or(SwapError::CalculationFailure)?,
+            )
+        }
+        _ => {
+            return Err(ProgramError::InvalidArgument);
+        }
+    };
+
+    let block_timestamp_last: i64 = clock.unix_timestamp;
+    let mut base_price_cumulative_last = token_swap.base_price_cumulative_last;
+    if token_swap.is_open_twap == utils::TWAP_OPENED {
+        let time_elapsed = block_timestamp_last - token_swap.block_timestamp_last;
+        if time_elapsed > 0 && new_base_reserve != 0 && new_quote_reserve != 0 {
+            let state = PMMState::new(PMMState {
+                base_reserve: Decimal::from(new_base_reserve),
+                quote_reserve: Decimal::from(new_quote_reserve),
+                ..state
+            })?;
+
+            base_price_cumulative_last = base_price_cumulative_last
+                .try_add(state.get_mid_price()?.try_mul(time_elapsed as u64)?)?;
+        }
+    }
+    let receive_amount = Decimal::from(dy_swap_amount);
+
+    token_swap.pmm_state = PMMState::new(PMMState {
+        base_reserve: Decimal::from(new_base_reserve),
+        quote_reserve: Decimal::from(new_quote_reserve),
+        r: new_r,
+        ..state
+    })?;
+    token_swap.block_timestamp_last = block_timestamp_last;
+    token_swap.base_price_cumulative_last = base_price_cumulative_last;
+    token_swap.receive_amount = receive_amount;
+    SwapInfo::pack(token_swap, &mut swap_info.data.borrow_mut())?;
+
+    Ok(())
+}
+
+fn process_deposit(
+    program_id: &Pubkey,
+    token_a_amount: u64,
+    token_b_amount: u64,
+    min_mint_amount: u64,
+    accounts: &[AccountInfo],
+) -> ProgramResult {
+    let account_info_iter = &mut accounts.iter();
+    let swap_info = next_account_info(account_info_iter)?;
+    let authority_info = next_account_info(account_info_iter)?;
+    let source_a_info = next_account_info(account_info_iter)?;
+    let source_b_info = next_account_info(account_info_iter)?;
+    let token_a_info = next_account_info(account_info_iter)?;
+    let token_b_info = next_account_info(account_info_iter)?;
+    let pool_mint_info = next_account_info(account_info_iter)?;
+    let dest_info = next_account_info(account_info_iter)?;
+    let pyth_price_info = next_account_info(account_info_iter)?; // pyth price account added : 2021.10.21
+    let liquidity_provider_info = next_account_info(account_info_iter)?;
+    let liquidity_owner_info = next_account_info(account_info_iter)?;
+    let clock = &Clock::from_account_info(next_account_info(account_info_iter)?)?;
+    let token_program_info = next_account_info(account_info_iter)?;
+
+    let mut token_swap = SwapInfo::unpack(&swap_info.data.borrow())?;
+    if token_swap.is_paused {
+        return Err(SwapError::IsPaused.into());
+    }
+    if *authority_info.key != utils::authority_id(program_id, swap_info.key, token_swap.nonce)? {
+        return Err(SwapError::InvalidProgramAddress.into());
+    }
+    if *token_a_info.key != token_swap.token_a {
+        return Err(SwapError::IncorrectSwapAccount.into());
+    }
+    if *token_b_info.key != token_swap.token_b {
+        return Err(SwapError::IncorrectSwapAccount.into());
+    }
+    if *pool_mint_info.key != token_swap.pool_mint {
+        return Err(SwapError::IncorrectMint.into());
+    }
+
+    let mut liquidity_provider =
+        LiquidityProvider::unpack(&liquidity_provider_info.data.borrow_mut())?;
+    if liquidity_provider_info.owner != program_id {
+        msg!("Liquidity provider is not owned by token swap program");
+        return Err(SwapError::InvalidAccountOwner.into());
+    }
+    if &liquidity_provider.owner != liquidity_owner_info.key {
+        msg!("Liquidity owner does not match owner provided");
+        return Err(SwapError::InvalidOwner.into());
+    }
+    if !liquidity_owner_info.is_signer {
+        msg!("Liquidity owner provided must be a signer");
+        return Err(SwapError::InvalidSigner.into());
+    }
+
+    let token_a = utils::unpack_token_account(&token_a_info.data.borrow())?;
+    let token_b = utils::unpack_token_account(&token_b_info.data.borrow())?;
+    let pool_mint = unpack_mint(&pool_mint_info.data.borrow())?;
+
+    // impl pmm into deposit process
+    let mut base_balance = token_a.amount;
+    let mut quote_balance = token_b.amount;
+    let base_in_amount = token_a_amount;
+    let quote_in_amount = token_b_amount;
+
+    // updating price from pyth price
+    let pyth_price = get_pyth_price(pyth_price_info, clock)?;
+    let pmm_state = token_swap.pmm_state.clone();
+    let deviation = match pmm_state.market_price.cmp(&pyth_price) {
+        Ordering::Greater => pmm_state.market_price.try_sub(pyth_price)?,
+        _ => pyth_price.try_sub(pmm_state.market_price)?,
+    };
+
+    let new_market_price = if deviation.try_mul(100u64)? > pmm_state.market_price {
+        token_swap.base_price_cumulative_last
+    } else {
+        pyth_price
+    };
+
+    let mut state = PMMState::new(PMMState {
+        market_price: new_market_price,
+        ..pmm_state
+    })?;
+
+    let (pmm_base_in_amount, pmm_quote_in_amount) =
+        state.calculate_deposit_amount(base_in_amount, quote_in_amount)?;
+
+    base_balance = base_balance
+        .checked_add(pmm_base_in_amount)
+        .ok_or(SwapError::CalculationFailure)?;
+    quote_balance = quote_balance
+        .checked_add(pmm_quote_in_amount)
+        .ok_or(SwapError::CalculationFailure)?;
+
+    let pool_mint_amount = state.buy_shares(base_balance, quote_balance, pool_mint.supply)?;
+
+    if pool_mint_amount < min_mint_amount {
+        return Err(SwapError::ExceededSlippage.into());
+    }
+
+    liquidity_provider
+        .find_or_add_position(*swap_info.key, clock.unix_timestamp)?
+        .deposit(pool_mint_amount)?;
+
+    LiquidityProvider::pack(
+        liquidity_provider,
+        &mut liquidity_provider_info.data.borrow_mut(),
+    )?;
+
+    token_transfer(
+        swap_info.key,
+        token_program_info.clone(),
+        source_a_info.clone(),
+        token_a_info.clone(),
+        authority_info.clone(),
+        token_swap.nonce,
+        pmm_base_in_amount,
+    )?;
+    token_transfer(
+        swap_info.key,
+        token_program_info.clone(),
+        source_b_info.clone(),
+        token_b_info.clone(),
+        authority_info.clone(),
+        token_swap.nonce,
+        pmm_quote_in_amount,
+    )?;
+    token_mint_to(
+        swap_info.key,
+        token_program_info.clone(),
+        pool_mint_info.clone(),
+        dest_info.clone(),
+        authority_info.clone(),
+        token_swap.nonce,
+        pool_mint_amount,
+    )?;
+
+    let block_timestamp_last: i64 = clock.unix_timestamp;
+    let mut base_price_cumulative_last = token_swap.base_price_cumulative_last;
+    if token_swap.is_open_twap == utils::TWAP_OPENED {
+        let time_elapsed = block_timestamp_last - token_swap.block_timestamp_last;
+        if time_elapsed > 0 && base_balance != 0 && quote_balance != 0 {
+            let state = PMMState::new(PMMState {
+                base_reserve: Decimal::from(base_balance),
+                quote_reserve: Decimal::from(quote_balance),
+                ..state
+            })?;
+
+            base_price_cumulative_last = base_price_cumulative_last
+                .try_add(state.get_mid_price()?.try_mul(time_elapsed as u64)?)?;
         }
     }
 
-    fn process_farming_instruction(
-        program_id: &Pubkey,
-        accounts: &[AccountInfo],
-        input: &[u8],
-    ) -> ProgramResult {
-        let instruction = FarmingInstruction::unpack(input)?;
-        match instruction {
-            FarmingInstruction::EnableUser() => {
-                msg!("Instruction: Enable User");
-                Self::process_farming_enable_user(program_id, accounts)
+    token_swap.pmm_state = PMMState::new(PMMState {
+        base_reserve: Decimal::from(base_balance),
+        quote_reserve: Decimal::from(quote_balance),
+        ..state
+    })?;
+    token_swap.block_timestamp_last = block_timestamp_last;
+    token_swap.base_price_cumulative_last = base_price_cumulative_last;
+    token_swap.receive_amount = Decimal::zero();
+
+    SwapInfo::pack(token_swap, &mut swap_info.data.borrow_mut())?;
+
+    Ok(())
+}
+
+fn process_withdraw(
+    program_id: &Pubkey,
+    pool_token_amount: u64,
+    minimum_token_a_amount: u64,
+    minimum_token_b_amount: u64,
+    accounts: &[AccountInfo],
+) -> ProgramResult {
+    let account_info_iter = &mut accounts.iter();
+    let swap_info = next_account_info(account_info_iter)?;
+    let authority_info = next_account_info(account_info_iter)?;
+    let pool_mint_info = next_account_info(account_info_iter)?;
+    let source_info = next_account_info(account_info_iter)?;
+    let token_a_info = next_account_info(account_info_iter)?;
+    let token_b_info = next_account_info(account_info_iter)?;
+    let dest_token_a_info = next_account_info(account_info_iter)?;
+    let dest_token_b_info = next_account_info(account_info_iter)?;
+    let admin_fee_dest_a_info = next_account_info(account_info_iter)?;
+    let admin_fee_dest_b_info = next_account_info(account_info_iter)?;
+    let liquidity_provider_info = next_account_info(account_info_iter)?;
+    let liquidity_owner_info = next_account_info(account_info_iter)?;
+    let token_program_info = next_account_info(account_info_iter)?;
+
+    let token_swap = SwapInfo::unpack(&swap_info.data.borrow())?;
+    if *authority_info.key != utils::authority_id(program_id, swap_info.key, token_swap.nonce)? {
+        return Err(SwapError::InvalidProgramAddress.into());
+    }
+    if *token_a_info.key != token_swap.token_a {
+        return Err(SwapError::IncorrectSwapAccount.into());
+    }
+    if *token_b_info.key != token_swap.token_b {
+        return Err(SwapError::IncorrectSwapAccount.into());
+    }
+    if *pool_mint_info.key != token_swap.pool_mint {
+        return Err(SwapError::IncorrectMint.into());
+    }
+    if *admin_fee_dest_a_info.key != token_swap.admin_fee_key_a {
+        return Err(SwapError::InvalidAdmin.into());
+    }
+    if *admin_fee_dest_b_info.key != token_swap.admin_fee_key_b {
+        return Err(SwapError::InvalidAdmin.into());
+    }
+    let pool_mint = unpack_mint(&pool_mint_info.data.borrow())?;
+    if pool_mint.supply == 0 {
+        return Err(SwapError::EmptyPool.into());
+    }
+
+    let mut liquidity_provider =
+        LiquidityProvider::unpack(&liquidity_provider_info.data.borrow_mut())?;
+    if liquidity_provider_info.owner != program_id {
+        msg!("Liquidity provider is not owned by token swap program");
+        return Err(SwapError::InvalidAccountOwner.into());
+    }
+    if &liquidity_provider.owner != liquidity_owner_info.key {
+        msg!("Liquidity owner does not match owner provided");
+        return Err(SwapError::InvalidOwner.into());
+    }
+    if !liquidity_owner_info.is_signer {
+        msg!("Liquidity owner provided must be a signer");
+        return Err(SwapError::InvalidSigner.into());
+    }
+
+    let token_a = utils::unpack_token_account(&token_a_info.data.borrow())?;
+    let token_b = utils::unpack_token_account(&token_b_info.data.borrow())?;
+
+    let converter = PoolTokenConverter {
+        supply: U256::from(pool_mint.supply),
+        token_a: U256::from(token_a.amount),
+        token_b: U256::from(token_b.amount),
+        fees: &token_swap.fees,
+    };
+    let pool_token_amount_u256 = U256::from(pool_token_amount);
+    let (a_amount_u256, a_admin_fee_u256) = converter
+        .token_a_rate(pool_token_amount_u256)
+        .ok_or(SwapError::CalculationFailure)?;
+    let (a_amount, a_admin_fee) = (
+        U256::to_u64(a_amount_u256)?,
+        U256::to_u64(a_admin_fee_u256)?,
+    );
+    if a_amount < minimum_token_a_amount {
+        return Err(SwapError::ExceededSlippage.into());
+    }
+    let (b_amount_u256, b_admin_fee_u256) = converter
+        .token_b_rate(pool_token_amount_u256)
+        .ok_or(SwapError::CalculationFailure)?;
+    let (b_amount, b_admin_fee) = (
+        U256::to_u64(b_amount_u256)?,
+        U256::to_u64(b_admin_fee_u256)?,
+    );
+    if b_amount < minimum_token_b_amount {
+        return Err(SwapError::ExceededSlippage.into());
+    }
+
+    let (position, position_index) = liquidity_provider.find_position(*swap_info.key)?;
+    if position.liquidity_amount == 0 {
+        msg!("Liquidity amount is zero");
+        return Err(SwapError::InsufficientLiquidity.into());
+    }
+    liquidity_provider.withdraw(pool_token_amount, position_index)?;
+    LiquidityProvider::pack(
+        liquidity_provider,
+        &mut liquidity_provider_info.data.borrow_mut(),
+    )?;
+
+    token_transfer(
+        swap_info.key,
+        token_program_info.clone(),
+        token_a_info.clone(),
+        dest_token_a_info.clone(),
+        authority_info.clone(),
+        token_swap.nonce,
+        a_amount,
+    )?;
+    token_transfer(
+        swap_info.key,
+        token_program_info.clone(),
+        token_a_info.clone(),
+        admin_fee_dest_a_info.clone(),
+        authority_info.clone(),
+        token_swap.nonce,
+        a_admin_fee,
+    )?;
+    token_transfer(
+        swap_info.key,
+        token_program_info.clone(),
+        token_b_info.clone(),
+        dest_token_b_info.clone(),
+        authority_info.clone(),
+        token_swap.nonce,
+        b_amount,
+    )?;
+    token_transfer(
+        swap_info.key,
+        token_program_info.clone(),
+        token_b_info.clone(),
+        admin_fee_dest_b_info.clone(),
+        authority_info.clone(),
+        token_swap.nonce,
+        b_admin_fee,
+    )?;
+    token_burn(
+        swap_info.key,
+        token_program_info.clone(),
+        source_info.clone(),
+        pool_mint_info.clone(),
+        authority_info.clone(),
+        token_swap.nonce,
+        pool_token_amount,
+    )?;
+    Ok(())
+}
+
+fn process_withdraw_one(
+    program_id: &Pubkey,
+    pool_token_amount: u64,
+    minimum_token_amount: u64,
+    accounts: &[AccountInfo],
+) -> ProgramResult {
+    let account_info_iter = &mut accounts.iter();
+    let swap_info = next_account_info(account_info_iter)?;
+    let authority_info = next_account_info(account_info_iter)?;
+    let pool_mint_info = next_account_info(account_info_iter)?;
+    let source_info = next_account_info(account_info_iter)?;
+    let base_token_info = next_account_info(account_info_iter)?;
+    let quote_token_info = next_account_info(account_info_iter)?;
+    let destination_info = next_account_info(account_info_iter)?;
+    let admin_destination_info = next_account_info(account_info_iter)?;
+    let liquidity_provider_info = next_account_info(account_info_iter)?;
+    let liquidity_owner_info = next_account_info(account_info_iter)?;
+    let token_program_info = next_account_info(account_info_iter)?;
+    let clock_sysvar_info = next_account_info(account_info_iter)?;
+
+    if *base_token_info.key == *quote_token_info.key {
+        return Err(SwapError::InvalidInput.into());
+    }
+    let token_swap = SwapInfo::unpack(&swap_info.data.borrow())?;
+    if token_swap.is_paused {
+        return Err(SwapError::IsPaused.into());
+    }
+    if *authority_info.key != utils::authority_id(program_id, swap_info.key, token_swap.nonce)? {
+        return Err(SwapError::InvalidProgramAddress.into());
+    }
+    if *base_token_info.key != token_swap.token_b && *base_token_info.key != token_swap.token_a {
+        return Err(SwapError::IncorrectSwapAccount.into());
+    }
+    if *quote_token_info.key != token_swap.token_b && *quote_token_info.key != token_swap.token_a {
+        return Err(SwapError::IncorrectSwapAccount.into());
+    }
+    if *base_token_info.key == token_swap.token_a
+        && *admin_destination_info.key != token_swap.admin_fee_key_a
+    {
+        return Err(SwapError::InvalidAdmin.into());
+    }
+    if *base_token_info.key == token_swap.token_b
+        && *admin_destination_info.key != token_swap.admin_fee_key_b
+    {
+        return Err(SwapError::InvalidAdmin.into());
+    }
+    if *pool_mint_info.key != token_swap.pool_mint {
+        return Err(SwapError::IncorrectMint.into());
+    }
+    let pool_mint = unpack_mint(&pool_mint_info.data.borrow())?;
+    if pool_token_amount > pool_mint.supply {
+        return Err(SwapError::InvalidInput.into());
+    }
+
+    let mut liquidity_provider =
+        LiquidityProvider::unpack(&liquidity_provider_info.data.borrow_mut())?;
+    if liquidity_provider_info.owner != program_id {
+        msg!("Liquidity provider is not owned by token swap program");
+        return Err(SwapError::InvalidAccountOwner.into());
+    }
+    if &liquidity_provider.owner != liquidity_owner_info.key {
+        msg!("Liquidity owner does not match owner provided");
+        return Err(SwapError::InvalidOwner.into());
+    }
+    if !liquidity_owner_info.is_signer {
+        msg!("Liquidity owner provided must be a signer");
+        return Err(SwapError::InvalidSigner.into());
+    }
+
+    let clock = Clock::from_account_info(clock_sysvar_info)?;
+    let base_token = utils::unpack_token_account(&base_token_info.data.borrow())?;
+    let quote_token = utils::unpack_token_account(&quote_token_info.data.borrow())?;
+
+    let invariant = StableSwap::new(
+        token_swap.initial_amp_factor,
+        token_swap.target_amp_factor,
+        clock.unix_timestamp,
+        token_swap.start_ramp_ts,
+        token_swap.stop_ramp_ts,
+    );
+    let (dy, dy_fee) = invariant
+        .compute_withdraw_one(
+            U256::from(pool_token_amount),
+            U256::from(pool_mint.supply),
+            U256::from(base_token.amount),
+            U256::from(quote_token.amount),
+            &token_swap.fees,
+        )
+        .ok_or(SwapError::CalculationFailure)?;
+    let withdraw_fee = token_swap
+        .fees
+        .withdraw_fee_256(dy)
+        .ok_or(SwapError::CalculationFailure)?;
+    let token_amount = U256::to_u64(
+        dy.checked_sub(withdraw_fee)
+            .ok_or(SwapError::CalculationFailure)?,
+    )?;
+    if token_amount < minimum_token_amount {
+        return Err(SwapError::ExceededSlippage.into());
+    }
+
+    let admin_trade_fee = token_swap
+        .fees
+        .admin_trade_fee_256(dy_fee)
+        .ok_or(SwapError::CalculationFailure)?;
+    let admin_withdraw_fee = token_swap
+        .fees
+        .admin_withdraw_fee_256(withdraw_fee)
+        .ok_or(SwapError::CalculationFailure)?;
+    let admin_fee = admin_trade_fee
+        .checked_add(admin_withdraw_fee)
+        .ok_or(SwapError::CalculationFailure)?;
+
+    let (position, position_index) = liquidity_provider.find_position(*swap_info.key)?;
+    if position.liquidity_amount == 0 {
+        msg!("Liquidity amount is zero");
+        return Err(SwapError::InsufficientLiquidity.into());
+    }
+    liquidity_provider.withdraw(pool_token_amount, position_index)?;
+    LiquidityProvider::pack(
+        liquidity_provider,
+        &mut liquidity_provider_info.data.borrow_mut(),
+    )?;
+
+    token_transfer(
+        swap_info.key,
+        token_program_info.clone(),
+        base_token_info.clone(),
+        destination_info.clone(),
+        authority_info.clone(),
+        token_swap.nonce,
+        token_amount,
+    )?;
+    token_transfer(
+        swap_info.key,
+        token_program_info.clone(),
+        base_token_info.clone(),
+        admin_destination_info.clone(),
+        authority_info.clone(),
+        token_swap.nonce,
+        U256::to_u64(admin_fee)?,
+    )?;
+    token_burn(
+        swap_info.key,
+        token_program_info.clone(),
+        source_info.clone(),
+        pool_mint_info.clone(),
+        authority_info.clone(),
+        token_swap.nonce,
+        pool_token_amount,
+    )?;
+    Ok(())
+}
+
+// fn process_calc_receive_amount(
+//     program_id: &Pubkey,
+//     amount_in: u64,
+//     minimum_amount_out: u64,
+//     swap_direction: u8,
+//     accounts: &[AccountInfo],
+// ) -> ProgramResult {
+//     let account_info_iter = &mut accounts.iter();
+//     let swap_info = next_account_info(account_info_iter)?;
+//     let authority_info = next_account_info(account_info_iter)?;
+//     let swap_source_info = next_account_info(account_info_iter)?;
+//     let swap_destination_info = next_account_info(account_info_iter)?;
+//     let reward_token_info = next_account_info(account_info_iter)?;
+//     let reward_mint_info = next_account_info(account_info_iter)?;
+//     let admin_destination_info = next_account_info(account_info_iter)?;
+//     let clock_sysvar_info = next_account_info(account_info_iter)?;
+
+//     let token_swap = SwapInfo::unpack(&swap_info.data.borrow())?;
+//     if token_swap.is_paused {
+//         return Err(SwapError::IsPaused.into());
+//     }
+//     if *authority_info.key != utils::authority_id(program_id, swap_info.key, token_swap.nonce)? {
+//         return Err(SwapError::InvalidProgramAddress.into());
+//     }
+//     if !(*swap_source_info.key == token_swap.token_a || *swap_source_info.key == token_swap.token_b)
+//     {
+//         return Err(SwapError::IncorrectSwapAccount.into());
+//     }
+//     if !(*swap_destination_info.key == token_swap.token_a
+//         || *swap_destination_info.key == token_swap.token_b)
+//     {
+//         return Err(SwapError::IncorrectSwapAccount.into());
+//     }
+//     match swap_direction {
+//         utils::SWAP_DIRECTION_SELL_BASE => {
+//             if *swap_destination_info.key == token_swap.token_a
+//                 && *admin_destination_info.key != token_swap.admin_fee_key_a
+//             {
+//                 return Err(SwapError::InvalidAdmin.into());
+//             }
+//             if *swap_destination_info.key == token_swap.token_b
+//                 && *admin_destination_info.key != token_swap.admin_fee_key_b
+//             {
+//                 return Err(SwapError::InvalidAdmin.into());
+//             }
+//         }
+//         utils::SWAP_DIRECTION_SELL_QUOTE => {
+//             if *swap_destination_info.key == token_swap.token_a
+//                 && *admin_destination_info.key != token_swap.admin_fee_key_b
+//             {
+//                 return Err(SwapError::InvalidAdmin.into());
+//             }
+//             if *swap_destination_info.key == token_swap.token_b
+//                 && *admin_destination_info.key != token_swap.admin_fee_key_a
+//             {
+//                 return Err(SwapError::InvalidAdmin.into());
+//             }
+//         }
+//         _ => {
+//             return Err(ProgramError::InvalidArgument);
+//         }
+//     }
+//     if *swap_source_info.key == *swap_destination_info.key {
+//         return Err(SwapError::InvalidInput.into());
+//     }
+//     if *reward_mint_info.key != token_swap.deltafi_mint {
+//         return Err(SwapError::IncorrectMint.into());
+//     }
+//     if *reward_token_info.key != token_swap.deltafi_token {
+//         return Err(SwapError::IncorrectRewardAccount.into());
+//     }
+//     let clock = Clock::from_account_info(clock_sysvar_info)?;
+//     let token_a = utils::unpack_token_account(&swap_source_info.data.borrow())?;
+//     let token_b = utils::unpack_token_account(&swap_destination_info.data.borrow())?;
+
+//     // calculate swap amount with pmm
+
+//     let base_balance = FixedU64::new_from_fixed_u64(token_a.amount)?;
+//     let quote_balance = FixedU64::new_from_fixed_u64(token_b.amount)?;
+//     let pay_amount = FixedU64::new_from_fixed_u64(amount_in)?;
+
+//     match swap_direction {
+//         utils::SWAP_DIRECTION_SELL_BASE => {
+//             if base_balance.inner() < pay_amount.inner() {
+//                 return Err(ProgramError::InsufficientFunds);
+//             }
+//         }
+//         utils::SWAP_DIRECTION_SELL_QUOTE => {
+//             if quote_balance.inner() < pay_amount.inner() {
+//                 return Err(ProgramError::InsufficientFunds);
+//             }
+//         }
+//         _ => {
+//             return Err(ProgramError::InvalidArgument);
+//         }
+//     }
+
+//     let base_reserve = token_swap.pmm_state.b;
+//     let quote_reserve = token_swap.pmm_state.q;
+//     let base_target = token_swap.pmm_state.b_0;
+//     let quote_target = token_swap.pmm_state.q_0;
+
+//     let state = PMMState::new(
+//         token_swap.pmm_state.i,
+//         token_swap.pmm_state.k,
+//         base_reserve,
+//         quote_reserve,
+//         base_target,
+//         quote_target,
+//         token_swap.pmm_state.r,
+//     );
+//     msg!("Pmm on calc receive amount ----------------{:?}", state);
+
+//     let state = state.adjusted_target()?;
+//     let mut dy_swap_amount = FixedU64::zero();
+//     if curve_mode == utils::CURVE_AMM {
+//         let (mut _receive_amount, mut _new_r) = (FixedU64::zero(), RState::One);
+//         match swap_direction {
+//             utils::SWAP_DIRECTION_SELL_BASE => {
+//                 let (r_a, n_r) = state.sell_base_token(pay_amount)?;
+//                 _receive_amount = r_a;
+//                 _new_r = n_r;
+//             }
+//             utils::SWAP_DIRECTION_SELL_QUOTE => {
+//                 let (r_a, n_r) = state.sell_quote_token(pay_amount)?;
+//                 _receive_amount = r_a;
+//                 _new_r = n_r;
+//             }
+//             _ => {
+//                 return Err(ProgramError::InvalidArgument);
+//             }
+//         }
+
+//         let fees = &token_swap.fees;
+//         let dy_fee = FixedU64::new_from_fixed_u64(fees.trade_fee(_receive_amount.inner())?)?;
+//         dy_swap_amount = _receive_amount.checked_sub(dy_fee)?;
+//     } else if curve_mode == utils::CURVE_PMM {
+//         let invariant = StableSwap::new(
+//             token_swap.initial_amp_factor,
+//             token_swap.target_amp_factor,
+//             clock.unix_timestamp,
+//             token_swap.start_ramp_ts,
+//             token_swap.stop_ramp_ts,
+//         );
+//         let result = invariant
+//             .swap_to(
+//                 U256::from(amount_in),
+//                 U256::from(token_a.amount),
+//                 U256::from(token_b.amount),
+//                 &token_swap.fees,
+//             )
+//             .ok_or(SwapError::CalculationFailure)?;
+//         dy_swap_amount = FixedU64::new_from_fixed_u64(U256::to_u64(result.amount_swapped)?)?;
+//     }
+
+//     if dy_swap_amount.inner() < minimum_amount_out {
+//         return Err(SwapError::ExceededSlippage.into());
+//     }
+
+//     let obj = SwapInfo {
+//         is_initialized: token_swap.is_initialized,
+//         is_paused: token_swap.is_paused,
+//         nonce: token_swap.nonce,
+//         initial_amp_factor: token_swap.initial_amp_factor,
+//         target_amp_factor: token_swap.target_amp_factor,
+//         start_ramp_ts: token_swap.start_ramp_ts,
+//         stop_ramp_ts: token_swap.stop_ramp_ts,
+//         token_a: token_swap.token_a,
+//         token_b: token_swap.token_b,
+//         pool_mint: token_swap.pool_mint,
+//         token_a_mint: token_swap.token_a_mint,
+//         token_b_mint: token_swap.token_b_mint,
+//         admin_fee_key_a: token_swap.admin_fee_key_a,
+//         admin_fee_key_b: token_swap.admin_fee_key_b,
+//         deltafi_token: token_swap.deltafi_token,
+//         deltafi_mint: token_swap.deltafi_mint,
+//         fees: token_swap.fees,
+//         rewards: token_swap.rewards,
+//         pmm_state: PMMState::new(
+//             token_swap.pmm_state.i,
+//             token_swap.pmm_state.k,
+//             token_swap.pmm_state.b,
+//             token_swap.pmm_state.q,
+//             token_swap.pmm_state.b_0,
+//             token_swap.pmm_state.q_0,
+//             token_swap.pmm_state.r,
+//         ),
+//         is_open_twap: token_swap.is_open_twap,
+//         block_timestamp_last: token_swap.block_timestamp_last,
+//         base_price_cumulative_last: token_swap.base_price_cumulative_last,
+//         receive_amount: dy_swap_amount,
+//     };
+//     SwapInfo::pack(obj, &mut swap_info.data.borrow_mut())?;
+
+//     Ok(())
+// }
+
+fn process_init_liquidity_provider(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
+    let account_info_iter = &mut accounts.iter();
+    let liquidity_provider_info = next_account_info(account_info_iter)?;
+    let liquidity_owner_info = next_account_info(account_info_iter)?;
+
+    let mut liquidity_provider =
+        assert_uninitialized::<LiquidityProvider>(liquidity_provider_info)?;
+    if liquidity_provider_info.owner != program_id {
+        msg!("Liquidity provider is not owned by token swap program");
+        return Err(SwapError::InvalidAccountOwner.into());
+    }
+
+    if !liquidity_owner_info.is_signer {
+        msg!("Liquidity owner provided must be a signer");
+        return Err(SwapError::InvalidSigner.into());
+    }
+
+    liquidity_provider.init(*liquidity_owner_info.key, vec![]);
+    LiquidityProvider::pack(
+        liquidity_provider,
+        &mut liquidity_provider_info.data.borrow_mut(),
+    )?;
+
+    Ok(())
+}
+
+fn process_claim_liquidity_rewards(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
+    let account_info_iter = &mut accounts.iter();
+    let swap_info = next_account_info(account_info_iter)?;
+    let authority_info = next_account_info(account_info_iter)?;
+    let liquidity_provider_info = next_account_info(account_info_iter)?;
+    let liquidity_owner_info = next_account_info(account_info_iter)?;
+    let claim_destination_info = next_account_info(account_info_iter)?;
+    let claim_mint_info = next_account_info(account_info_iter)?;
+    let token_program_info = next_account_info(account_info_iter)?;
+
+    if swap_info.owner != program_id {
+        return Err(SwapError::InvalidAccountOwner.into());
+    }
+
+    let token_swap = SwapInfo::unpack(&swap_info.data.borrow())?;
+    if *authority_info.key != utils::authority_id(program_id, swap_info.key, token_swap.nonce)? {
+        return Err(SwapError::InvalidProgramAddress.into());
+    }
+    if claim_mint_info.owner != program_id {
+        return Err(SwapError::InvalidProgramAddress.into());
+    }
+
+    let mut liquidity_provider =
+        LiquidityProvider::unpack(&liquidity_provider_info.data.borrow_mut())?;
+    if liquidity_provider.owner != *liquidity_owner_info.key {
+        return Err(SwapError::InvalidOwner.into());
+    }
+    if !liquidity_owner_info.is_signer {
+        return Err(SwapError::InvalidSigner.into());
+    }
+
+    let (position, _) = liquidity_provider.find_position(*swap_info.key)?;
+    let rewards_owed = position.rewards_owed;
+    position.claim_rewards()?;
+
+    LiquidityProvider::pack(
+        liquidity_provider,
+        &mut liquidity_provider_info.data.borrow_mut(),
+    )?;
+
+    token_mint_to(
+        swap_info.key,
+        token_program_info.clone(),
+        claim_mint_info.clone(),
+        claim_destination_info.clone(),
+        authority_info.clone(),
+        token_swap.nonce,
+        rewards_owed,
+    )?;
+
+    Ok(())
+}
+
+fn process_refresh_liquidity_obligation(
+    program_id: &Pubkey,
+    accounts: &[AccountInfo],
+) -> ProgramResult {
+    let account_info_iter = &mut accounts.iter();
+    let swap_info = next_account_info(account_info_iter)?;
+    let clock_sysvar_info = next_account_info(account_info_iter)?;
+
+    let token_swap = SwapInfo::unpack(&swap_info.data.borrow())?;
+    if swap_info.owner != program_id {
+        msg!("Swap account is not owned by swap token program");
+        return Err(SwapError::InvalidAccountOwner.into());
+    }
+
+    let clock = Clock::from_account_info(clock_sysvar_info)?;
+
+    let lp_price = token_swap.pmm_state.get_mid_price()?;
+    let _deltafi_price = Decimal::one().try_div(10)?; // Temp value
+    let reward_ratio = lp_price.try_div(_deltafi_price)?;
+
+    for liquidity_provider_info in account_info_iter {
+        let mut liquidity_provider =
+            LiquidityProvider::unpack(&liquidity_provider_info.data.borrow_mut())?;
+        let (position, _) = liquidity_provider.find_position(*swap_info.key)?;
+
+        let rewards_unit = token_swap.rewards.liquidity_reward_u64(
+            reward_ratio
+                .try_mul(position.liquidity_amount)?
+                .try_floor_u64()?,
+        )?;
+        position.calc_and_update_rewards(rewards_unit, clock.unix_timestamp)?;
+
+        LiquidityProvider::pack(
+            liquidity_provider,
+            &mut liquidity_provider_info.data.borrow_mut(),
+        )?;
+    }
+
+    Ok(())
+}
+
+fn _get_pyth_product_quote_currency(
+    pyth_product: &pyth::Product,
+) -> Result<[u8; 32], ProgramError> {
+    const LEN: usize = 14;
+    const KEY: &[u8; LEN] = b"quote_currency";
+
+    let mut start = 0;
+    while start < pyth::PROD_ATTR_SIZE {
+        let mut length = pyth_product.attr[start] as usize;
+        start += 1;
+
+        if length == LEN {
+            let mut end = start + length;
+            if end > pyth::PROD_ATTR_SIZE {
+                msg!("Pyth product attribute key length too long");
+                return Err(SwapError::InvalidOracleConfig.into());
             }
-            FarmingInstruction::Deposit(FarmingDepositData {
-                pool_token_amount,
-                // min_mint_amount: _,
-            }) => {
-                msg!("Instruction: Farm Deposit");
-                Self::process_farming_deposit(program_id, pool_token_amount, accounts)
+
+            let key = &pyth_product.attr[start..end];
+            if key == KEY {
+                start += length;
+                length = pyth_product.attr[start] as usize;
+                start += 1;
+
+                end = start + length;
+                if length > 32 || end > pyth::PROD_ATTR_SIZE {
+                    msg!("Pyth product quote currency value too long");
+                    return Err(SwapError::InvalidOracleConfig.into());
+                }
+
+                let mut value = [0u8; 32];
+                value[0..length].copy_from_slice(&pyth_product.attr[start..end]);
+                return Ok(value);
             }
-            FarmingInstruction::Withdraw(FarmingWithdrawData {
-                pool_token_amount,
-                min_pool_token_amount: _,
-            }) => {
-                msg!("Instruction: Farm Withdraw");
-                Self::process_farming_withdraw(program_id, pool_token_amount, accounts)
-            }
-            FarmingInstruction::EmergencyWithdraw() => {
-                msg!("Instruction: Farm Withdraw");
-                Self::process_farming_emergency_withdraw(program_id, accounts)
-            }
-            FarmingInstruction::PrintPendingDeltafi() => {
-                msg!("Instruction: Farm Print Pending Deltafi");
-                Self::process_farming_pending_deltafi(program_id, accounts)
-            } // _ => Err(SwapError::InvalidInstruction.into())
         }
+
+        start += length;
+        start += 1 + pyth_product.attr[start] as usize;
+    }
+
+    msg!("Pyth product quote currency not found");
+    Err(SwapError::InvalidOracleConfig.into())
+}
+
+fn get_pyth_price(pyth_price_info: &AccountInfo, clock: &Clock) -> Result<Decimal, ProgramError> {
+    const STALE_AFTER_SLOTS_ELAPSED: u64 = 5;
+
+    let pyth_price_data = pyth_price_info.try_borrow_data()?;
+    let pyth_price = pyth::load::<pyth::Price>(&pyth_price_data)
+        .map_err(|_| ProgramError::InvalidAccountData)?;
+
+    if pyth_price.ptype != pyth::PriceType::Price {
+        msg!("Oracle price type is invalid");
+        return Err(SwapError::InvalidOracleConfig.into());
+    }
+
+    let slots_elapsed = clock
+        .slot
+        .checked_sub(pyth_price.valid_slot)
+        .ok_or(SwapError::CalculationFailure)?;
+    if slots_elapsed >= STALE_AFTER_SLOTS_ELAPSED {
+        msg!("Oracle price is stale");
+        return Err(SwapError::InvalidOracleConfig.into());
+    }
+
+    let price: u64 = pyth_price.agg.price.try_into().map_err(|_| {
+        msg!("Oracle price cannot be negative");
+        SwapError::InvalidOracleConfig
+    })?;
+
+    let market_price = if pyth_price.expo >= 0 {
+        let exponent = pyth_price
+            .expo
+            .try_into()
+            .map_err(|_| SwapError::CalculationFailure)?;
+        let zeros = 10u64
+            .checked_pow(exponent)
+            .ok_or(SwapError::CalculationFailure)?;
+        Decimal::from(price).try_mul(zeros)?
+    } else {
+        let exponent = pyth_price
+            .expo
+            .checked_abs()
+            .ok_or(SwapError::CalculationFailure)?
+            .try_into()
+            .map_err(|_| SwapError::CalculationFailure)?;
+        let decimals = 10u64
+            .checked_pow(exponent)
+            .ok_or(SwapError::CalculationFailure)?;
+        Decimal::from(price).try_div(decimals)?
+    };
+
+    Ok(market_price)
+}
+
+fn assert_uninitialized<T: Pack + IsInitialized>(
+    account_info: &AccountInfo,
+) -> Result<T, ProgramError> {
+    let account: T = T::unpack_unchecked(&account_info.data.borrow())?;
+    if account.is_initialized() {
+        Err(SwapError::AlreadyInUse.into())
+    } else {
+        Ok(account)
     }
 }
 
-#[cfg(test)]
+fn _assert_rent_exempt(rent: &Rent, account_info: &AccountInfo) -> ProgramResult {
+    if !rent.is_exempt(account_info.lamports(), account_info.data_len()) {
+        msg!(&rent.minimum_balance(account_info.data_len()).to_string());
+        Err(SwapError::NotRentExempt.into())
+    } else {
+        Ok(())
+    }
+}
+
+/// Unpacks a spl_token `Mint`.
+pub fn unpack_mint(data: &[u8]) -> Result<Mint, SwapError> {
+    Mint::unpack(data).map_err(|_| SwapError::ExpectedMint)
+}
+
+/// Issue a spl_token `Transfer` instruction.
+pub fn token_transfer<'a>(
+    swap: &Pubkey,
+    token_program: AccountInfo<'a>,
+    source: AccountInfo<'a>,
+    destination: AccountInfo<'a>,
+    authority: AccountInfo<'a>,
+    nonce: u8,
+    amount: u64,
+) -> Result<(), ProgramError> {
+    let swap_bytes = swap.to_bytes();
+    let authority_signature_seeds = [&swap_bytes[..32], &[nonce]];
+    let signers = &[&authority_signature_seeds[..]];
+    let ix = spl_token::instruction::transfer(
+        token_program.key,
+        source.key,
+        destination.key,
+        authority.key,
+        &[],
+        amount,
+    )?;
+
+    invoke_signed(
+        &ix,
+        &[source, destination, authority, token_program],
+        signers,
+    )
+}
+
+/// Issue a spl_token `MintTo` instruction.
+pub fn token_mint_to<'a>(
+    swap: &Pubkey,
+    token_program: AccountInfo<'a>,
+    mint: AccountInfo<'a>,
+    destination: AccountInfo<'a>,
+    authority: AccountInfo<'a>,
+    nonce: u8,
+    amount: u64,
+) -> Result<(), ProgramError> {
+    let swap_bytes = swap.to_bytes();
+    let authority_signature_seeds = [&swap_bytes[..32], &[nonce]];
+    let signers = &[&authority_signature_seeds[..]];
+    let ix = spl_token::instruction::mint_to(
+        token_program.key,
+        mint.key,
+        destination.key,
+        authority.key,
+        &[],
+        amount,
+    )?;
+
+    invoke_signed(&ix, &[mint, destination, authority, token_program], signers)
+}
+
+/// Issue a spl_token `Burn` instruction.
+pub fn token_burn<'a>(
+    swap: &Pubkey,
+    token_program: AccountInfo<'a>,
+    burn_account: AccountInfo<'a>,
+    mint: AccountInfo<'a>,
+    authority: AccountInfo<'a>,
+    nonce: u8,
+    amount: u64,
+) -> Result<(), ProgramError> {
+    let swap_bytes = swap.to_bytes();
+    let authority_signature_seeds = [&swap_bytes[..32], &[nonce]];
+    let signers = &[&authority_signature_seeds[..]];
+    let ix = spl_token::instruction::burn(
+        token_program.key,
+        burn_account.key,
+        mint.key,
+        authority.key,
+        &[],
+        amount,
+    )?;
+
+    invoke_signed(
+        &ix,
+        &[burn_account, mint, authority, token_program],
+        signers,
+    )
+}
+
+#[cfg(feature = "test-bpf")]
 mod tests {
     use solana_sdk::account::Account;
     use spl_token::{
@@ -2050,7 +1536,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        curve::MIN_AMP,
+        curve_1::MIN_AMP,
         fees::Fees,
         instruction::{
             deposit, farm_deposit, farm_emergency_withdraw, farm_withdraw, swap, withdraw,
@@ -5127,1028 +4613,5 @@ mod tests {
                 )
             );
         }
-    }
-
-    #[test]
-    fn test_farming_deposit() {
-        let user_key = pubkey_rand();
-        let depositor_key = pubkey_rand();
-        let token_pool_amount = 1000;
-        let alloc_point = 200;
-        let reward_unit = 10;
-        // let deltafi_amount = 3000;
-        let deposit_lp = token_pool_amount / 10;
-        let min_mint_amount = 0;
-
-        let mut accounts = FarmAccountInfo::new(
-            &user_key,
-            token_pool_amount,
-            alloc_point,
-            reward_unit,
-            DEFAULT_TEST_FEES,
-        );
-
-        // farm not initialized
-        {
-            let (
-                pool_key,
-                mut pool_account,
-                deltafi_key,
-                mut deltafi_account,
-                depositor_farming_key,
-                mut depositor_farming_account,
-            ) = accounts.setup_token_accounts(&user_key, &depositor_key, token_pool_amount, 0);
-            assert_eq!(
-                Err(ProgramError::UninitializedAccount),
-                accounts.deposit(
-                    &depositor_key,
-                    &depositor_farming_key,
-                    &mut depositor_farming_account,
-                    &pool_key,
-                    &mut pool_account,
-                    &deltafi_key,
-                    &mut deltafi_account,
-                    deposit_lp,
-                    0,
-                ),
-                "farm not initialized",
-            );
-        }
-
-        accounts.initialize_farm(ZERO_TS).unwrap();
-
-        // wrong nonce for authority_key
-        {
-            let (
-                pool_key,
-                mut pool_account,
-                deltafi_key,
-                mut deltafi_account,
-                depositor_farming_key,
-                mut depositor_farming_account,
-            ) = accounts.setup_token_accounts(&user_key, &depositor_key, token_pool_amount, 0);
-            let old_authority = accounts.authority_key;
-            let (bad_authority_key, _nonce) = Pubkey::find_program_address(
-                &[&accounts.farm_key.to_bytes()[..]],
-                &spl_token::id(),
-            );
-            accounts.authority_key = bad_authority_key;
-            assert_eq!(
-                Err(SwapError::InvalidProgramAddress.into()),
-                accounts.deposit(
-                    &depositor_key,
-                    &depositor_farming_key,
-                    &mut depositor_farming_account,
-                    &pool_key,
-                    &mut pool_account,
-                    &deltafi_key,
-                    &mut deltafi_account,
-                    deposit_lp,
-                    min_mint_amount,
-                ),
-                "wrong nonce for authority_key",
-            );
-            accounts.authority_key = old_authority;
-        }
-
-        // not enough pool token
-        {
-            let (
-                pool_key,
-                mut pool_account,
-                deltafi_key,
-                mut deltafi_account,
-                depositor_farming_key,
-                mut depositor_farming_account,
-            ) = accounts.setup_token_accounts(&user_key, &depositor_key, deposit_lp / 2, 0);
-            accounts
-                .enable_user(&depositor_farming_key, &mut depositor_farming_account)
-                .unwrap();
-            assert_eq!(
-                Err(TokenError::InsufficientFunds.into()),
-                accounts.deposit(
-                    &depositor_key,
-                    &depositor_farming_key,
-                    &mut depositor_farming_account,
-                    &pool_key,
-                    &mut pool_account,
-                    &deltafi_key,
-                    &mut deltafi_account,
-                    deposit_lp,
-                    min_mint_amount,
-                ),
-                "not enough pool token",
-            );
-        }
-
-        //no approval
-        {
-            let (
-                pool_key,
-                mut pool_account,
-                deltafi_key,
-                mut deltafi_account,
-                depositor_farming_key,
-                mut depositor_farming_account,
-            ) = accounts.setup_token_accounts(&user_key, &depositor_key, token_pool_amount, 0);
-            accounts
-                .enable_user(&depositor_farming_key, &mut depositor_farming_account)
-                .unwrap();
-            assert_eq!(
-                Err(TokenError::OwnerMismatch.into()),
-                do_process_instruction(
-                    farm_deposit(
-                        &SWAP_PROGRAM_ID,
-                        &spl_token::id(),
-                        &accounts.farm_base_key,
-                        &accounts.farm_key,
-                        &accounts.authority_key,
-                        &accounts.admin_fee_deltafi_key,
-                        &pool_key,
-                        &depositor_farming_key,
-                        &accounts.pool_token_key,
-                        &accounts.token_deltafi_mint_key,
-                        &deltafi_key,
-                        deposit_lp,
-                        min_mint_amount,
-                    )
-                    .unwrap(),
-                    vec![
-                        &mut accounts.farm_base_account,
-                        &mut accounts.farm_account,
-                        &mut Account::default(),
-                        &mut accounts.admin_fee_deltafi_account,
-                        &mut pool_account,
-                        &mut depositor_farming_account,
-                        &mut accounts.pool_token_account,
-                        &mut accounts.token_deltafi_mint_account,
-                        &mut deltafi_account,
-                        &mut Account::default(),
-                        &mut clock_account(ZERO_TS),
-                    ],
-                ),
-                "no approval",
-            );
-        }
-
-        // wrong token program id
-        {
-            let (
-                _pool_key,
-                mut pool_account,
-                deltafi_key,
-                mut deltafi_account,
-                depositor_farming_key,
-                mut depositor_farming_account,
-            ) = accounts.setup_token_accounts(&user_key, &depositor_key, token_pool_amount, 0);
-            accounts
-                .enable_user(&depositor_farming_key, &mut depositor_farming_account)
-                .unwrap();
-            let wrong_key = pubkey_rand();
-            assert_eq!(
-                Err(ProgramError::IncorrectProgramId),
-                do_process_instruction(
-                    farm_deposit(
-                        &SWAP_PROGRAM_ID,
-                        &wrong_key,
-                        &accounts.farm_base_key,
-                        &accounts.farm_key,
-                        &accounts.authority_key,
-                        &accounts.admin_fee_deltafi_key,
-                        &depositor_key,
-                        &depositor_farming_key,
-                        &accounts.pool_token_key,
-                        &accounts.token_deltafi_mint_key,
-                        &deltafi_key,
-                        deposit_lp,
-                        min_mint_amount,
-                    )
-                    .unwrap(),
-                    vec![
-                        &mut accounts.farm_base_account,
-                        &mut accounts.farm_account,
-                        &mut Account::default(),
-                        &mut accounts.admin_fee_deltafi_account,
-                        &mut pool_account,
-                        &mut depositor_farming_account,
-                        &mut accounts.pool_token_account,
-                        &mut accounts.token_deltafi_mint_account,
-                        &mut deltafi_account,
-                        &mut Account::default(),
-                        &mut clock_account(ZERO_TS),
-                    ],
-                ),
-                "wrong token program id",
-            );
-        }
-
-        // wrong mint
-        {
-            let (
-                pool_key,
-                mut pool_account,
-                deltafi_key,
-                mut deltafi_account,
-                depositor_farming_key,
-                mut depositor_farming_account,
-            ) = accounts.setup_token_accounts(&user_key, &depositor_key, token_pool_amount, 0);
-            accounts
-                .enable_user(&depositor_farming_key, &mut depositor_farming_account)
-                .unwrap();
-            let (deltafi_mint_key, deltafi_mint_account) = create_mint(
-                &spl_token::id(),
-                &accounts.authority_key,
-                DEFAULT_TOKEN_DECIMALS,
-                None,
-            );
-            let old_deltafi_key = accounts.token_deltafi_mint_key;
-            let old_deltafi_account = accounts.token_deltafi_mint_account;
-            accounts.token_deltafi_mint_key = deltafi_mint_key;
-            accounts.token_deltafi_mint_account = deltafi_mint_account;
-
-            assert_eq!(
-                Err(SwapError::IncorrectMint.into()),
-                accounts.deposit(
-                    &depositor_key,
-                    &depositor_farming_key,
-                    &mut depositor_farming_account,
-                    &pool_key,
-                    &mut pool_account,
-                    &deltafi_key,
-                    &mut deltafi_account,
-                    deposit_lp,
-                    min_mint_amount,
-                ),
-                "wrong mint",
-            );
-
-            accounts.token_deltafi_mint_key = old_deltafi_key;
-            accounts.token_deltafi_mint_account = old_deltafi_account;
-        }
-
-        // correctly deposit
-        {
-            let (
-                pool_key,
-                mut pool_account,
-                deltafi_key,
-                mut deltafi_account,
-                depositor_farming_key,
-                mut depositor_farming_account,
-            ) = accounts.setup_token_accounts(&user_key, &depositor_key, token_pool_amount, 0);
-            accounts
-                .enable_user(&depositor_farming_key, &mut depositor_farming_account)
-                .unwrap();
-
-            accounts
-                .deposit(
-                    &depositor_key,
-                    &depositor_farming_key,
-                    &mut depositor_farming_account,
-                    &pool_key,
-                    &mut pool_account,
-                    &deltafi_key,
-                    &mut deltafi_account,
-                    deposit_lp,
-                    min_mint_amount,
-                )
-                .unwrap();
-
-            // !! need to write check farm state
-            // ...
-        }
-
-        // !! let me think about these two test case.
-        // pool is paused
-        {}
-
-        // farm is paused
-        {}
-    }
-
-    #[test]
-    fn test_farming_withdraw() {
-        let user_key = pubkey_rand();
-        let withdrawer_key = pubkey_rand();
-        let token_pool_amount = 1000;
-        let alloc_point = 200;
-        let reward_unit = 10;
-        let withdraw_amount = token_pool_amount / 10;
-        let minimum_pool_amount = token_pool_amount / 40;
-
-        let mut accounts = FarmAccountInfo::new(
-            &user_key,
-            token_pool_amount,
-            alloc_point,
-            reward_unit,
-            DEFAULT_TEST_FEES,
-        );
-
-        // farm not initialized
-        {
-            let (
-                pool_key,
-                mut pool_account,
-                deltafi_key,
-                mut deltafi_account,
-                withdrawer_farming_key,
-                mut withdrawer_farming_account,
-            ) = accounts.setup_token_accounts(&user_key, &withdrawer_key, token_pool_amount, 0);
-            assert_eq!(
-                Err(ProgramError::UninitializedAccount),
-                accounts.withdraw(
-                    &withdrawer_key,
-                    &withdrawer_farming_key,
-                    &mut withdrawer_farming_account,
-                    &pool_key,
-                    &mut pool_account,
-                    &deltafi_key,
-                    &mut deltafi_account,
-                    withdraw_amount,
-                    minimum_pool_amount,
-                ),
-                "farm not initialized",
-            );
-        }
-
-        accounts.initialize_farm(ZERO_TS).unwrap();
-
-        // wrong nonce for authority_key
-        {
-            let (
-                pool_key,
-                mut pool_account,
-                deltafi_key,
-                mut deltafi_account,
-                withdrawer_farming_key,
-                mut withdrawer_farming_account,
-            ) = accounts.setup_token_accounts(&user_key, &withdrawer_key, token_pool_amount, 0);
-            let old_authority = accounts.authority_key;
-            let (bad_authority_key, _nonce) = Pubkey::find_program_address(
-                &[&accounts.farm_key.to_bytes()[..]],
-                &spl_token::id(),
-            );
-            accounts.authority_key = bad_authority_key;
-            assert_eq!(
-                Err(SwapError::InvalidProgramAddress.into()),
-                accounts.withdraw(
-                    &withdrawer_key,
-                    &withdrawer_farming_key,
-                    &mut withdrawer_farming_account,
-                    &pool_key,
-                    &mut pool_account,
-                    &deltafi_key,
-                    &mut deltafi_account,
-                    withdraw_amount,
-                    minimum_pool_amount,
-                ),
-                "wrong nonce for authority_key",
-            );
-            accounts.authority_key = old_authority;
-        }
-
-        // not enough pool token
-        {
-            let (
-                pool_key,
-                mut pool_account,
-                deltafi_key,
-                mut deltafi_account,
-                withdrawer_farming_key,
-                mut withdrawer_farming_account,
-            ) = accounts.setup_token_accounts(&user_key, &withdrawer_key, token_pool_amount, 0);
-            accounts
-                .enable_user(&withdrawer_farming_key, &mut withdrawer_farming_account)
-                .unwrap();
-
-            accounts
-                .deposit(
-                    &withdrawer_key,
-                    &withdrawer_farming_key,
-                    &mut withdrawer_farming_account,
-                    &pool_key,
-                    &mut pool_account,
-                    &deltafi_key,
-                    &mut deltafi_account,
-                    withdraw_amount / 2,
-                    minimum_pool_amount,
-                )
-                .unwrap();
-
-            assert_eq!(
-                Err(SwapError::InvalidInput.into()),
-                accounts.withdraw(
-                    &withdrawer_key,
-                    &withdrawer_farming_key,
-                    &mut withdrawer_farming_account,
-                    &pool_key,
-                    &mut pool_account,
-                    &deltafi_key,
-                    &mut deltafi_account,
-                    withdraw_amount,
-                    minimum_pool_amount,
-                )
-            );
-        }
-
-        // // no approval
-        // {
-        //     let (
-        //         pool_key,
-        //         mut pool_account,
-        //         deltafi_key,
-        //         mut deltafi_account,
-        //         withdrawer_farming_key,
-        //         mut withdrawer_farming_account,
-        //     ) = accounts.setup_token_accounts(&user_key, &withdrawer_key, withdraw_amount, 0);
-        //     accounts
-        //         .enable_user(&withdrawer_farming_key, &mut withdrawer_farming_account)
-        //         .unwrap();
-
-        //     // accounts
-        //     //     .deposit(
-        //     //         &withdrawer_key,
-        //     //         &withdrawer_farming_key,
-        //     //         &mut withdrawer_farming_account,
-        //     //         &pool_key,
-        //     //         &mut pool_account,
-        //     //         &deltafi_key,
-        //     //         &mut deltafi_account,
-        //     //         withdraw_amount,
-        //     //         minimum_pool_amount,
-        //     //     )
-        //     //     .unwrap();
-
-        //     assert_eq!(
-        //         Err(TokenError::OwnerMismatch.into()),
-        //         do_process_instruction(
-        //             farm_withdraw(
-        //                 &SWAP_PROGRAM_ID,
-        //                 &TOKEN_PROGRAM_ID,
-        //                 &accounts.farm_base_key,
-        //                 &accounts.farm_key,
-        //                 &accounts.authority_key,
-        //                 &accounts.admin_fee_deltafi_key,
-        //                 &pool_key,
-        //                 &withdrawer_farming_key,
-        //                 &accounts.pool_token_key,
-        //                 &accounts.token_deltafi_mint_key,
-        //                 &deltafi_key,
-        //                 withdraw_amount,
-        //                 minimum_pool_amount,
-        //             )
-        //             .unwrap(),
-        //             vec![
-        //                 &mut accounts.farm_base_account,
-        //                 &mut accounts.farm_account,
-        //                 &mut Account::default(),
-        //                 &mut accounts.admin_fee_deltafi_account,
-        //                 &mut pool_account,
-        //                 &mut withdrawer_farming_account,
-        //                 &mut accounts.pool_token_account,
-        //                 &mut accounts.token_deltafi_mint_account,
-        //                 &mut deltafi_account,
-        //                 &mut Account::default(),
-        //                 &mut clock_account(ZERO_TS),
-        //             ],
-        //         )
-        //     );
-        // }
-
-        // wrong token program id
-        {
-            let (
-                pool_key,
-                mut pool_account,
-                deltafi_key,
-                mut deltafi_account,
-                withdrawer_farming_key,
-                mut withdrawer_farming_account,
-            ) = accounts.setup_token_accounts(&user_key, &withdrawer_key, withdraw_amount, 0);
-            accounts
-                .enable_user(&withdrawer_farming_key, &mut withdrawer_farming_account)
-                .unwrap();
-
-            accounts
-                .deposit(
-                    &withdrawer_key,
-                    &withdrawer_farming_key,
-                    &mut withdrawer_farming_account,
-                    &pool_key,
-                    &mut pool_account,
-                    &deltafi_key,
-                    &mut deltafi_account,
-                    withdraw_amount,
-                    minimum_pool_amount,
-                )
-                .unwrap();
-
-            let wrong_key = pubkey_rand();
-            assert_eq!(
-                Err(ProgramError::IncorrectProgramId),
-                do_process_instruction(
-                    farm_withdraw(
-                        &SWAP_PROGRAM_ID,
-                        &wrong_key,
-                        &accounts.farm_base_key,
-                        &accounts.farm_key,
-                        &accounts.authority_key,
-                        &accounts.admin_fee_deltafi_key,
-                        &pool_key,
-                        &withdrawer_farming_key,
-                        &accounts.pool_token_key,
-                        &accounts.token_deltafi_mint_key,
-                        &deltafi_key,
-                        withdraw_amount,
-                        minimum_pool_amount,
-                    )
-                    .unwrap(),
-                    vec![
-                        &mut accounts.farm_base_account,
-                        &mut accounts.farm_account,
-                        &mut Account::default(),
-                        &mut accounts.admin_fee_deltafi_account,
-                        &mut pool_account,
-                        &mut withdrawer_farming_account,
-                        &mut accounts.pool_token_account,
-                        &mut accounts.token_deltafi_mint_account,
-                        &mut deltafi_account,
-                        &mut Account::default(),
-                        &mut clock_account(ZERO_TS),
-                    ],
-                )
-            );
-        }
-
-        // wrong deltafi mint
-        {
-            let (
-                pool_key,
-                mut pool_account,
-                deltafi_key,
-                mut deltafi_account,
-                withdrawer_farming_key,
-                mut withdrawer_farming_account,
-            ) = accounts.setup_token_accounts(&user_key, &withdrawer_key, withdraw_amount, 0);
-            accounts
-                .enable_user(&withdrawer_farming_key, &mut withdrawer_farming_account)
-                .unwrap();
-
-            accounts
-                .deposit(
-                    &withdrawer_key,
-                    &withdrawer_farming_key,
-                    &mut withdrawer_farming_account,
-                    &pool_key,
-                    &mut pool_account,
-                    &deltafi_key,
-                    &mut deltafi_account,
-                    withdraw_amount,
-                    minimum_pool_amount,
-                )
-                .unwrap();
-
-            let (deltafi_mint_key, deltafi_mint_account) = create_mint(
-                &spl_token::id(),
-                &accounts.authority_key,
-                DEFAULT_TOKEN_DECIMALS,
-                None,
-            );
-
-            let old_deltafi_key = accounts.token_deltafi_mint_key;
-            let old_deltafi_account = accounts.token_deltafi_mint_account;
-            accounts.token_deltafi_mint_key = deltafi_mint_key;
-            accounts.token_deltafi_mint_account = deltafi_mint_account;
-
-            assert_eq!(
-                Err(SwapError::IncorrectMint.into()),
-                accounts.withdraw(
-                    &withdrawer_key,
-                    &withdrawer_farming_key,
-                    &mut withdrawer_farming_account,
-                    &pool_key,
-                    &mut pool_account,
-                    &deltafi_key,
-                    &mut deltafi_account,
-                    withdraw_amount,
-                    minimum_pool_amount,
-                )
-            );
-
-            accounts.token_deltafi_mint_key = old_deltafi_key;
-            accounts.token_deltafi_mint_account = old_deltafi_account;
-        }
-
-        // correctly withdrawal
-        {
-            let (
-                pool_key,
-                mut pool_account,
-                deltafi_key,
-                mut deltafi_account,
-                withdrawer_farming_key,
-                mut withdrawer_farming_account,
-            ) = accounts.setup_token_accounts(&user_key, &withdrawer_key, withdraw_amount, 0);
-            accounts
-                .enable_user(&withdrawer_farming_key, &mut withdrawer_farming_account)
-                .unwrap();
-
-            accounts
-                .deposit(
-                    &withdrawer_key,
-                    &withdrawer_farming_key,
-                    &mut withdrawer_farming_account,
-                    &pool_key,
-                    &mut pool_account,
-                    &deltafi_key,
-                    &mut deltafi_account,
-                    withdraw_amount,
-                    minimum_pool_amount,
-                )
-                .unwrap();
-
-            accounts
-                .withdraw(
-                    &withdrawer_key,
-                    &withdrawer_farming_key,
-                    &mut withdrawer_farming_account,
-                    &pool_key,
-                    &mut pool_account,
-                    &deltafi_key,
-                    &mut deltafi_account,
-                    withdraw_amount,
-                    minimum_pool_amount,
-                )
-                .unwrap();
-
-            // !! need to write check farm state
-            // ...
-        }
-
-        // !! let me think about these two test case.
-        // pool is paused
-        {}
-
-        // farm is paused
-        {}
-    }
-
-    #[test]
-    fn test_farming_emergency_withdraw() {
-        let user_key = pubkey_rand();
-        let withdrawer_key = pubkey_rand();
-        let token_pool_amount = 1000;
-        let alloc_point = 200;
-        let reward_unit = 10;
-        let withdraw_amount = token_pool_amount / 10;
-        let minimum_pool_amount = token_pool_amount / 40;
-
-        let mut accounts = FarmAccountInfo::new(
-            &user_key,
-            token_pool_amount,
-            alloc_point,
-            reward_unit,
-            DEFAULT_TEST_FEES,
-        );
-
-        // farm not initialized
-        {
-            let (
-                pool_key,
-                mut pool_account,
-                _deltafi_key,
-                _deltafi_account,
-                withdrawer_farming_key,
-                mut withdrawer_farming_account,
-            ) = accounts.setup_token_accounts(&user_key, &withdrawer_key, token_pool_amount, 0);
-            assert_eq!(
-                Err(ProgramError::UninitializedAccount),
-                accounts.emergency_withdraw(
-                    &withdrawer_key,
-                    &withdrawer_farming_key,
-                    &mut withdrawer_farming_account,
-                    &pool_key,
-                    &mut pool_account,
-                    withdraw_amount,
-                    minimum_pool_amount,
-                ),
-                "farm not initialized",
-            );
-        }
-
-        accounts.initialize_farm(ZERO_TS).unwrap();
-
-        // wrong nonce for authority_key
-        {
-            let (
-                pool_key,
-                mut pool_account,
-                _deltafi_key,
-                _deltafi_account,
-                withdrawer_farming_key,
-                mut withdrawer_farming_account,
-            ) = accounts.setup_token_accounts(&user_key, &withdrawer_key, token_pool_amount, 0);
-            let old_authority = accounts.authority_key;
-            let (bad_authority_key, _nonce) = Pubkey::find_program_address(
-                &[&accounts.farm_key.to_bytes()[..]],
-                &spl_token::id(),
-            );
-            accounts.authority_key = bad_authority_key;
-            assert_eq!(
-                Err(SwapError::InvalidProgramAddress.into()),
-                accounts.emergency_withdraw(
-                    &withdrawer_key,
-                    &withdrawer_farming_key,
-                    &mut withdrawer_farming_account,
-                    &pool_key,
-                    &mut pool_account,
-                    withdraw_amount,
-                    minimum_pool_amount,
-                ),
-                "wrong nonce for authority_key",
-            );
-            accounts.authority_key = old_authority;
-        }
-
-        // not enough pool token
-        {
-            let (
-                pool_key,
-                mut pool_account,
-                deltafi_key,
-                mut deltafi_account,
-                withdrawer_farming_key,
-                mut withdrawer_farming_account,
-            ) = accounts.setup_token_accounts(&user_key, &withdrawer_key, token_pool_amount, 0);
-            accounts
-                .enable_user(&withdrawer_farming_key, &mut withdrawer_farming_account)
-                .unwrap();
-
-            accounts
-                .deposit(
-                    &withdrawer_key,
-                    &withdrawer_farming_key,
-                    &mut withdrawer_farming_account,
-                    &pool_key,
-                    &mut pool_account,
-                    &deltafi_key,
-                    &mut deltafi_account,
-                    0,
-                    minimum_pool_amount,
-                )
-                .unwrap();
-
-            assert_eq!(
-                Err(SwapError::EmptyPool.into()),
-                accounts.emergency_withdraw(
-                    &withdrawer_key,
-                    &withdrawer_farming_key,
-                    &mut withdrawer_farming_account,
-                    &pool_key,
-                    &mut pool_account,
-                    withdraw_amount,
-                    minimum_pool_amount,
-                )
-            );
-        }
-
-        // no approval
-        // {
-        //     let (
-        //         _pool_key,
-        //         mut pool_account,
-        //         _deltafi_key,
-        //         _deltafi_account,
-        //         withdrawer_farming_key,
-        //         mut withdrawer_farming_account,
-        //     ) = accounts.setup_token_accounts(&user_key, &withdrawer_key, withdraw_amount, 0);
-        //     assert_eq!(
-        //         Err(TokenError::OwnerMismatch.into()),
-        //         do_process_instruction(
-        //             farm_emergency_withdraw(
-        //                 &SWAP_PROGRAM_ID,
-        //                 &TOKEN_PROGRAM_ID,
-        //                 &accounts.farm_key,
-        //                 &accounts.authority_key,
-        //                 &withdrawer_key,
-        //                 &withdrawer_farming_key,
-        //                 &accounts.pool_token_key,
-        //             )
-        //             .unwrap(),
-        //             vec![
-        //                 &mut accounts.farm_account,
-        //                 &mut Account::default(),
-        //                 &mut pool_account,
-        //                 &mut withdrawer_farming_account,
-        //                 &mut accounts.pool_token_account,
-        //                 &mut Account::default(),
-        //                 &mut clock_account(ZERO_TS),
-        //             ],
-        //         )
-        //     );
-        // }
-
-        // wrong token program id
-        {
-            let (
-                pool_key,
-                mut pool_account,
-                deltafi_key,
-                mut deltafi_account,
-                withdrawer_farming_key,
-                mut withdrawer_farming_account,
-            ) = accounts.setup_token_accounts(&user_key, &withdrawer_key, withdraw_amount, 0);
-            accounts
-                .enable_user(&withdrawer_farming_key, &mut withdrawer_farming_account)
-                .unwrap();
-
-            accounts
-                .deposit(
-                    &withdrawer_key,
-                    &withdrawer_farming_key,
-                    &mut withdrawer_farming_account,
-                    &pool_key,
-                    &mut pool_account,
-                    &deltafi_key,
-                    &mut deltafi_account,
-                    withdraw_amount,
-                    minimum_pool_amount,
-                )
-                .unwrap();
-            let wrong_key = pubkey_rand();
-            assert_eq!(
-                Err(ProgramError::IncorrectProgramId),
-                do_process_instruction(
-                    farm_emergency_withdraw(
-                        &SWAP_PROGRAM_ID,
-                        &wrong_key,
-                        &accounts.farm_key,
-                        &accounts.authority_key,
-                        &withdrawer_key,
-                        &withdrawer_farming_key,
-                        &accounts.pool_token_key,
-                    )
-                    .unwrap(),
-                    vec![
-                        &mut accounts.farm_account,
-                        &mut Account::default(),
-                        &mut pool_account,
-                        &mut withdrawer_farming_account,
-                        &mut accounts.pool_token_account,
-                        &mut Account::default(),
-                        &mut clock_account(ZERO_TS),
-                    ],
-                )
-            );
-        }
-
-        // correctly withdrawal
-        {
-            let (
-                pool_key,
-                mut pool_account,
-                deltafi_key,
-                mut deltafi_account,
-                withdrawer_farming_key,
-                mut withdrawer_farming_account,
-            ) = accounts.setup_token_accounts(&user_key, &withdrawer_key, withdraw_amount, 0);
-            accounts
-                .enable_user(&withdrawer_farming_key, &mut withdrawer_farming_account)
-                .unwrap();
-
-            accounts
-                .deposit(
-                    &withdrawer_key,
-                    &withdrawer_farming_key,
-                    &mut withdrawer_farming_account,
-                    &pool_key,
-                    &mut pool_account,
-                    &deltafi_key,
-                    &mut deltafi_account,
-                    withdraw_amount,
-                    minimum_pool_amount,
-                )
-                .unwrap();
-
-            accounts
-                .emergency_withdraw(
-                    &withdrawer_key,
-                    &withdrawer_farming_key,
-                    &mut withdrawer_farming_account,
-                    &pool_key,
-                    &mut pool_account,
-                    withdraw_amount,
-                    minimum_pool_amount,
-                )
-                .unwrap();
-
-            // !! need to write check farm state and this part will be the main difference from withdraw test function
-            // ...
-        }
-
-        // !! let me think about these two test case.
-        // pool is paused
-        {}
-
-        // farm is paused
-        {}
-    }
-
-    #[test]
-    fn test_farming_pending_deltafi() {
-        let user_key = pubkey_rand();
-        let viewer_key = pubkey_rand();
-        let token_pool_amount = 1000;
-        let alloc_point = 200;
-        let reward_unit = 10;
-        let amount = token_pool_amount / 10;
-        let minimum_pool_amount = token_pool_amount / 40;
-
-        let mut accounts = FarmAccountInfo::new(
-            &user_key,
-            token_pool_amount,
-            alloc_point,
-            reward_unit,
-            DEFAULT_TEST_FEES,
-        );
-
-        // farm not initialized
-        {
-            let (
-                pool_key,
-                mut pool_account,
-                _deltafi_key,
-                mut _deltafi_account,
-                viewer_farming_key,
-                mut viewer_farming_account,
-            ) = accounts.setup_token_accounts(&user_key, &viewer_key, token_pool_amount, 0);
-
-            assert_eq!(
-                Err(ProgramError::UninitializedAccount),
-                accounts.print_pending_deltafi(
-                    &viewer_key,
-                    &viewer_farming_key,
-                    &mut viewer_farming_account,
-                    &pool_key,
-                    &mut pool_account,
-                    amount,
-                    minimum_pool_amount,
-                )
-            );
-        }
-
-        accounts.initialize_farm(ZERO_TS).unwrap();
-
-        // correctly seeing
-        {
-            let (
-                pool_key,
-                mut pool_account,
-                deltafi_key,
-                mut deltafi_account,
-                viewer_farming_key,
-                mut viewer_farming_account,
-            ) = accounts.setup_token_accounts(&user_key, &viewer_key, token_pool_amount, 0);
-
-            accounts
-                .enable_user(&viewer_farming_key, &mut viewer_farming_account)
-                .unwrap();
-
-            accounts
-                .deposit(
-                    &viewer_key,
-                    &viewer_farming_key,
-                    &mut viewer_farming_account,
-                    &pool_key,
-                    &mut pool_account,
-                    &deltafi_key,
-                    &mut deltafi_account,
-                    amount,
-                    minimum_pool_amount,
-                )
-                .unwrap();
-
-            accounts
-                .print_pending_deltafi(
-                    &viewer_key,
-                    &viewer_farming_key,
-                    &mut viewer_farming_account,
-                    &pool_key,
-                    &mut pool_account,
-                    amount,
-                    minimum_pool_amount,
-                )
-                .unwrap();
-
-            // !! need to write check farm state and this part will be the main difference from withdraw test function
-            // ...
-        }
-
-        // !! let me think about these two test case.
-        // pool is paused
-        {}
-
-        // farm is paused
-        {}
     }
 }

@@ -346,7 +346,7 @@ pub fn solve_quadratic_function_for_trade(
     }
 }
 
-#[cfg(test)]
+#[cfg(feature = "test-bpf")]
 mod tests {
     use super::*;
     use crate::utils::{

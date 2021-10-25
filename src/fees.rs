@@ -3,14 +3,14 @@
 use arrayref::{array_mut_ref, array_ref, array_refs, mut_array_refs};
 use solana_program::{
     program_error::ProgramError,
-    program_pack::{Pack, Sealed},
+    program_pack::{IsInitialized, Pack, Sealed},
 };
 
 use crate::bn::U256;
 
 /// Fees struct
 #[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Fees {
     /// Admin trade fee numerator
     pub admin_trade_fee_numerator: u64,
@@ -31,6 +31,20 @@ pub struct Fees {
 }
 
 impl Fees {
+    /// Create new fees
+    pub fn new(params: &Self) -> Self {
+        Fees {
+            admin_trade_fee_numerator: params.admin_trade_fee_numerator,
+            admin_trade_fee_denominator: params.admin_trade_fee_denominator,
+            admin_withdraw_fee_numerator: params.admin_withdraw_fee_numerator,
+            admin_withdraw_fee_denominator: params.admin_withdraw_fee_denominator,
+            trade_fee_numerator: params.trade_fee_numerator,
+            trade_fee_denominator: params.trade_fee_denominator,
+            withdraw_fee_numerator: params.withdraw_fee_numerator,
+            withdraw_fee_denominator: params.withdraw_fee_denominator,
+        }
+    }
+
     /// Apply admin trade fee
     pub fn admin_trade_fee(&self, fee_amount: u64) -> Result<u64, ProgramError> {
         let result = fee_amount
@@ -120,10 +134,17 @@ impl Fees {
 }
 
 impl Sealed for Fees {}
+impl IsInitialized for Fees {
+    fn is_initialized(&self) -> bool {
+        true
+    }
+}
+
+const FEES_SIZE: usize = 64;
 impl Pack for Fees {
-    const LEN: usize = 64;
+    const LEN: usize = FEES_SIZE;
     fn unpack_from_slice(input: &[u8]) -> Result<Self, ProgramError> {
-        let input = array_ref![input, 0, 64];
+        let input = array_ref![input, 0, FEES_SIZE];
         #[allow(clippy::ptr_offset_with_cast)]
         let (
             admin_trade_fee_numerator,
@@ -148,7 +169,7 @@ impl Pack for Fees {
     }
 
     fn pack_into_slice(&self, output: &mut [u8]) {
-        let output = array_mut_ref![output, 0, 64];
+        let output = array_mut_ref![output, 0, FEES_SIZE];
         let (
             admin_trade_fee_numerator,
             admin_trade_fee_denominator,
