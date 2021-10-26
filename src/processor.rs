@@ -262,8 +262,10 @@ fn process_swap(
     accounts: &[AccountInfo],
 ) -> ProgramResult {
     let account_info_iter = &mut accounts.iter();
+    let config_info = next_account_info(account_info_iter)?;
     let swap_info = next_account_info(account_info_iter)?;
-    let authority_info = next_account_info(account_info_iter)?;
+    let market_authority_info = next_account_info(account_info_iter)?;
+    let swap_authority_info = next_account_info(account_info_iter)?;
     let source_info = next_account_info(account_info_iter)?;
     let swap_source_info = next_account_info(account_info_iter)?;
     let swap_destination_info = next_account_info(account_info_iter)?;
@@ -275,19 +277,21 @@ fn process_swap(
     let clock = &Clock::from_account_info(next_account_info(account_info_iter)?)?;
     let token_program_info = next_account_info(account_info_iter)?;
 
-    if swap_info.owner != program_id {
+    if swap_info.owner != program_id || config_info.owner != program_id {
         return Err(ProgramError::IncorrectProgramId);
     }
 
+    let config = ConfigInfo::unpack(&config_info.data.borrow())?;
     let mut token_swap = SwapInfo::unpack(&swap_info.data.borrow())?;
     if token_swap.is_paused {
         return Err(SwapError::IsPaused.into());
     }
 
-    let nonce = token_swap.nonce;
-    if *authority_info.key != authority_id(program_id, swap_info.key, nonce)? {
+    let swap_nonce = token_swap.nonce;
+    if *swap_authority_info.key != authority_id(program_id, swap_info.key, swap_nonce)? {
         return Err(SwapError::InvalidProgramAddress.into());
     }
+
     if !(*swap_source_info.key == token_swap.token_a || *swap_source_info.key == token_swap.token_b)
     {
         return Err(SwapError::IncorrectSwapAccount.into());
@@ -312,8 +316,18 @@ fn process_swap(
     let reward_mint = unpack_mint(reward_mint_info, &token_program_id)?;
 
     // ======== Need check more =========
+    let market_nonce = config.bump_seed;
+    if *market_authority_info.key != authority_id(program_id, config_info.key, market_nonce)? {
+        return Err(SwapError::InvalidProgramAddress.into());
+    }
+    if config.deltafi_mint != *reward_mint_info.key {
+        return Err(SwapError::IncorrectMint.into());
+    }
+    if reward_token.owner == *market_authority_info.key {
+        return Err(SwapError::InvalidOwner.into());
+    }
     if reward_mint.mint_authority.is_some()
-        && *authority_info.key != reward_mint.mint_authority.unwrap()
+        && *market_authority_info.key != reward_mint.mint_authority.unwrap()
     {
         return Err(SwapError::InvalidOwner.into());
     }
@@ -429,8 +443,8 @@ fn process_swap(
                 token_program_info.clone(),
                 source_info.clone(),
                 swap_source_info.clone(),
-                authority_info.clone(),
-                nonce,
+                swap_authority_info.clone(),
+                swap_nonce,
                 amount_in,
             )?;
             token_transfer(
@@ -438,8 +452,8 @@ fn process_swap(
                 token_program_info.clone(),
                 swap_destination_info.clone(),
                 destination_info.clone(),
-                authority_info.clone(),
-                nonce,
+                swap_authority_info.clone(),
+                swap_nonce,
                 amount_out,
             )?;
             token_transfer(
@@ -447,17 +461,17 @@ fn process_swap(
                 token_program_info.clone(),
                 swap_destination_info.clone(),
                 admin_destination_info.clone(),
-                authority_info.clone(),
-                nonce,
+                swap_authority_info.clone(),
+                swap_nonce,
                 admin_fee,
             )?;
             token_mint_to(
-                swap_info.key,
+                config_info.key,
                 token_program_info.clone(),
                 reward_mint_info.clone(),
                 reward_token_info.clone(),
-                authority_info.clone(),
-                nonce,
+                market_authority_info.clone(),
+                market_nonce,
                 amount_to_reward,
             )?;
         }
@@ -467,8 +481,8 @@ fn process_swap(
                 token_program_info.clone(),
                 destination_info.clone(),
                 swap_destination_info.clone(),
-                authority_info.clone(),
-                nonce,
+                swap_authority_info.clone(),
+                swap_nonce,
                 amount_in,
             )?;
             token_transfer(
@@ -476,8 +490,8 @@ fn process_swap(
                 token_program_info.clone(),
                 swap_source_info.clone(),
                 source_info.clone(),
-                authority_info.clone(),
-                nonce,
+                swap_authority_info.clone(),
+                swap_nonce,
                 amount_out,
             )?;
             token_transfer(
@@ -485,17 +499,17 @@ fn process_swap(
                 token_program_info.clone(),
                 swap_source_info.clone(),
                 admin_destination_info.clone(),
-                authority_info.clone(),
-                nonce,
+                swap_authority_info.clone(),
+                swap_nonce,
                 admin_fee,
             )?;
             token_mint_to(
-                swap_info.key,
+                config_info.key,
                 token_program_info.clone(),
                 reward_mint_info.clone(),
                 reward_token_info.clone(),
-                authority_info.clone(),
-                nonce,
+                market_authority_info.clone(),
+                market_nonce,
                 amount_to_reward,
             )?;
         }
@@ -530,7 +544,7 @@ fn process_deposit(
     let token_program_info = next_account_info(account_info_iter)?;
 
     if swap_info.owner != program_id {
-        return Err(ProgramError::IncorrectProgramId);
+        return Err(SwapError::InvalidAccountOwner.into());
     }
 
     let mut token_swap = SwapInfo::unpack(&swap_info.data.borrow())?;
@@ -666,7 +680,7 @@ fn process_withdraw(
     let token_program_info = next_account_info(account_info_iter)?;
 
     if swap_info.owner != program_id {
-        return Err(ProgramError::IncorrectProgramId);
+        return Err(SwapError::InvalidAccountOwner.into());
     }
 
     let mut token_swap = SwapInfo::unpack(&swap_info.data.borrow())?;
@@ -811,12 +825,10 @@ fn process_init_liquidity_provider(program_id: &Pubkey, accounts: &[AccountInfo]
     let mut liquidity_provider =
         assert_uninitialized::<LiquidityProvider>(liquidity_provider_info)?;
     if liquidity_provider_info.owner != program_id {
-        msg!("Liquidity provider is not owned by token swap program");
         return Err(SwapError::InvalidAccountOwner.into());
     }
 
     if !liquidity_owner_info.is_signer {
-        msg!("Liquidity owner provided must be a signer");
         return Err(SwapError::InvalidSigner.into());
     }
 
@@ -831,24 +843,30 @@ fn process_init_liquidity_provider(program_id: &Pubkey, accounts: &[AccountInfo]
 
 fn process_claim_liquidity_rewards(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
     let account_info_iter = &mut accounts.iter();
+    let config_info = next_account_info(account_info_iter)?;
     let swap_info = next_account_info(account_info_iter)?;
-    let authority_info = next_account_info(account_info_iter)?;
+    let market_authority_info = next_account_info(account_info_iter)?;
     let liquidity_provider_info = next_account_info(account_info_iter)?;
     let liquidity_owner_info = next_account_info(account_info_iter)?;
     let claim_destination_info = next_account_info(account_info_iter)?;
     let claim_mint_info = next_account_info(account_info_iter)?;
     let token_program_info = next_account_info(account_info_iter)?;
 
-    if swap_info.owner != program_id {
+    if swap_info.owner != program_id || config_info.owner != program_id {
         return Err(SwapError::InvalidAccountOwner.into());
     }
 
-    let token_swap = SwapInfo::unpack(&swap_info.data.borrow())?;
-    if *authority_info.key != authority_id(program_id, swap_info.key, token_swap.nonce)? {
+    let config = ConfigInfo::unpack(&config_info.data.borrow())?;
+    let market_nonce = config.bump_seed;
+    if *market_authority_info.key != authority_id(program_id, config_info.key, market_nonce)? {
         return Err(SwapError::InvalidProgramAddress.into());
     }
-    if claim_mint_info.owner != program_id {
-        return Err(SwapError::InvalidProgramAddress.into());
+
+    if config.deltafi_mint != *claim_mint_info.key {
+        return Err(SwapError::IncorrectMint.into());
+    }
+    if claim_destination_info.owner == market_authority_info.key {
+        return Err(SwapError::InvalidOwner.into());
     }
 
     let mut liquidity_provider =
@@ -870,12 +888,12 @@ fn process_claim_liquidity_rewards(program_id: &Pubkey, accounts: &[AccountInfo]
     )?;
 
     token_mint_to(
-        swap_info.key,
+        config_info.key,
         token_program_info.clone(),
         claim_mint_info.clone(),
         claim_destination_info.clone(),
-        authority_info.clone(),
-        token_swap.nonce,
+        market_authority_info.clone(),
+        market_nonce,
         rewards_owed,
     )?;
 
@@ -1062,7 +1080,8 @@ fn get_pyth_price(pyth_price_info: &AccountInfo, clock: &Clock) -> Result<Decima
     Ok(market_price)
 }
 
-fn assert_uninitialized<T: Pack + IsInitialized>(
+/// Assert and unpack account data
+pub fn assert_uninitialized<T: Pack + IsInitialized>(
     account_info: &AccountInfo,
 ) -> Result<T, ProgramError> {
     let account: T = T::unpack_unchecked(&account_info.data.borrow())?;
@@ -1073,7 +1092,8 @@ fn assert_uninitialized<T: Pack + IsInitialized>(
     }
 }
 
-fn _assert_rent_exempt(rent: &Rent, account_info: &AccountInfo) -> ProgramResult {
+/// Check if the account has enough lamports to be rent to store state
+pub fn assert_rent_exempt(rent: &Rent, account_info: &AccountInfo) -> ProgramResult {
     if !rent.is_exempt(account_info.lamports(), account_info.data_len()) {
         msg!(&rent.minimum_balance(account_info.data_len()).to_string());
         Err(SwapError::NotRentExempt.into())
@@ -1083,7 +1103,10 @@ fn _assert_rent_exempt(rent: &Rent, account_info: &AccountInfo) -> ProgramResult
 }
 
 /// Unpacks a spl_token `Mint`.
-fn unpack_mint(account_info: &AccountInfo, token_program_id: &Pubkey) -> Result<Mint, SwapError> {
+pub fn unpack_mint(
+    account_info: &AccountInfo,
+    token_program_id: &Pubkey,
+) -> Result<Mint, SwapError> {
     if account_info.owner != token_program_id {
         Err(SwapError::IncorrectTokenProgramId)
     } else {

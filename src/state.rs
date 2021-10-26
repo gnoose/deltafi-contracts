@@ -13,15 +13,23 @@ use crate::{curve::PMMState, error::SwapError, fees::Fees, math::*, rewards::Rew
 
 use std::convert::TryFrom;
 
+/// Current version of the program and all new accounts created
+pub const PROGRAM_VERSION: u8 = 1;
+
+/// Accounts are created with data zeroed out, so uninitialized state instances
+/// will have the version set to 0.
+pub const UNINITIALIZED_VERSION: u8 = 0;
+
 /// Dex Default Configuration information
 #[repr(C)]
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ConfigInfo {
-    /// Initialization state
-    pub is_initialized: bool,
+    /// Version of DELTAFI
+    pub version: u8,
 
-    /// Paused state
-    pub is_paused: bool,
+    /// Bump seed for derived authority address
+    /// Especially for deltafi mint
+    pub bump_seed: u8,
 
     /// Deadline to transfer admin control to future_admin_key
     pub future_admin_deadline: UnixTimestamp,
@@ -42,7 +50,7 @@ pub struct ConfigInfo {
 impl Sealed for ConfigInfo {}
 impl IsInitialized for ConfigInfo {
     fn is_initialized(&self) -> bool {
-        self.is_initialized
+        self.version != UNINITIALIZED_VERSION
     }
 }
 
@@ -55,8 +63,8 @@ impl Pack for ConfigInfo {
         let src = array_ref![src, 0, CONFIG_INFO_SIZE];
         #[allow(clippy::ptr_offset_with_cast)]
         let (
-            is_initialized,
-            is_paused,
+            version,
+            bump_seed,
             future_admin_deadline,
             future_admin_key,
             admin_key,
@@ -75,17 +83,14 @@ impl Pack for ConfigInfo {
             Rewards::LEN
         ];
 
+        let version = u8::from_le_bytes(*version);
+        if version > PROGRAM_VERSION {
+            return Err(ProgramError::InvalidAccountData);
+        }
+
         Ok(Self {
-            is_initialized: match is_initialized {
-                [0] => false,
-                [1] => true,
-                _ => return Err(ProgramError::InvalidAccountData),
-            },
-            is_paused: match is_paused {
-                [0] => false,
-                [1] => true,
-                _ => return Err(ProgramError::InvalidAccountData),
-            },
+            version,
+            bump_seed: u8::from_le_bytes(*bump_seed),
             future_admin_deadline: i64::from_le_bytes(*future_admin_deadline),
             future_admin_key: Pubkey::new_from_array(*future_admin_key),
             admin_key: Pubkey::new_from_array(*admin_key),
@@ -99,8 +104,8 @@ impl Pack for ConfigInfo {
         let dst = array_mut_ref![dst, 0, CONFIG_INFO_SIZE];
         #[allow(clippy::ptr_offset_with_cast)]
         let (
-            is_initialized,
-            is_paused,
+            version,
+            bump_seed,
             future_admin_deadline,
             future_admin_key,
             admin_key,
@@ -118,8 +123,8 @@ impl Pack for ConfigInfo {
             Fees::LEN,
             Rewards::LEN
         ];
-        is_initialized[0] = self.is_initialized as u8;
-        is_paused[0] = self.is_paused as u8;
+        *version = self.version.to_le_bytes();
+        *bump_seed = self.bump_seed.to_le_bytes();
         *future_admin_deadline = self.future_admin_deadline.to_le_bytes();
         future_admin_key.copy_from_slice(self.future_admin_key.as_ref());
         admin_key.copy_from_slice(self.admin_key.as_ref());
@@ -235,7 +240,7 @@ impl Pack for SwapInfo {
         Ok(Self {
             is_initialized: unpack_bool(is_initialized)?,
             is_paused: unpack_bool(is_paused)?,
-            nonce: nonce[0],
+            nonce: u8::from_le_bytes(*nonce),
             token_a: Pubkey::new_from_array(*token_a),
             token_b: Pubkey::new_from_array(*token_b),
             pool_mint: Pubkey::new_from_array(*pool_mint),

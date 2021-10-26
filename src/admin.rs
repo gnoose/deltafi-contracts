@@ -6,18 +6,21 @@ use solana_program::{
     entrypoint::ProgramResult,
     msg,
     program_error::ProgramError,
+    program_option::COption,
     program_pack::Pack,
     pubkey::Pubkey,
-    sysvar::{clock::Clock, Sysvar},
+    sysvar::{clock::Clock, rent::Rent, Sysvar},
 };
 
 use crate::{
     error::SwapError,
     fees::Fees,
     instruction::{AdminInitializeData, AdminInstruction},
-    processor::{authority_id, unpack_token_account},
+    processor::{
+        assert_rent_exempt, assert_uninitialized, authority_id, unpack_mint, unpack_token_account,
+    },
     rewards::Rewards,
-    state::{ConfigInfo, SwapInfo},
+    state::{ConfigInfo, SwapInfo, PROGRAM_VERSION},
 };
 
 const ZERO_TS: UnixTimestamp = 0;
@@ -87,19 +90,35 @@ fn initialize(
 ) -> ProgramResult {
     let account_info_iter = &mut accounts.iter();
     let config_info = next_account_info(account_info_iter)?;
+    let autority_info = next_account_info(account_info_iter)?;
+    let deltafi_mint_info = next_account_info(account_info_iter)?;
+    let rent = &Rent::from_account_info(next_account_info(account_info_iter)?)?;
+    let token_program_info = next_account_info(account_info_iter)?;
 
-    let mut config = ConfigInfo::unpack_unchecked(&config_info.data.borrow())?;
-    if config.is_initialized {
-        return Err(SwapError::AlreadyInUse.into());
-    }
+    assert_rent_exempt(rent, config_info)?;
+    let mut config = assert_uninitialized::<ConfigInfo>(config_info)?;
     if config_info.owner != program_id {
+        return Err(SwapError::InvalidAccountOwner.into());
+    }
+    let (market_autority_key, bump_seed) =
+        Pubkey::find_program_address(&[config_info.key.as_ref()], program_id);
+    if &market_autority_key != autority_info.key {
+        return Err(SwapError::InvalidProgramAddress.into());
+    }
+    let token_program_id = *token_program_info.key;
+    let deltafi_mint = unpack_mint(deltafi_mint_info, &token_program_id)?;
+    if COption::Some(*autority_info.key) != deltafi_mint.mint_authority {
         return Err(SwapError::InvalidOwner.into());
     }
+    if deltafi_mint.freeze_authority.is_some() {
+        return Err(SwapError::InvalidFreezeAuthority.into());
+    }
 
-    config.is_initialized = true;
+    config.version = PROGRAM_VERSION;
+    config.bump_seed = bump_seed;
     config.future_admin_key = Pubkey::default();
     config.future_admin_deadline = ZERO_TS;
-    config.deltafi_mint = Pubkey::default();
+    config.deltafi_mint = *deltafi_mint_info.key;
     config.fees = Fees::new(fees);
     config.rewards = Rewards::new(rewards);
     ConfigInfo::pack(config, &mut config_info.data.borrow_mut())?;
@@ -159,7 +178,7 @@ fn set_fee_account(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResu
     is_admin(&config.admin_key, admin_info)?;
     let mut token_swap = SwapInfo::unpack(&swap_info.data.borrow())?;
     if swap_info.owner != program_id {
-        return Err(SwapError::InvalidOwner.into());
+        return Err(SwapError::InvalidAccountOwner.into());
     }
     if *authority_info.key != authority_id(program_id, swap_info.key, token_swap.nonce)? {
         return Err(SwapError::InvalidProgramAddress.into());
