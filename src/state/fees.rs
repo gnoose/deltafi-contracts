@@ -155,27 +155,11 @@ impl Pack for Fees {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::DEFAULT_TEST_FEES;
 
     #[test]
     fn pack_fees() {
-        let admin_trade_fee_numerator = 1;
-        let admin_trade_fee_denominator = 2;
-        let admin_withdraw_fee_numerator = 3;
-        let admin_withdraw_fee_denominator = 4;
-        let trade_fee_numerator = 5;
-        let trade_fee_denominator = 6;
-        let withdraw_fee_numerator = 7;
-        let withdraw_fee_denominator = 8;
-        let fees = Fees {
-            admin_trade_fee_numerator,
-            admin_trade_fee_denominator,
-            admin_withdraw_fee_numerator,
-            admin_withdraw_fee_denominator,
-            trade_fee_numerator,
-            trade_fee_denominator,
-            withdraw_fee_numerator,
-            withdraw_fee_denominator,
-        };
+        let fees = DEFAULT_TEST_FEES;
 
         let mut packed = [0u8; Fees::LEN];
         Pack::pack_into_slice(&fees, &mut packed[..]);
@@ -183,45 +167,29 @@ mod tests {
         assert_eq!(fees, unpacked);
 
         let mut packed = vec![];
-        packed.extend_from_slice(&admin_trade_fee_numerator.to_le_bytes());
-        packed.extend_from_slice(&admin_trade_fee_denominator.to_le_bytes());
-        packed.extend_from_slice(&admin_withdraw_fee_numerator.to_le_bytes());
-        packed.extend_from_slice(&admin_withdraw_fee_denominator.to_le_bytes());
-        packed.extend_from_slice(&trade_fee_numerator.to_le_bytes());
-        packed.extend_from_slice(&trade_fee_denominator.to_le_bytes());
-        packed.extend_from_slice(&withdraw_fee_numerator.to_le_bytes());
-        packed.extend_from_slice(&withdraw_fee_denominator.to_le_bytes());
+        packed.extend_from_slice(&fees.admin_trade_fee_numerator.to_le_bytes());
+        packed.extend_from_slice(&fees.admin_trade_fee_denominator.to_le_bytes());
+        packed.extend_from_slice(&fees.admin_withdraw_fee_numerator.to_le_bytes());
+        packed.extend_from_slice(&fees.admin_withdraw_fee_denominator.to_le_bytes());
+        packed.extend_from_slice(&fees.trade_fee_numerator.to_le_bytes());
+        packed.extend_from_slice(&fees.trade_fee_denominator.to_le_bytes());
+        packed.extend_from_slice(&fees.withdraw_fee_numerator.to_le_bytes());
+        packed.extend_from_slice(&fees.withdraw_fee_denominator.to_le_bytes());
         let unpacked = Fees::unpack_from_slice(&packed).unwrap();
         assert_eq!(fees, unpacked);
     }
 
     #[test]
     fn fee_results() {
-        let admin_trade_fee_numerator = 1;
-        let admin_trade_fee_denominator = 2;
-        let admin_withdraw_fee_numerator = 3;
-        let admin_withdraw_fee_denominator = 4;
-        let trade_fee_numerator = 5;
-        let trade_fee_denominator = 6;
-        let withdraw_fee_numerator = 7;
-        let withdraw_fee_denominator = 8;
-        let fees = Fees {
-            admin_trade_fee_numerator,
-            admin_trade_fee_denominator,
-            admin_withdraw_fee_numerator,
-            admin_withdraw_fee_denominator,
-            trade_fee_numerator,
-            trade_fee_denominator,
-            withdraw_fee_numerator,
-            withdraw_fee_denominator,
-        };
+        let fees = DEFAULT_TEST_FEES;
 
         let trade_amount = 1_000_000_000;
-        let expected_trade_fee = trade_amount * trade_fee_numerator / trade_fee_denominator;
+        let expected_trade_fee =
+            trade_amount * fees.trade_fee_numerator / fees.trade_fee_denominator;
         let trade_fee = fees.trade_fee(trade_amount).unwrap();
         assert_eq!(trade_fee, expected_trade_fee);
         let expected_admin_trade_fee =
-            expected_trade_fee * admin_trade_fee_numerator / admin_trade_fee_denominator;
+            expected_trade_fee * fees.admin_trade_fee_numerator / fees.admin_trade_fee_denominator;
         assert_eq!(
             fees.admin_trade_fee(trade_fee).unwrap(),
             expected_admin_trade_fee
@@ -229,20 +197,20 @@ mod tests {
 
         let withdraw_amount = 100_000_000_000;
         let expected_withdraw_fee =
-            withdraw_amount * withdraw_fee_numerator / withdraw_fee_denominator;
+            withdraw_amount * fees.withdraw_fee_numerator / fees.withdraw_fee_denominator;
         let withdraw_fee = fees.withdraw_fee(withdraw_amount).unwrap();
         assert_eq!(withdraw_fee, expected_withdraw_fee);
-        let expected_admin_withdraw_fee =
-            expected_withdraw_fee * admin_withdraw_fee_numerator / admin_withdraw_fee_denominator;
+        let expected_admin_withdraw_fee = expected_withdraw_fee * fees.admin_withdraw_fee_numerator
+            / fees.admin_withdraw_fee_denominator;
         assert_eq!(
             fees.admin_withdraw_fee(expected_withdraw_fee).unwrap(),
             expected_admin_withdraw_fee
         );
 
         let n_coins = 2;
-        let adjusted_trade_fee_numerator = trade_fee_numerator * n_coins / (4 * (n_coins - 1));
+        let adjusted_trade_fee_numerator = fees.trade_fee_numerator * n_coins / (4 * (n_coins - 1));
         let expected_normalized_fee =
-            trade_amount * adjusted_trade_fee_numerator / trade_fee_denominator;
+            trade_amount * adjusted_trade_fee_numerator / fees.trade_fee_denominator;
         assert_eq!(
             fees.normalized_trade_fee(n_coins, trade_amount).unwrap(),
             expected_normalized_fee

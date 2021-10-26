@@ -129,23 +129,14 @@ impl Pack for ConfigInfo {
     }
 }
 
-#[cfg(feature = "test-bpf")]
+#[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        solana_program::clock::Clock,
-        utils::{
-            test_utils::{default_i, default_k, DEFAULT_TEST_FEES, DEFAULT_TEST_REWARDS},
-            TWAP_OPENED,
-        },
-        v2curve::RState,
-    };
 
     #[test]
     fn test_config_info_packing() {
-        let is_initialized = true;
-        let is_paused = false;
-        let amp_factor: u64 = 1;
+        let version = PROGRAM_VERSION;
+        let bump_seed = 255;
         let future_admin_deadline: i64 = i64::MAX;
         let future_admin_key_raw = [1u8; 32];
         let admin_key_raw = [2u8; 32];
@@ -157,9 +148,8 @@ mod tests {
         let rewards = DEFAULT_TEST_REWARDS;
 
         let config_info = ConfigInfo {
-            is_initialized,
-            is_paused,
-            amp_factor,
+            version,
+            bump_seed,
             future_admin_deadline,
             future_admin_key,
             admin_key,
@@ -173,8 +163,8 @@ mod tests {
         let unpacked = ConfigInfo::unpack(&packed).unwrap();
         assert_eq!(config_info, unpacked);
 
-        let mut packed: Vec<u8> = vec![1, 0];
-        packed.extend_from_slice(&amp_factor.to_le_bytes());
+        let mut packed: Vec<u8> = vec![PROGRAM_VERSION];
+        packed.extend_from_slice(&bump_seed.to_le_bytes());
         packed.extend_from_slice(&future_admin_deadline.to_le_bytes());
         packed.extend_from_slice(&future_admin_key_raw);
         packed.extend_from_slice(&admin_key_raw);
@@ -194,6 +184,16 @@ mod tests {
         packed.extend_from_slice(&DEFAULT_TEST_REWARDS.trade_reward_numerator.to_le_bytes());
         packed.extend_from_slice(&DEFAULT_TEST_REWARDS.trade_reward_denominator.to_le_bytes());
         packed.extend_from_slice(&DEFAULT_TEST_REWARDS.trade_reward_cap.to_le_bytes());
+        packed.extend_from_slice(
+            &DEFAULT_TEST_REWARDS
+                .liquidity_reward_numerator
+                .to_le_bytes(),
+        );
+        packed.extend_from_slice(
+            &DEFAULT_TEST_REWARDS
+                .liquidity_reward_denominator
+                .to_le_bytes(),
+        );
         let unpacked = ConfigInfo::unpack(&packed).unwrap();
         assert_eq!(config_info, unpacked);
 

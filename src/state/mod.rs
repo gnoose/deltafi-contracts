@@ -42,3 +42,29 @@ pub fn unpack_bool(src: &[u8; 1]) -> Result<bool, ProgramError> {
         _ => Err(ProgramError::InvalidAccountData),
     }
 }
+
+#[cfg(test)]
+/// Fees for testing
+pub const DEFAULT_TEST_FEES: Fees = Fees {
+    admin_trade_fee_numerator: 1,
+    admin_trade_fee_denominator: 2,
+    admin_withdraw_fee_numerator: 1,
+    admin_withdraw_fee_denominator: 2,
+    trade_fee_numerator: 6,
+    trade_fee_denominator: 100,
+    withdraw_fee_numerator: 6,
+    withdraw_fee_denominator: 100,
+};
+
+#[cfg(test)]
+/// Rewards for testing
+pub const DEFAULT_TEST_REWARDS: Rewards = Rewards {
+    trade_reward_numerator: 1,
+    trade_reward_denominator: 2,
+    trade_reward_cap: 100,
+    liquidity_reward_numerator: 1,
+    liquidity_reward_denominator: 1000,
+};
+
+#[cfg(test)]
+mod tests {}

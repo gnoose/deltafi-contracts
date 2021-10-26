@@ -176,7 +176,7 @@ impl PMMState {
                     self.slop,
                 )?
             }
-            _ => return Err(SwapError::Equilibrium.into()),
+            _ => {}
         };
         Ok(())
     }

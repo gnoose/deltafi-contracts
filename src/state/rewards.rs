@@ -106,21 +106,11 @@ impl Pack for Rewards {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::DEFAULT_TEST_REWARDS;
 
     #[test]
     fn pack_rewards() {
-        let trade_reward_numerator = 1;
-        let trade_reward_denominator = 2;
-        let trade_reward_cap = 100;
-        let liquidity_reward_numerator = 1;
-        let liquidity_reward_denominator = 1000;
-        let rewards = Rewards {
-            trade_reward_numerator,
-            trade_reward_denominator,
-            trade_reward_cap,
-            liquidity_reward_numerator,
-            liquidity_reward_denominator,
-        };
+        let rewards = DEFAULT_TEST_REWARDS;
 
         let mut packed = [0u8; Rewards::LEN];
         Rewards::pack_into_slice(&rewards, &mut packed[..]);
@@ -128,11 +118,11 @@ mod tests {
         assert_eq!(rewards, unpacked);
 
         let mut packed = vec![];
-        packed.extend_from_slice(&trade_reward_numerator.to_le_bytes());
-        packed.extend_from_slice(&trade_reward_denominator.to_le_bytes());
-        packed.extend_from_slice(&trade_reward_cap.to_le_bytes());
-        packed.extend_from_slice(&liquidity_reward_numerator.to_le_bytes());
-        packed.extend_from_slice(&liquidity_reward_denominator.to_le_bytes());
+        packed.extend_from_slice(&rewards.trade_reward_numerator.to_le_bytes());
+        packed.extend_from_slice(&rewards.trade_reward_denominator.to_le_bytes());
+        packed.extend_from_slice(&rewards.trade_reward_cap.to_le_bytes());
+        packed.extend_from_slice(&rewards.liquidity_reward_numerator.to_le_bytes());
+        packed.extend_from_slice(&rewards.liquidity_reward_denominator.to_le_bytes());
         let unpacked = Rewards::unpack_from_slice(&packed).unwrap();
         assert_eq!(rewards, unpacked);
     }
@@ -176,7 +166,7 @@ mod tests {
 
         // LP reward calc
         {
-            let expected_lp_reward = 10u64;
+            let expected_lp_reward = 100u64;
             let lp_reward = rewards.liquidity_reward_u64(liquidity_amount).unwrap();
             assert_eq!(lp_reward, expected_lp_reward);
         }
