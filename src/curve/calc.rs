@@ -22,7 +22,7 @@ pub fn general_integrate(
     k: Decimal,
 ) -> Result<Decimal, ProgramError> {
     let fair_amount = v1.try_sub(v2)?.try_mul(i)?; // i*delta
-    if k == Decimal::zero() {
+    if k.is_zero() {
         return Ok(fair_amount);
     }
     let v0_v0_v1_v2 = v0.try_mul(v0)?.try_div(v1)?.try_div(v2)?;
@@ -53,15 +53,15 @@ pub fn solve_quadratic_for_trade(
     i: Decimal,
     k: Decimal,
 ) -> Result<Decimal, ProgramError> {
-    if v0 == Decimal::zero() {
+    if v0.is_zero() {
         return Err(SwapError::CalculationFailure.into());
     }
-    if delta == Decimal::zero() {
+    if delta.is_zero() {
         return Ok(Decimal::zero());
     }
 
     let idelta = delta.try_mul(i)?;
-    if k == Decimal::zero() {
+    if k.is_zero() {
         return Ok(idelta.min(v1));
     }
 
@@ -84,15 +84,12 @@ pub fn solve_quadratic_for_trade(
     let k_q2_q1 = v0.try_mul(v0)?.try_div(v1)?.try_mul(k)?.try_add(idelta)?; // kQ0^2/Q1-i*deltaB
     let mut b = Decimal::one().try_sub(k)?.try_mul(v1)?; // (1-k)Q1
 
-    let b_sig = match b.cmp(&k_q2_q1) {
-        Ordering::Less => {
-            b = k_q2_q1.try_sub(b)?;
-            true
-        }
-        _ => {
-            b = b.try_sub(k_q2_q1)?;
-            false
-        }
+    let b_sig = if b < k_q2_q1 {
+        b = k_q2_q1.try_sub(b)?;
+        true
+    } else {
+        b = b.try_sub(k_q2_q1)?;
+        false
     };
 
     // calculate sqrt
@@ -129,10 +126,10 @@ pub fn solve_quadratic_for_target(
     i: Decimal,
     k: Decimal,
 ) -> Result<Decimal, ProgramError> {
-    if v1 == Decimal::zero() {
+    if v1.is_zero() {
         return Ok(Decimal::zero());
     }
-    if k == Decimal::zero() {
+    if k.is_zero() {
         return delta.try_mul(i)?.try_add(v1);
     }
     // V0 = V1+V1*(sqrt-1)/2k

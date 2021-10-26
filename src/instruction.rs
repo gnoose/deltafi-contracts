@@ -46,9 +46,9 @@ pub struct InitializeData {
     /// Slope variable - real value * 10**18, 0 <= slop <= 1
     pub slop: u64,
     /// mid price
-    pub mid_price: u64,
+    pub mid_price: u128,
     /// flag to know about twap open
-    pub is_open_twap: u8,
+    pub is_open_twap: bool,
 }
 
 /// Swap instruction data
@@ -104,8 +104,6 @@ pub struct WithdrawOneData {
 #[repr(C)]
 #[derive(Clone, Debug, PartialEq)]
 pub struct AdminInitializeData {
-    /// Default amp coefficient
-    pub amp_factor: u64,
     /// Default fees
     pub fees: Fees,
     /// Default rewards
@@ -128,10 +126,6 @@ pub enum AdminInstruction {
     /// Admin initialization instruction
     Initialize(AdminInitializeData),
     /// TODO: Docs
-    RampA(RampAData),
-    /// TODO: Docs
-    StopRampA,
-    /// TODO: Docs
     Pause,
     /// TODO: Docs
     Unpause,
@@ -153,36 +147,22 @@ impl AdminInstruction {
         let (&tag, rest) = input.split_first().ok_or(SwapError::InvalidInstruction)?;
         Ok(match tag {
             100 => {
-                let (amp_factor, rest) = unpack_u64(rest)?;
                 let (fees, rest) = rest.split_at(Fees::LEN);
                 let fees = Fees::unpack_unchecked(fees)?;
                 let (rewards, _rest) = rest.split_at(Rewards::LEN);
                 let rewards = Rewards::unpack_unchecked(rewards)?;
-                Self::Initialize(AdminInitializeData {
-                    amp_factor,
-                    fees,
-                    rewards,
-                })
+                Self::Initialize(AdminInitializeData { fees, rewards })
             }
-            101 => {
-                let (target_amp, rest) = unpack_u64(rest)?;
-                let (stop_ramp_ts, _rest) = unpack_i64(rest)?;
-                Self::RampA(RampAData {
-                    target_amp,
-                    stop_ramp_ts,
-                })
-            }
-            102 => Self::StopRampA,
-            103 => Self::Pause,
-            104 => Self::Unpause,
-            105 => Self::SetFeeAccount,
-            106 => Self::ApplyNewAdmin,
-            107 => Self::CommitNewAdmin,
-            108 => {
+            101 => Self::Pause,
+            102 => Self::Unpause,
+            103 => Self::SetFeeAccount,
+            104 => Self::ApplyNewAdmin,
+            105 => Self::CommitNewAdmin,
+            106 => {
                 let fees = Fees::unpack_unchecked(rest)?;
                 Self::SetNewFees(fees)
             }
-            109 => {
+            107 => {
                 let rewards = Rewards::unpack_unchecked(rest)?;
                 Self::SetNewRewards(rewards)
             }
@@ -194,13 +174,8 @@ impl AdminInstruction {
     pub fn pack(&self) -> Vec<u8> {
         let mut buf = Vec::with_capacity(size_of::<Self>());
         match &*self {
-            Self::Initialize(AdminInitializeData {
-                amp_factor,
-                fees,
-                rewards,
-            }) => {
+            Self::Initialize(AdminInitializeData { fees, rewards }) => {
                 buf.push(100);
-                buf.extend_from_slice(&amp_factor.to_le_bytes());
                 let mut fees_slice = [0u8; Fees::LEN];
                 Pack::pack_into_slice(fees, &mut fees_slice[..]);
                 buf.extend_from_slice(&fees_slice);
@@ -208,28 +183,19 @@ impl AdminInstruction {
                 Pack::pack_into_slice(rewards, &mut rewards_slice[..]);
                 buf.extend_from_slice(&rewards_slice);
             }
-            Self::RampA(RampAData {
-                target_amp,
-                stop_ramp_ts,
-            }) => {
-                buf.push(101);
-                buf.extend_from_slice(&target_amp.to_le_bytes());
-                buf.extend_from_slice(&stop_ramp_ts.to_le_bytes());
-            }
-            Self::StopRampA => buf.push(102),
-            Self::Pause => buf.push(103),
-            Self::Unpause => buf.push(104),
-            Self::SetFeeAccount => buf.push(105),
-            Self::ApplyNewAdmin => buf.push(106),
-            Self::CommitNewAdmin => buf.push(107),
+            Self::Pause => buf.push(101),
+            Self::Unpause => buf.push(102),
+            Self::SetFeeAccount => buf.push(103),
+            Self::ApplyNewAdmin => buf.push(104),
+            Self::CommitNewAdmin => buf.push(105),
             Self::SetNewFees(fees) => {
-                buf.push(108);
+                buf.push(106);
                 let mut fees_slice = [0u8; Fees::LEN];
                 Pack::pack_into_slice(fees, &mut fees_slice[..]);
                 buf.extend_from_slice(&fees_slice);
             }
             Self::SetNewRewards(rewards) => {
-                buf.push(109);
+                buf.push(107);
                 let mut rewards_slice = [0u8; Rewards::LEN];
                 Pack::pack_into_slice(rewards, &mut rewards_slice[..]);
                 buf.extend_from_slice(&rewards_slice);
@@ -244,72 +210,14 @@ pub fn initialize_config(
     program_id: &Pubkey,
     config_key: &Pubkey,
     admin_key: &Pubkey,
-    amp_factor: u64,
     fees: Fees,
     rewards: Rewards,
 ) -> Result<Instruction, ProgramError> {
-    let data = AdminInstruction::Initialize(AdminInitializeData {
-        amp_factor,
-        fees,
-        rewards,
-    })
-    .pack();
+    let data = AdminInstruction::Initialize(AdminInitializeData { fees, rewards }).pack();
 
     let accounts = vec![
         AccountMeta::new(*config_key, true),
         AccountMeta::new_readonly(*admin_key, true),
-    ];
-
-    Ok(Instruction {
-        program_id: *program_id,
-        accounts,
-        data,
-    })
-}
-
-/// Creates a 'ramp_a' instruction
-pub fn ramp_a(
-    program_id: &Pubkey,
-    config_pubkey: &Pubkey,
-    swap_pubkey: &Pubkey,
-    admin_pubkey: &Pubkey,
-    target_amp: u64,
-    stop_ramp_ts: i64,
-) -> Result<Instruction, ProgramError> {
-    let data = AdminInstruction::RampA(RampAData {
-        target_amp,
-        stop_ramp_ts,
-    })
-    .pack();
-
-    let accounts = vec![
-        AccountMeta::new_readonly(*config_pubkey, true),
-        AccountMeta::new(*swap_pubkey, true),
-        AccountMeta::new_readonly(*admin_pubkey, true),
-        AccountMeta::new_readonly(clock::id(), false),
-    ];
-
-    Ok(Instruction {
-        program_id: *program_id,
-        accounts,
-        data,
-    })
-}
-
-/// Creates a 'stop_ramp_a' instruction
-pub fn stop_ramp_a(
-    program_id: &Pubkey,
-    config_pubkey: &Pubkey,
-    swap_pubkey: &Pubkey,
-    admin_pubkey: &Pubkey,
-) -> Result<Instruction, ProgramError> {
-    let data = AdminInstruction::StopRampA.pack();
-
-    let accounts = vec![
-        AccountMeta::new_readonly(*config_pubkey, true),
-        AccountMeta::new_readonly(*swap_pubkey, true),
-        AccountMeta::new_readonly(*admin_pubkey, true),
-        AccountMeta::new_readonly(clock::id(), false),
     ];
 
     Ok(Instruction {
@@ -538,19 +446,19 @@ pub enum SwapInstruction {
     ///   10. `[]` Token program id
     Withdraw(WithdrawData),
 
-    ///   Withdraw one token from the pool at the current ratio.
-    ///
-    ///   0. `[]` Token-swap
-    ///   1. `[]` $authority
-    ///   2. `[writable]` Pool mint account, $authority is the owner
-    ///   3. `[writable]` SOURCE Pool account, amount is transferable by $authority.
-    ///   4. `[writable]` token_(A|B) BASE token Swap Account to withdraw FROM.
-    ///   5. `[writable]` token_(A|B) QUOTE token Swap Account to exchange to base token.
-    ///   6. `[writable]` token_(A|B) BASE token user Account to credit.
-    ///   7. `[writable]` token_(A|B) admin fee Account. Must have same mint as BASE token.
-    ///   8. `[]` Token program id
-    ///   9. `[]` Clock sysvar
-    WithdrawOne(WithdrawOneData),
+    // ///   Withdraw one token from the pool at the current ratio.
+    // ///
+    // ///   0. `[]` Token-swap
+    // ///   1. `[]` $authority
+    // ///   2. `[writable]` Pool mint account, $authority is the owner
+    // ///   3. `[writable]` SOURCE Pool account, amount is transferable by $authority.
+    // ///   4. `[writable]` token_(A|B) BASE token Swap Account to withdraw FROM.
+    // ///   5. `[writable]` token_(A|B) QUOTE token Swap Account to exchange to base token.
+    // ///   6. `[writable]` token_(A|B) BASE token user Account to credit.
+    // ///   7. `[writable]` token_(A|B) admin fee Account. Must have same mint as BASE token.
+    // ///   8. `[]` Token program id
+    // ///   9. `[]` Clock sysvar
+    // WithdrawOne(WithdrawOneData),
 
     // ///   Calc the receive amount in the pool - pmm.
     // ///
@@ -602,8 +510,8 @@ impl SwapInstruction {
             0x0 => {
                 let (&nonce, rest) = rest.split_first().ok_or(SwapError::InvalidInstruction)?;
                 let (slop, rest) = unpack_u64(rest)?;
-                let (mid_price, rest) = unpack_u64(rest)?;
-                let (is_open_twap, _) = unpack_u8(rest)?;
+                let (mid_price, rest) = unpack_u128(rest)?;
+                let (is_open_twap, _) = unpack_bool(rest)?;
                 Self::Initialize(InitializeData {
                     nonce,
                     slop,
@@ -641,17 +549,9 @@ impl SwapInstruction {
                     minimum_token_b_amount,
                 })
             }
-            0x4 => {
-                let (pool_token_amount, rest) = unpack_u64(rest)?;
-                let (minimum_token_amount, _) = unpack_u64(rest)?;
-                Self::WithdrawOne(WithdrawOneData {
-                    pool_token_amount,
-                    minimum_token_amount,
-                })
-            }
-            0x5 => Self::InitializeLiquidityProvider,
-            0x6 => Self::ClaimLiquidityRewards,
-            0x7 => Self::RefreshLiquidityObligation,
+            0x4 => Self::InitializeLiquidityProvider,
+            0x5 => Self::ClaimLiquidityRewards,
+            0x6 => Self::RefreshLiquidityObligation,
             _ => {
                 msg!("SwapInstruction cannot be unpakced");
                 return Err(SwapError::InstructionUnpackError.into());
@@ -673,7 +573,7 @@ impl SwapInstruction {
                 buf.push(nonce);
                 buf.extend_from_slice(&slop.to_le_bytes());
                 buf.extend_from_slice(&mid_price.to_le_bytes());
-                buf.extend_from_slice(&is_open_twap.to_le_bytes());
+                buf.extend_from_slice(&(is_open_twap as u8).to_le_bytes());
             }
             Self::Swap(SwapData {
                 amount_in,
@@ -704,14 +604,6 @@ impl SwapInstruction {
                 buf.extend_from_slice(&pool_token_amount.to_le_bytes());
                 buf.extend_from_slice(&minimum_token_a_amount.to_le_bytes());
                 buf.extend_from_slice(&minimum_token_b_amount.to_le_bytes());
-            }
-            Self::WithdrawOne(WithdrawOneData {
-                pool_token_amount,
-                minimum_token_amount,
-            }) => {
-                buf.push(0x4);
-                buf.extend_from_slice(&pool_token_amount.to_le_bytes());
-                buf.extend_from_slice(&minimum_token_amount.to_le_bytes());
             }
             Self::InitializeLiquidityProvider => {
                 buf.push(0x5);
@@ -744,8 +636,8 @@ pub fn initialize(
     pyth_key: &Pubkey,
     nonce: u8,
     slop: u64,
-    mid_price: u64,
-    is_open_twap: u8,
+    mid_price: u128,
+    is_open_twap: bool,
 ) -> Result<Instruction, ProgramError> {
     let data = SwapInstruction::Initialize(InitializeData {
         nonce,
@@ -919,51 +811,6 @@ pub fn withdraw(
     })
 }
 
-/// Creates a 'withdraw_one' instruction.
-pub fn withdraw_one(
-    program_id: &Pubkey,
-    token_program_id: &Pubkey,
-    swap_pubkey: &Pubkey,
-    authority_pubkey: &Pubkey,
-    pool_mint_pubkey: &Pubkey,
-    source_pubkey: &Pubkey,
-    swap_base_token_pubkey: &Pubkey,
-    swap_quote_token_pubkey: &Pubkey,
-    base_destination_pubkey: &Pubkey,
-    admin_fee_destination_pubkey: &Pubkey,
-    liquidity_provider_pubkey: &Pubkey,
-    liquidity_owner_pubkey: &Pubkey,
-    pool_token_amount: u64,
-    minimum_token_amount: u64,
-) -> Result<Instruction, ProgramError> {
-    let data = SwapInstruction::WithdrawOne(WithdrawOneData {
-        pool_token_amount,
-        minimum_token_amount,
-    })
-    .pack();
-
-    let accounts = vec![
-        AccountMeta::new(*swap_pubkey, false),
-        AccountMeta::new(*authority_pubkey, false),
-        AccountMeta::new(*pool_mint_pubkey, false),
-        AccountMeta::new(*source_pubkey, false),
-        AccountMeta::new(*swap_base_token_pubkey, false),
-        AccountMeta::new(*swap_quote_token_pubkey, false),
-        AccountMeta::new(*base_destination_pubkey, false),
-        AccountMeta::new(*admin_fee_destination_pubkey, false),
-        AccountMeta::new(*liquidity_provider_pubkey, false),
-        AccountMeta::new_readonly(*liquidity_owner_pubkey, true),
-        AccountMeta::new(*token_program_id, false),
-        AccountMeta::new(clock::id(), false),
-    ];
-
-    Ok(Instruction {
-        program_id: *program_id,
-        accounts,
-        data,
-    })
-}
-
 /// Creates `InitializeLiquidityProvider` instruction
 pub fn init_liquidity_provider(
     program_id: &Pubkey,
@@ -1039,6 +886,20 @@ pub fn refresh_liquidity_obligation(
     })
 }
 
+fn unpack_u128(input: &[u8]) -> Result<(u128, &[u8]), ProgramError> {
+    if input.len() < 16 {
+        return Err(SwapError::InstructionUnpackError.into());
+    }
+    let (amount, rest) = input.split_at(16);
+    let amount = amount
+        .get(..16)
+        .and_then(|slice| slice.try_into().ok())
+        .map(u128::from_le_bytes)
+        .ok_or(SwapError::InstructionUnpackError)?;
+    Ok((amount, rest))
+}
+
+#[allow(dead_code)]
 fn unpack_i64(input: &[u8]) -> Result<(i64, &[u8]), ProgramError> {
     if input.len() < 8 {
         return Err(SwapError::InstructionUnpackError.into());
@@ -1065,7 +926,6 @@ fn unpack_u64(input: &[u8]) -> Result<(u64, &[u8]), ProgramError> {
     Ok((amount, rest))
 }
 
-#[allow(dead_code)]
 fn unpack_u8(input: &[u8]) -> Result<(u8, &[u8]), ProgramError> {
     if input.is_empty() {
         return Err(SwapError::InstructionUnpackError.into());
@@ -1076,6 +936,16 @@ fn unpack_u8(input: &[u8]) -> Result<(u8, &[u8]), ProgramError> {
         .and_then(|slice| slice.try_into().ok())
         .map(u8::from_le_bytes)
         .ok_or(SwapError::InstructionUnpackError)?;
+    Ok((value, rest))
+}
+
+fn unpack_bool(input: &[u8]) -> Result<(bool, &[u8]), ProgramError> {
+    let (value, rest) = unpack_u8(input)?;
+    let value = match u8::from_le(value) {
+        0 => false,
+        1 => true,
+        _ => return Err(SwapError::InstructionUnpackError.into()),
+    };
     Ok((value, rest))
 }
 

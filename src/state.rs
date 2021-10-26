@@ -23,11 +23,8 @@ pub struct ConfigInfo {
     /// Paused state
     pub is_paused: bool,
 
-    /// Default amplification coefficient
-    pub amp_factor: u64,
-
     /// Deadline to transfer admin control to future_admin_key
-    pub future_admin_deadline: i64,
+    pub future_admin_deadline: UnixTimestamp,
     /// Public key of the admin account to be applied
     pub future_admin_key: Pubkey,
     /// Public key of admin account to execute admin instructions
@@ -50,7 +47,7 @@ impl IsInitialized for ConfigInfo {
 }
 
 #[doc(hidden)]
-pub const CONFIG_INFO_SIZE: usize = 202;
+pub const CONFIG_INFO_SIZE: usize = 210;
 impl Pack for ConfigInfo {
     const LEN: usize = CONFIG_INFO_SIZE;
     #[doc(hidden)]
@@ -60,14 +57,23 @@ impl Pack for ConfigInfo {
         let (
             is_initialized,
             is_paused,
-            amp_factor,
             future_admin_deadline,
             future_admin_key,
             admin_key,
             deltafi_mint,
             fees,
             rewards,
-        ) = array_refs![src, 1, 1, 8, 8, 32, 32, 32, 64, 24];
+        ) = array_refs![
+            src,
+            1,
+            1,
+            8,
+            PUBKEY_BYTES,
+            PUBKEY_BYTES,
+            PUBKEY_BYTES,
+            Fees::LEN,
+            Rewards::LEN
+        ];
 
         Ok(Self {
             is_initialized: match is_initialized {
@@ -80,7 +86,6 @@ impl Pack for ConfigInfo {
                 [1] => true,
                 _ => return Err(ProgramError::InvalidAccountData),
             },
-            amp_factor: u64::from_le_bytes(*amp_factor),
             future_admin_deadline: i64::from_le_bytes(*future_admin_deadline),
             future_admin_key: Pubkey::new_from_array(*future_admin_key),
             admin_key: Pubkey::new_from_array(*admin_key),
@@ -92,20 +97,29 @@ impl Pack for ConfigInfo {
     #[doc(hidden)]
     fn pack_into_slice(&self, dst: &mut [u8]) {
         let dst = array_mut_ref![dst, 0, CONFIG_INFO_SIZE];
+        #[allow(clippy::ptr_offset_with_cast)]
         let (
             is_initialized,
             is_paused,
-            amp_factor,
             future_admin_deadline,
             future_admin_key,
             admin_key,
             deltafi_mint,
             fees,
             rewards,
-        ) = mut_array_refs![dst, 1, 1, 8, 8, 32, 32, 32, 64, 24];
+        ) = mut_array_refs![
+            dst,
+            1,
+            1,
+            8,
+            PUBKEY_BYTES,
+            PUBKEY_BYTES,
+            PUBKEY_BYTES,
+            Fees::LEN,
+            Rewards::LEN
+        ];
         is_initialized[0] = self.is_initialized as u8;
         is_paused[0] = self.is_paused as u8;
-        *amp_factor = self.amp_factor.to_le_bytes();
         *future_admin_deadline = self.future_admin_deadline.to_le_bytes();
         future_admin_key.copy_from_slice(self.future_admin_key.as_ref());
         admin_key.copy_from_slice(self.admin_key.as_ref());
@@ -132,15 +146,6 @@ pub struct SwapInfo {
     /// token mint.
     pub nonce: u8,
 
-    /// Initial amplification coefficient (A)
-    pub initial_amp_factor: u64,
-    /// Target amplification coefficient (A)
-    pub target_amp_factor: u64,
-    /// Ramp A start timestamp
-    pub start_ramp_ts: i64,
-    /// Ramp A stop timestamp
-    pub stop_ramp_ts: i64,
-
     /// Token A
     pub token_a: Pubkey,
     /// Token B
@@ -166,13 +171,13 @@ pub struct SwapInfo {
     /// PMM object
     pub pmm_state: PMMState,
     /// twap open flag
-    pub is_open_twap: u8,
+    pub is_open_twap: bool,
     /// block timestamp last - twap
-    pub block_timestamp_last: i64,
+    pub block_timestamp_last: u64,
+    /// cumulative ticks in seconds
+    pub cumulative_ticks: u64,
     /// base price cumulative last - twap
     pub base_price_cumulative_last: Decimal,
-    /// receive amount on swap
-    pub receive_amount: Decimal,
 }
 
 impl Sealed for SwapInfo {}
@@ -181,7 +186,7 @@ impl IsInitialized for SwapInfo {
         self.is_initialized
     }
 }
-const SWAP_INFO_SIZE: usize = 501; // 1 + 1 + 1 + 8 + 8 + 8 + 8 + 32 + 32 + 32 + 32 + 32 + 32 + 32 + 64 + 24 + 97 + 1 + 8 + 16 + 16
+const SWAP_INFO_SIZE: usize = 461;
 impl Pack for SwapInfo {
     const LEN: usize = SWAP_INFO_SIZE;
 
@@ -193,10 +198,6 @@ impl Pack for SwapInfo {
             is_initialized,
             is_paused,
             nonce,
-            initial_amp_factor,
-            target_amp_factor,
-            start_ramp_ts,
-            stop_ramp_ts,
             token_a,
             token_b,
             pool_mint,
@@ -209,17 +210,13 @@ impl Pack for SwapInfo {
             pmm_state,
             is_open_twap,
             block_timestamp_last,
+            cumulative_ticks,
             base_price_cumulative_last,
-            receive_amount,
         ) = array_refs![
             input,
             1,
             1,
             1,
-            8,
-            8,
-            8,
-            8,
             PUBKEY_BYTES,
             PUBKEY_BYTES,
             PUBKEY_BYTES,
@@ -232,25 +229,13 @@ impl Pack for SwapInfo {
             PMMState::LEN,
             1,
             8,
-            16,
+            8,
             16
         ];
         Ok(Self {
-            is_initialized: match is_initialized {
-                [0] => false,
-                [1] => true,
-                _ => return Err(ProgramError::InvalidAccountData),
-            },
-            is_paused: match is_paused {
-                [0] => false,
-                [1] => true,
-                _ => return Err(ProgramError::InvalidAccountData),
-            },
+            is_initialized: unpack_bool(is_initialized)?,
+            is_paused: unpack_bool(is_paused)?,
             nonce: nonce[0],
-            initial_amp_factor: u64::from_le_bytes(*initial_amp_factor),
-            target_amp_factor: u64::from_le_bytes(*target_amp_factor),
-            start_ramp_ts: i64::from_le_bytes(*start_ramp_ts),
-            stop_ramp_ts: i64::from_le_bytes(*stop_ramp_ts),
             token_a: Pubkey::new_from_array(*token_a),
             token_b: Pubkey::new_from_array(*token_b),
             pool_mint: Pubkey::new_from_array(*pool_mint),
@@ -261,10 +246,10 @@ impl Pack for SwapInfo {
             fees: Fees::unpack_from_slice(fees)?,
             rewards: Rewards::unpack_from_slice(rewards)?,
             pmm_state: PMMState::unpack_from_slice(pmm_state)?,
-            is_open_twap: u8::from_le_bytes(*is_open_twap),
-            block_timestamp_last: i64::from_le_bytes(*block_timestamp_last),
+            is_open_twap: unpack_bool(is_open_twap)?,
+            block_timestamp_last: u64::from_le_bytes(*block_timestamp_last),
+            cumulative_ticks: u64::from_le_bytes(*cumulative_ticks),
             base_price_cumulative_last: unpack_decimal(base_price_cumulative_last),
-            receive_amount: unpack_decimal(receive_amount),
         })
     }
 
@@ -275,10 +260,6 @@ impl Pack for SwapInfo {
             is_initialized,
             is_paused,
             nonce,
-            initial_amp_factor,
-            target_amp_factor,
-            start_ramp_ts,
-            stop_ramp_ts,
             token_a,
             token_b,
             pool_mint,
@@ -291,17 +272,13 @@ impl Pack for SwapInfo {
             pmm_state,
             is_open_twap,
             block_timestamp_last,
+            cumulative_ticks,
             base_price_cumulative_last,
-            receive_amount,
         ) = mut_array_refs![
             output,
             1,
             1,
             1,
-            8,
-            8,
-            8,
-            8,
             PUBKEY_BYTES,
             PUBKEY_BYTES,
             PUBKEY_BYTES,
@@ -314,16 +291,12 @@ impl Pack for SwapInfo {
             PMMState::LEN,
             1,
             8,
-            16,
+            8,
             16
         ];
-        is_initialized[0] = self.is_initialized as u8;
-        is_paused[0] = self.is_paused as u8;
-        nonce[0] = self.nonce;
-        *initial_amp_factor = self.initial_amp_factor.to_le_bytes();
-        *target_amp_factor = self.target_amp_factor.to_le_bytes();
-        *start_ramp_ts = self.start_ramp_ts.to_le_bytes();
-        *stop_ramp_ts = self.stop_ramp_ts.to_le_bytes();
+        pack_bool(self.is_initialized, is_initialized);
+        pack_bool(self.is_paused, is_paused);
+        *nonce = self.nonce.to_le_bytes();
         token_a.copy_from_slice(self.token_a.as_ref());
         token_b.copy_from_slice(self.token_b.as_ref());
         pool_mint.copy_from_slice(self.pool_mint.as_ref());
@@ -334,10 +307,10 @@ impl Pack for SwapInfo {
         self.fees.pack_into_slice(&mut fees[..]);
         self.rewards.pack_into_slice(&mut rewards[..]);
         self.pmm_state.pack_into_slice(&mut pmm_state[..]);
-        *is_open_twap = self.is_open_twap.to_le_bytes();
+        pack_bool(self.is_open_twap, is_open_twap);
         *block_timestamp_last = self.block_timestamp_last.to_le_bytes();
+        *cumulative_ticks = self.cumulative_ticks.to_le_bytes();
         pack_decimal(self.base_price_cumulative_last, base_price_cumulative_last);
-        pack_decimal(self.receive_amount, receive_amount);
     }
 }
 
@@ -412,7 +385,7 @@ impl LiquidityProvider {
     /// Withdraw liquidity and remove it from deposits if zeroed out
     pub fn withdraw(&mut self, withdraw_amount: u64, position_index: usize) -> ProgramResult {
         let position = &mut self.positions[position_index];
-        if withdraw_amount == position.liquidity_amount {
+        if withdraw_amount == position.liquidity_amount && position.rewards_owed == 0 {
             self.positions.remove(position_index);
         } else {
             position.withdraw(withdraw_amount)?;
@@ -638,6 +611,33 @@ impl Pack for LiquidityProvider {
             owner: Pubkey::new(owner),
             positions,
         })
+    }
+}
+
+/// Pack decimal
+pub fn pack_decimal(decimal: Decimal, dst: &mut [u8; 16]) {
+    *dst = decimal
+        .to_scaled_val()
+        .expect("Decimal cannot be packed")
+        .to_le_bytes();
+}
+
+/// Unpack decimal
+pub fn unpack_decimal(src: &[u8; 16]) -> Decimal {
+    Decimal::from_scaled_val(u128::from_le_bytes(*src))
+}
+
+/// Pack boolean
+pub fn pack_bool(boolean: bool, dst: &mut [u8; 1]) {
+    *dst = (boolean as u8).to_le_bytes()
+}
+
+/// Unpack boolean
+pub fn unpack_bool(src: &[u8; 1]) -> Result<bool, ProgramError> {
+    match u8::from_le_bytes(*src) {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(ProgramError::InvalidAccountData),
     }
 }
 

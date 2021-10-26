@@ -1,10 +1,5 @@
 //! Utility methods
 
-use solana_program::{program_pack::Pack, pubkey::Pubkey};
-use spl_token::state::Account;
-
-use crate::error::SwapError;
-
 /// swap directions - sell base
 pub const SWAP_DIRECTION_SELL_BASE: u8 = 0;
 
@@ -28,17 +23,6 @@ pub const CURVE_PMM: u8 = 0;
 
 /// curve mode - amm
 pub const CURVE_AMM: u8 = 1;
-
-/// Calculates the authority id by generating a program address.
-pub fn authority_id(program_id: &Pubkey, my_info: &Pubkey, nonce: u8) -> Result<Pubkey, SwapError> {
-    Pubkey::create_program_address(&[&my_info.to_bytes()[..32], &[nonce]], program_id)
-        .or(Err(SwapError::InvalidProgramAddress))
-}
-
-/// Unpacks a spl_token `Account`.
-pub fn unpack_token_account(data: &[u8]) -> Result<Account, SwapError> {
-    Account::unpack(data).map_err(|_| SwapError::ExpectedAccount)
-}
 
 /// check if the buf is consist of zero
 pub fn is_zero(buf: &[u8]) -> bool {

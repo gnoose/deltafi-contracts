@@ -24,7 +24,7 @@ construct_uint! {
 }
 
 /// Large decimal values, precise to 18 digits
-#[derive(Clone, Copy, Debug, Default, PartialEq, PartialOrd, Eq, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Eq, Ord)]
 pub struct Decimal(pub U192);
 
 impl Decimal {
@@ -36,6 +36,11 @@ impl Decimal {
     /// Zero
     pub fn zero() -> Self {
         Self(U192::zero())
+    }
+
+    /// Check if zero
+    pub fn is_zero(&self) -> bool {
+        self.0.is_zero()
     }
 
     // OPTIMIZE: use const slice when fixed in BPF toolchain
@@ -124,6 +129,12 @@ impl fmt::Display for Decimal {
             scaled_val.insert(scaled_val.len() - SCALE, '.');
         }
         f.write_str(&scaled_val)
+    }
+}
+
+impl Default for Decimal {
+    fn default() -> Self {
+        Self::zero()
     }
 }
 

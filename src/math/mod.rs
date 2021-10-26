@@ -47,16 +47,3 @@ pub trait TryMul<RHS>: Sized {
     /// Multiply
     fn try_mul(self, rhs: RHS) -> Result<Self, ProgramError>;
 }
-
-/// Pack decimal
-pub fn pack_decimal(decimal: Decimal, dst: &mut [u8; 16]) {
-    *dst = decimal
-        .to_scaled_val()
-        .expect("Decimal cannot be packed")
-        .to_le_bytes();
-}
-
-/// Unpack decimal
-pub fn unpack_decimal(src: &[u8; 16]) -> Decimal {
-    Decimal::from_scaled_val(u128::from_le_bytes(*src))
-}

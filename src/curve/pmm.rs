@@ -1,7 +1,11 @@
 //! Proactive Market Maker from dodo
 
 use super::*;
-use crate::{error::SwapError, math::Decimal};
+use crate::{
+    error::SwapError,
+    math::Decimal,
+    state::{pack_decimal, unpack_decimal},
+};
 
 use arrayref::{array_mut_ref, array_ref, array_refs, mut_array_refs};
 use solana_program::{
@@ -178,7 +182,8 @@ impl PMMState {
     }
 
     /// Get mid prixe of the current PMM status
-    pub fn get_mid_price(&self) -> Result<Decimal, ProgramError> {
+    pub fn get_mid_price(&mut self) -> Result<Decimal, ProgramError> {
+        self.adjust_target()?;
         match self.r {
             RState::BelowOne => {
                 let r = self
@@ -289,15 +294,22 @@ impl PMMState {
         let base_input = base_balance.try_sub(self.base_reserve)?;
         let quote_input = quote_balance.try_sub(self.quote_reserve)?;
 
+        if base_input.is_zero() {
+            return Err(SwapError::NoBaseInput.into());
+        }
+
         let shares = if total_supply == 0 {
-            let shares = match self.market_price.try_mul(base_balance)?.cmp(&quote_balance) {
-                Ordering::Greater => quote_balance.try_div(self.market_price)?,
-                _ => base_balance,
+            // case 1. initial supply
+            let shares = if self.market_price.try_mul(base_balance)? > quote_balance {
+                quote_balance.try_div(self.market_price)?
+            } else {
+                base_balance
             };
             self.base_target = shares;
             self.quote_target = shares.try_mul(self.market_price)?;
             shares
         } else if self.base_reserve > Decimal::zero() && self.quote_reserve > Decimal::zero() {
+            // case 2. normal case
             let base_input_ratio = base_input.try_div(self.base_reserve)?;
             let quote_input_ratio = quote_input.try_div(self.quote_reserve)?;
             let mint_ratio = base_input_ratio.min(quote_input_ratio);
@@ -321,6 +333,43 @@ impl PMMState {
         shares.try_floor_u64()
     }
 
+    /// Sell shares [round down]
+    pub fn sell_shares(
+        &mut self,
+        share_amount: u64,
+        base_min_amount: u64,
+        quote_min_amount: u64,
+        total_supply: u64,
+    ) -> Result<(u64, u64), ProgramError> {
+        let base_balance = self.base_reserve;
+        let quote_balance = self.quote_reserve;
+
+        let base_amount = base_balance.try_mul(share_amount)?.try_div(total_supply)?;
+        let quote_amount = quote_balance.try_mul(share_amount)?.try_div(total_supply)?;
+
+        self.base_target = self.base_target.try_sub(
+            self.base_target
+                .try_mul(share_amount)?
+                .try_div(total_supply)?,
+        )?;
+        self.quote_target = self.quote_target.try_sub(
+            self.quote_target
+                .try_mul(share_amount)?
+                .try_div(total_supply)?,
+        )?;
+
+        if base_amount < Decimal::from(base_min_amount)
+            || quote_amount < Decimal::from(quote_min_amount)
+        {
+            return Err(SwapError::WithdrawNotEnough.into());
+        }
+
+        self.base_reserve = self.base_reserve.try_sub(base_amount)?;
+        self.quote_reserve = self.quote_reserve.try_sub(quote_amount)?;
+
+        Ok((base_amount.try_floor_u64()?, quote_amount.try_floor_u64()?))
+    }
+
     /// Calculate deposit amount according to the reserve amount
     ///      a_reserve = 0 & b_reserve = 0 => (a_amount, b_amount)
     ///      a_reserve > 0 & b_reserve = 0 => (a_amount, 0)
@@ -334,7 +383,7 @@ impl PMMState {
         let quote_in_amount = Decimal::from(quote_in_amount);
 
         let (base_in_amount, quote_in_amount) =
-            if self.base_reserve == Decimal::zero() && self.quote_reserve == Decimal::zero() {
+            if self.base_reserve.is_zero() && self.quote_reserve.is_zero() {
                 let shares = match self
                     .market_price
                     .try_mul(base_in_amount)?
@@ -348,15 +397,16 @@ impl PMMState {
                 let base_increase_ratio = base_in_amount.try_div(self.base_reserve)?;
                 let quote_increase_ratio = quote_in_amount.try_div(self.quote_reserve)?;
 
-                match base_increase_ratio.cmp(&quote_increase_ratio) {
-                    Ordering::Less => (
+                if base_increase_ratio < quote_increase_ratio {
+                    (
                         base_in_amount,
                         self.quote_reserve.try_mul(base_increase_ratio)?,
-                    ),
-                    _ => (
+                    )
+                } else {
+                    (
                         self.base_reserve.try_mul(quote_increase_ratio)?,
                         quote_in_amount,
-                    ),
+                    )
                 }
             } else {
                 (base_in_amount, quote_in_amount)

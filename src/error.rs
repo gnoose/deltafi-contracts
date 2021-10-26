@@ -137,6 +137,15 @@ pub enum SwapError {
     /// Insufficient claim amount
     #[error("Insufficient claim amount")]
     InsufficientClaimAmount,
+    /// Incorrect token program ID
+    #[error("Incorrect token program ID")]
+    IncorrectTokenProgramId,
+    /// No base input
+    #[error("No base input")]
+    NoBaseInput,
+    /// Withdraw tokens not enough
+    #[error("Withdraw not enough")]
+    WithdrawNotEnough,
 }
 impl From<SwapError> for ProgramError {
     fn from(e: SwapError) -> Self {

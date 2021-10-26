@@ -76,9 +76,10 @@ impl Rewards {
             .try_mul(self.trade_reward_numerator)?
             .try_div(self.trade_reward_denominator)?;
 
-        Ok(match c_reward.cmp(&Decimal::from(self.trade_reward_cap)) {
-            Ordering::Greater => self.trade_reward_cap,
-            _ => c_reward.try_floor_u64()?,
+        Ok(if c_reward > Decimal::from(self.trade_reward_cap) {
+            self.trade_reward_cap
+        } else {
+            c_reward.try_floor_u64()?
         })
     }
 

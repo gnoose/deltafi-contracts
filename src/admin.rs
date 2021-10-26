@@ -2,6 +2,7 @@
 
 use solana_program::{
     account_info::{next_account_info, AccountInfo},
+    clock::UnixTimestamp,
     entrypoint::ProgramResult,
     msg,
     program_error::ProgramError,
@@ -11,15 +12,15 @@ use solana_program::{
 };
 
 use crate::{
-    bn::U256,
-    curve_1::{StableSwap, MAX_AMP, MIN_AMP, MIN_RAMP_DURATION, ZERO_TS},
     error::SwapError,
     fees::Fees,
-    instruction::{AdminInitializeData, AdminInstruction, RampAData},
+    instruction::{AdminInitializeData, AdminInstruction},
+    processor::{authority_id, unpack_token_account},
     rewards::Rewards,
     state::{ConfigInfo, SwapInfo},
-    utils,
 };
+
+const ZERO_TS: UnixTimestamp = 0;
 
 /// Process admin instruction
 pub fn process_admin_instruction(
@@ -29,24 +30,9 @@ pub fn process_admin_instruction(
 ) -> ProgramResult {
     let instruction = AdminInstruction::unpack(input)?;
     match instruction {
-        AdminInstruction::Initialize(AdminInitializeData {
-            amp_factor,
-            fees,
-            rewards,
-        }) => {
+        AdminInstruction::Initialize(AdminInitializeData { fees, rewards }) => {
             msg!("AdminInstruction : Initialization");
-            initialize(program_id, amp_factor, &fees, &rewards, accounts)
-        }
-        AdminInstruction::RampA(RampAData {
-            target_amp,
-            stop_ramp_ts,
-        }) => {
-            msg!("Instruction : RampA");
-            ramp_a(program_id, target_amp, stop_ramp_ts, accounts)
-        }
-        AdminInstruction::StopRampA => {
-            msg!("Instruction: StopRampA");
-            stop_ramp_a(program_id, accounts)
+            initialize(program_id, &fees, &rewards, accounts)
         }
         AdminInstruction::Pause => {
             msg!("Instruction: Pause");
@@ -95,14 +81,12 @@ fn is_admin(expected_admin_key: &Pubkey, admin_account_info: &AccountInfo) -> Pr
 #[inline(never)]
 fn initialize(
     program_id: &Pubkey,
-    amp_factor: u64,
     fees: &Fees,
     rewards: &Rewards,
     accounts: &[AccountInfo],
 ) -> ProgramResult {
     let account_info_iter = &mut accounts.iter();
     let config_info = next_account_info(account_info_iter)?;
-    let admin_info = next_account_info(account_info_iter)?;
 
     let mut config = ConfigInfo::unpack_unchecked(&config_info.data.borrow())?;
     if config.is_initialized {
@@ -112,129 +96,13 @@ fn initialize(
         return Err(SwapError::InvalidOwner.into());
     }
 
-    if !(MIN_AMP..=MAX_AMP).contains(&amp_factor) {
-        return Err(SwapError::InvalidInput.into());
-    }
-
     config.is_initialized = true;
-    config.amp_factor = amp_factor;
-    config.admin_key = *admin_info.key;
     config.future_admin_key = Pubkey::default();
     config.future_admin_deadline = ZERO_TS;
     config.deltafi_mint = Pubkey::default();
     config.fees = Fees::new(fees);
     config.rewards = Rewards::new(rewards);
     ConfigInfo::pack(config, &mut config_info.data.borrow_mut())?;
-    Ok(())
-}
-
-/// Ramp to future a
-#[inline(never)]
-fn ramp_a(
-    program_id: &Pubkey,
-    target_amp: u64,
-    stop_ramp_ts: i64,
-    accounts: &[AccountInfo],
-) -> ProgramResult {
-    let account_info_iter = &mut accounts.iter();
-    let config_info = next_account_info(account_info_iter)?;
-    let swap_info = next_account_info(account_info_iter)?;
-    let admin_info = next_account_info(account_info_iter)?;
-    let clock_sysvar_info = next_account_info(account_info_iter)?;
-
-    if !(MIN_AMP..=MAX_AMP).contains(&target_amp) {
-        return Err(SwapError::InvalidInput.into());
-    }
-    let config = ConfigInfo::unpack(&config_info.data.borrow())?;
-    is_admin(&config.admin_key, admin_info)?;
-
-    let mut token_swap = SwapInfo::unpack(&swap_info.data.borrow())?;
-    if swap_info.owner != program_id {
-        return Err(SwapError::InvalidOwner.into());
-    }
-    let clock = Clock::from_account_info(clock_sysvar_info)?;
-    let ramp_lock_ts = token_swap
-        .start_ramp_ts
-        .checked_add(MIN_RAMP_DURATION)
-        .ok_or(SwapError::CalculationFailure)?;
-    if clock.unix_timestamp < ramp_lock_ts {
-        return Err(SwapError::RampLocked.into());
-    }
-    let min_ramp_ts = clock
-        .unix_timestamp
-        .checked_add(MIN_RAMP_DURATION)
-        .ok_or(SwapError::CalculationFailure)?;
-    if stop_ramp_ts < min_ramp_ts {
-        return Err(SwapError::InsufficientRampTime.into());
-    }
-
-    const MAX_A_CHANGE: u64 = 10;
-    let invariant = StableSwap::new(
-        token_swap.initial_amp_factor,
-        token_swap.target_amp_factor,
-        clock.unix_timestamp,
-        token_swap.start_ramp_ts,
-        token_swap.stop_ramp_ts,
-    );
-    let current_amp = U256::to_u64(
-        invariant
-            .compute_amp_factor()
-            .ok_or(SwapError::CalculationFailure)?,
-    )?;
-    if target_amp < current_amp {
-        if current_amp > target_amp * MAX_A_CHANGE {
-            // target_amp too low
-            return Err(SwapError::InvalidInput.into());
-        }
-    } else if target_amp > current_amp * MAX_A_CHANGE {
-        // target_amp too high
-        return Err(SwapError::InvalidInput.into());
-    }
-
-    token_swap.initial_amp_factor = current_amp;
-    token_swap.target_amp_factor = target_amp;
-    token_swap.start_ramp_ts = clock.unix_timestamp;
-    token_swap.stop_ramp_ts = stop_ramp_ts;
-    SwapInfo::pack(token_swap, &mut swap_info.data.borrow_mut())?;
-    Ok(())
-}
-
-/// Stop ramp a
-#[inline(never)]
-fn stop_ramp_a(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
-    let account_info_iter = &mut accounts.iter();
-    let config_info = next_account_info(account_info_iter)?;
-    let swap_info = next_account_info(account_info_iter)?;
-    let admin_info = next_account_info(account_info_iter)?;
-    let clock_sysvar_info = next_account_info(account_info_iter)?;
-
-    let config = ConfigInfo::unpack(&config_info.data.borrow())?;
-    is_admin(&config.admin_key, admin_info)?;
-
-    let mut token_swap = SwapInfo::unpack(&swap_info.data.borrow())?;
-    if swap_info.owner != program_id {
-        return Err(SwapError::InvalidOwner.into());
-    }
-    let clock = Clock::from_account_info(clock_sysvar_info)?;
-    let invariant = StableSwap::new(
-        token_swap.initial_amp_factor,
-        token_swap.target_amp_factor,
-        clock.unix_timestamp,
-        token_swap.start_ramp_ts,
-        token_swap.stop_ramp_ts,
-    );
-    let current_amp = U256::to_u64(
-        invariant
-            .compute_amp_factor()
-            .ok_or(SwapError::CalculationFailure)?,
-    )?;
-
-    token_swap.initial_amp_factor = current_amp;
-    token_swap.target_amp_factor = current_amp;
-    token_swap.start_ramp_ts = clock.unix_timestamp;
-    token_swap.stop_ramp_ts = clock.unix_timestamp;
-    // now (current_ts < stop_ramp_ts) is always False, compute_amp_factor should return target_amp
-    SwapInfo::pack(token_swap, &mut swap_info.data.borrow_mut())?;
     Ok(())
 }
 
@@ -285,6 +153,7 @@ fn set_fee_account(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResu
     let authority_info = next_account_info(account_info_iter)?;
     let admin_info = next_account_info(account_info_iter)?;
     let new_fee_account_info = next_account_info(account_info_iter)?;
+    let token_program_info = next_account_info(account_info_iter)?;
 
     let config = ConfigInfo::unpack(&config_info.data.borrow())?;
     is_admin(&config.admin_key, admin_info)?;
@@ -292,10 +161,10 @@ fn set_fee_account(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResu
     if swap_info.owner != program_id {
         return Err(SwapError::InvalidOwner.into());
     }
-    if *authority_info.key != utils::authority_id(program_id, swap_info.key, token_swap.nonce)? {
+    if *authority_info.key != authority_id(program_id, swap_info.key, token_swap.nonce)? {
         return Err(SwapError::InvalidProgramAddress.into());
     }
-    let new_admin_fee_account = utils::unpack_token_account(&new_fee_account_info.data.borrow())?;
+    let new_admin_fee_account = unpack_token_account(new_fee_account_info, token_program_info.key)?;
     if *authority_info.key != new_admin_fee_account.owner {
         return Err(SwapError::InvalidOwner.into());
     }

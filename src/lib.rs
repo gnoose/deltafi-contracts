@@ -5,14 +5,14 @@
 pub mod admin;
 pub mod bn;
 pub mod curve;
-pub mod curve_1;
+// pub mod curve_1;
 pub mod entrypoint;
 pub mod error;
 pub mod fees;
 pub mod instruction;
 pub mod math;
 pub mod math2;
-pub mod pool_converter;
+// pub mod pool_converter;
 pub mod processor;
 pub mod pyth;
 pub mod rewards;
