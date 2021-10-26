@@ -9,7 +9,6 @@ use solana_program::{
 use crate::error::SwapError;
 
 /// Fees struct
-#[repr(C)]
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Fees {
     /// Admin trade fee numerator

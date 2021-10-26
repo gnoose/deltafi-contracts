@@ -1,20 +1,14 @@
 //! Program rewards
 
-use std::cmp::Ordering;
-
 use arrayref::{array_mut_ref, array_ref, array_refs, mut_array_refs};
 use solana_program::{
     program_error::ProgramError,
     program_pack::{IsInitialized, Pack, Sealed},
 };
 
-use crate::{
-    bn::{FixedU64, U256},
-    math::{Decimal, TryDiv, TryMul},
-};
+use crate::math::{Decimal, TryDiv, TryMul};
 
 /// Rewards structure
-#[repr(C)]
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Rewards {
     /// Trade reward numerator
@@ -41,34 +35,6 @@ impl Rewards {
         }
     }
 
-    /// Calc trade reward amount with [`U256`]
-    pub fn trade_reward_u256(&self, amount: U256) -> Result<U256, ProgramError> {
-        let c_reward = amount
-            .sqrt()?
-            .checked_bn_mul(self.trade_reward_numerator.into())?
-            .checked_floor_div(self.trade_reward_denominator.into())
-            .unwrap();
-
-        match c_reward.cmp(&self.trade_reward_cap.into()) {
-            Ordering::Greater => Ok(U256::from(self.trade_reward_cap)),
-            _ => Ok(c_reward),
-        }
-    }
-
-    /// Calc trade reward amount with [`FixedU64`]
-    pub fn trade_reward_fixed_u64(&self, amount: FixedU64) -> Result<FixedU64, ProgramError> {
-        let c_reward = amount
-            .sqrt()?
-            .checked_mul_floor(FixedU64::new(self.trade_reward_numerator))?
-            .checked_div_floor(FixedU64::new(self.trade_reward_denominator))
-            .unwrap();
-
-        match c_reward.into_real_u64_floor().cmp(&self.trade_reward_cap) {
-            Ordering::Greater => Ok(FixedU64::new(self.trade_reward_cap)),
-            _ => Ok(c_reward),
-        }
-    }
-
     /// Calc trade reward amount with [`u64`]
     pub fn trade_reward_u64(&self, amount: u64) -> Result<u64, ProgramError> {
         let c_reward = Decimal::from(amount)
@@ -81,20 +47,6 @@ impl Rewards {
         } else {
             c_reward.try_floor_u64()?
         })
-    }
-
-    /// Calc lp reward amount with [`U256`]
-    pub fn liquidity_reward_u256(&self, amount: U256) -> Result<U256, ProgramError> {
-        amount
-            .checked_bn_mul(self.liquidity_reward_numerator.into())?
-            .checked_floor_div(self.liquidity_reward_denominator.into())
-    }
-
-    /// Calc lp reward amount with [`FixedU64`]
-    pub fn liquidity_reward_fixed_u64(&self, amount: FixedU64) -> Result<FixedU64, ProgramError> {
-        amount
-            .checked_mul_floor(FixedU64::new(self.liquidity_reward_numerator))?
-            .checked_div_floor(FixedU64::new(self.liquidity_reward_denominator))
     }
 
     /// Calc lp reward amount with [`u64`]
@@ -207,13 +159,8 @@ mod tests {
             let trade_reward_cap = 1_000;
             rewards.trade_reward_cap = trade_reward_cap;
 
-            let expected_trade_reward = U256::from(trade_reward_cap);
-            let trade_reward = rewards.trade_reward_u256(trade_amount.into()).unwrap();
-            assert_eq!(trade_reward, expected_trade_reward);
-            let expected_trade_reward = FixedU64::new(trade_reward_cap.into());
-            let trade_reward = rewards
-                .trade_reward_fixed_u64(FixedU64::new(trade_amount.into()))
-                .unwrap();
+            let expected_trade_reward = trade_reward_cap;
+            let trade_reward = rewards.trade_reward_u64(trade_amount.into()).unwrap();
             assert_eq!(trade_reward, expected_trade_reward);
         }
 
@@ -223,25 +170,15 @@ mod tests {
             rewards.trade_reward_cap = trade_reward_cap;
 
             let expected_trade_reward = 5_000u64;
-            let trade_reward = rewards.trade_reward_u256(trade_amount.into()).unwrap();
-            assert_eq!(trade_reward, U256::from(expected_trade_reward));
-            let trade_reward = rewards
-                .trade_reward_fixed_u64(FixedU64::new(trade_amount.into()))
-                .unwrap();
-            assert_eq!(trade_reward, FixedU64::new(expected_trade_reward.into()));
+            let trade_reward = rewards.trade_reward_u64(trade_amount.into()).unwrap();
+            assert_eq!(trade_reward, expected_trade_reward);
         }
 
         // LP reward calc
         {
             let expected_lp_reward = 10u64;
-            let lp_reward = rewards
-                .liquidity_reward_u256(liquidity_amount.into())
-                .unwrap();
-            assert_eq!(lp_reward, U256::from(expected_lp_reward));
-            let lp_reward = rewards
-                .liquidity_reward_fixed_u64(FixedU64::new(liquidity_amount.into()))
-                .unwrap();
-            assert_eq!(lp_reward, FixedU64::new(expected_lp_reward.into()));
+            let lp_reward = rewards.liquidity_reward_u64(liquidity_amount).unwrap();
+            assert_eq!(lp_reward, expected_lp_reward);
         }
     }
 }

@@ -906,15 +906,14 @@ fn process_refresh_liquidity_obligation(
 ) -> ProgramResult {
     let account_info_iter = &mut accounts.iter();
     let swap_info = next_account_info(account_info_iter)?;
-    let clock_sysvar_info = next_account_info(account_info_iter)?;
+    let clock = &Clock::from_account_info(next_account_info(account_info_iter)?)?;
 
-    let mut token_swap = SwapInfo::unpack(&swap_info.data.borrow())?;
     if swap_info.owner != program_id {
         msg!("Swap account is not owned by swap token program");
         return Err(SwapError::InvalidAccountOwner.into());
     }
 
-    let clock = Clock::from_account_info(clock_sysvar_info)?;
+    let mut token_swap = SwapInfo::unpack(&swap_info.data.borrow())?;
 
     let lp_price = token_swap.pmm_state.get_mid_price()?;
     let _deltafi_price = Decimal::one().try_div(10)?; // Temp value

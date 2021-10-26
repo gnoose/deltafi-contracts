@@ -14,13 +14,12 @@ use solana_program::{
 
 use crate::{
     error::SwapError,
-    fees::Fees,
     instruction::{AdminInitializeData, AdminInstruction},
     processor::{
         assert_rent_exempt, assert_uninitialized, authority_id, unpack_mint, unpack_token_account,
     },
-    rewards::Rewards,
     state::{ConfigInfo, SwapInfo, PROGRAM_VERSION},
+    state::{Fees, Rewards},
 };
 
 const ZERO_TS: UnixTimestamp = 0;

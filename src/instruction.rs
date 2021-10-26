@@ -13,7 +13,10 @@ use solana_program::{
     sysvar::clock,
 };
 
-use crate::{error::SwapError, fees::Fees, rewards::Rewards};
+use crate::{
+    error::SwapError,
+    state::{Fees, Rewards},
+};
 
 /// Instruction Type
 #[repr(C)]
