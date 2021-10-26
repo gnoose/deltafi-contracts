@@ -5,7 +5,15 @@ use {
     std::cmp::Ordering,
 };
 
-/// Excellent calculate square root of the given number
+/// Safe and secure square root computation function.
+///
+/// # Arguments
+///
+/// * radicand - Nubmer to calculate square root.
+///
+/// # Return value
+///
+/// None for negative, zero for zero and square root for postive.
 pub fn sqrt<T: PrimInt + CheckedShl + CheckedShr>(radicand: T) -> Option<T> {
     match radicand.cmp(&T::zero()) {
         Ordering::Less => return None,             // fail for less than 0
@@ -50,6 +58,21 @@ mod tests {
         let test_roots = [0, u64::MAX];
         for i in test_roots.iter() {
             check_square_root(*i as u128);
+        }
+    }
+
+    #[test]
+    fn test_square_root_negative() {
+        let neg_num: i128 = -1;
+        assert_eq!(sqrt(neg_num).is_none(), true);
+    }
+
+    #[test]
+    fn test_square_root_exact() {
+        let test_nums: [u128; 7] = [0, 1, 4, 5, 9, 34028074089, u128::MAX];
+        let test_roots: [u128; 7] = [0, 1, 2, 2, 3, 184467, 18446744073709552000];
+        for (idx, test_num) in test_nums.iter().enumerate() {
+            assert_eq!(sqrt(*test_num).unwrap() as u128, test_roots[idx]);
         }
     }
 

@@ -26,9 +26,14 @@ Unit tests contained within the project can be built via:
 $ ./do.sh test
 ```
 
+Run one exact test within the project can be built via:
+```bash
+./do.sh exact-test math::approximations::tests::test_square_root
+```
+
 Running end-to-end tests:
 
-```
+```bash
 $ ./do.sh e2e-test
 ```
 

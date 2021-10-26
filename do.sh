@@ -87,6 +87,9 @@ perform_action() {
     test)
             cargo test-bpf ${@:2}
         ;;
+    exact-test)
+            cargo test ${@:2} -- --exact
+        ;;
     update)
         (
             exit_code=0
