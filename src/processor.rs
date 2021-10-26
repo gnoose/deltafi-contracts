@@ -1054,6 +1054,12 @@ fn get_pyth_price(pyth_price_info: &AccountInfo, clock: &Clock) -> Result<Decima
         SwapError::InvalidOracleConfig
     })?;
 
+    // if conf / price > 1% -> volative, do not use pyth price?
+    if pyth_price.agg.conf > 0 && price / pyth_price.agg.conf < 100u64 {
+        msg!("Pyth suggests market is volatile");
+        return Err(SwapError::InvalidOracleConfig.into());
+    }
+
     let market_price = if pyth_price.expo >= 0 {
         let exponent = pyth_price
             .expo
