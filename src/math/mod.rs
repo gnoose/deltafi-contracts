@@ -47,3 +47,17 @@ pub trait TryMul<RHS>: Sized {
     /// Multiply
     fn try_mul(self, rhs: RHS) -> Result<Self, ProgramError>;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_public_constants() {
+        let base_num: u64 = 10;
+        let base_scale: u32 = SCALE as u32;
+        assert_eq!(base_num.pow(base_scale), WAD);
+        assert_eq!(base_num.pow(base_scale) / 2, HALF_WAD);
+        assert_eq!(base_num.pow(base_scale - 2), PERCENT_SCALER);
+    }
+}

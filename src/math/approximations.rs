@@ -70,7 +70,7 @@ mod tests {
     #[test]
     fn test_square_root_exact() {
         let test_nums: [u128; 7] = [0, 1, 4, 5, 9, 34028074089, u128::MAX];
-        let test_roots: [u128; 7] = [0, 1, 2, 2, 3, 184467, 18446744073709552000];
+        let test_roots: [u128; 7] = [0, 1, 2, 2, 3, 184467, 18446744073709551615];
         for (idx, test_num) in test_nums.iter().enumerate() {
             assert_eq!(sqrt(*test_num).unwrap() as u128, test_roots[idx]);
         }
