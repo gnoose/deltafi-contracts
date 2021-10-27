@@ -16,7 +16,7 @@ pub fn default_slop() -> Decimal {
 }
 
 #[cfg(test)]
-/// Mid Price for testing
+/// Market Price for testing
 pub fn default_market_price() -> Decimal {
     Decimal::from(100u64)
 }
