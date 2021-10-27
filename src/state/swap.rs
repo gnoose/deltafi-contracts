@@ -226,7 +226,7 @@ mod tests {
         let rewards = DEFAULT_TEST_REWARDS;
         let pmm_state = PMMState::new(PMMState {
             market_price: default_market_price(),
-            slop: default_slop().unwrap(),
+            slop: default_slop(),
             base_target: Decimal::zero(),
             quote_target: Decimal::zero(),
             base_reserve: Decimal::zero(),

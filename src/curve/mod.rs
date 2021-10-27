@@ -10,8 +10,8 @@ use crate::math::*;
 
 #[cfg(test)]
 /// Slope Value for testing
-pub fn default_slop() -> Result<Decimal, solana_program::program_error::ProgramError> {
-    Ok(Decimal::one().try_mul(5)?.try_div(10)?)
+pub fn default_slop() -> Decimal {
+    Decimal::from_scaled_val(HALF_WAD as u128)
 }
 
 #[cfg(test)]
