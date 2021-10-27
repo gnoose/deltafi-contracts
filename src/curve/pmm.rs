@@ -124,7 +124,7 @@ impl PMMState {
     }
 
     fn r_bellow_sell_quote_token(&self, quote_amount: Decimal) -> Result<Decimal, ProgramError> {
-        general_integrate(
+        get_target_amount(
             self.quote_target,
             self.quote_reserve.try_add(quote_amount)?,
             self.quote_reserve,
@@ -136,7 +136,7 @@ impl PMMState {
     // ================================ R > 1 case ====================================
 
     fn r_above_sell_base_token(&self, base_amount: Decimal) -> Result<Decimal, ProgramError> {
-        general_integrate(
+        get_target_amount(
             self.base_target,
             self.base_reserve.try_add(base_amount)?,
             self.base_reserve,

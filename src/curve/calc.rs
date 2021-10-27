@@ -8,26 +8,44 @@ use crate::{
 };
 use solana_program::program_error::ProgramError;
 
-/// Integrate dodo curve from V1 to V2
-/// require V0>=V1>=V2>0
-/// res = (1-k)i(V1-V2)+ikV0*V0(1/V2-1-V1)
-/// let V1-V2=delta
-/// res = i*delta*(1-k+k(V0^2/V1/V2))
-/// support k=1 & k=0 case
-pub fn general_integrate(
-    v0: Decimal,
-    v1: Decimal,
-    v2: Decimal,
-    i: Decimal,
-    k: Decimal,
+/// General integrate function.
+///
+/// target_amount = market_price * quote_amount * (1 - slope
+///         + slope * (target_reserve^2 / future_reserve / current_reserve))
+/// where quote_amount = future_reserve - current_reserve.
+///
+/// # Arguments
+///
+/// * target_reserve - initial reserve position to track divergent loss.
+/// * future_reserve - reserve position after the current quoted trade.
+/// * current_reserve - current reserve position.
+/// * market price - fair market price determined by internal and external oracle.
+/// * slope - the higher the curve slope is, the bigger the price splippage.
+///
+/// # Return value
+///
+/// target amount determined by the pricing function.
+pub fn get_target_amount(
+    target_reserve: Decimal,
+    future_reserve: Decimal,
+    current_reserve: Decimal,
+    market_price: Decimal,
+    slope: Decimal,
 ) -> Result<Decimal, ProgramError> {
-    let fair_amount = v1.try_sub(v2)?.try_mul(i)?; // i*delta
-    if k.is_zero() {
+    // TODO: add code to enforce target_reserve >= future_reserve >= current_reserve > 0
+    let fair_amount = future_reserve
+        .try_sub(current_reserve)?
+        .try_mul(market_price)?;
+    if slope.is_zero() {
         return Ok(fair_amount);
     }
-    let v0_v0_v1_v2 = v0.try_mul(v0)?.try_div(v1)?.try_div(v2)?;
-    let penalty = v0_v0_v1_v2.try_mul(k)?; // k(V0^2/V1/V2)
-    fair_amount.try_mul(penalty.try_add(Decimal::one())?.try_sub(k)?)
+    // current_reserve should be div_ceil
+    let penalty_ratio = target_reserve
+        .try_mul(target_reserve)?
+        .try_div(future_reserve)?
+        .try_div(current_reserve)?;
+    let penalty = penalty_ratio.try_mul(slope)?;
+    fair_amount.try_mul(penalty.try_add(Decimal::one())?.try_sub(slope)?)
 }
 
 /// i*deltaB = (Q2-Q1)*(1-k+kQ0^2/Q1/Q2)
