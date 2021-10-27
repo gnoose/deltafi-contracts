@@ -295,7 +295,7 @@ impl PMMState {
         let quote_input = quote_balance.try_sub(self.quote_reserve)?;
 
         if base_input.is_zero() {
-            return Err(SwapError::NoBaseInput.into());
+            return Err(SwapError::InsufficientFunds.into());
         }
 
         let shares = if total_supply == 0 {

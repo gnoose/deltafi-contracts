@@ -6,7 +6,6 @@ use std::{convert::TryInto, mem::size_of};
 
 use solana_program::{
     instruction::{AccountMeta, Instruction},
-    msg,
     program_error::ProgramError,
     program_pack::Pack,
     pubkey::{Pubkey, PUBKEY_BYTES},
@@ -147,7 +146,9 @@ pub enum AdminInstruction {
 impl AdminInstruction {
     /// Unpacks a byte buffer into a [AdminInstruction](enum.AdminInstruction.html).
     pub fn unpack(input: &[u8]) -> Result<Self, ProgramError> {
-        let (&tag, rest) = input.split_first().ok_or(SwapError::InvalidInstruction)?;
+        let (&tag, rest) = input
+            .split_first()
+            .ok_or(SwapError::InstructionUnpackError)?;
         Ok(match tag {
             100 => {
                 let (fees, rest) = rest.split_at(Fees::LEN);
@@ -511,7 +512,9 @@ impl SwapInstruction {
             .ok_or(SwapError::InstructionUnpackError)?;
         Ok(match tag {
             0x0 => {
-                let (&nonce, rest) = rest.split_first().ok_or(SwapError::InvalidInstruction)?;
+                let (&nonce, rest) = rest
+                    .split_first()
+                    .ok_or(SwapError::InstructionUnpackError)?;
                 let (slop, rest) = unpack_u64(rest)?;
                 let (mid_price, rest) = unpack_u128(rest)?;
                 let (is_open_twap, _) = unpack_bool(rest)?;
@@ -555,10 +558,7 @@ impl SwapInstruction {
             0x4 => Self::InitializeLiquidityProvider,
             0x5 => Self::ClaimLiquidityRewards,
             0x6 => Self::RefreshLiquidityObligation,
-            _ => {
-                msg!("SwapInstruction cannot be unpakced");
-                return Err(SwapError::InstructionUnpackError.into());
-            }
+            _ => return Err(SwapError::InvalidInstruction.into()),
         })
     }
 

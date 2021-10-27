@@ -7,7 +7,7 @@ use solana_program::{
     pubkey::{Pubkey, PUBKEY_BYTES},
 };
 
-use crate::error::SwapError;
+use crate::{error::SwapError, state::unpack_bool};
 
 use std::convert::TryFrom;
 
@@ -149,13 +149,12 @@ impl LiquidityPosition {
 
     /// Update next claim timestamp
     pub fn update_claim_ts(&mut self) -> ProgramResult {
-        if self.liquidity_amount == 0 {
-            return Err(SwapError::LiquidityPositionEmpty.into());
+        if self.liquidity_amount != 0 {
+            self.next_claim_ts = self
+                .next_claim_ts
+                .checked_add(MIN_CLAIM_PERIOD)
+                .ok_or(SwapError::CalculationFailure)?;
         }
-        self.next_claim_ts = self
-            .next_claim_ts
-            .checked_add(MIN_CLAIM_PERIOD)
-            .ok_or(SwapError::CalculationFailure)?;
         Ok(())
     }
 
@@ -194,7 +193,7 @@ impl LiquidityPosition {
     }
 
     /// Claim rewards owed
-    pub fn claim_rewards(&mut self) -> ProgramResult {
+    pub fn claim_rewards(&mut self) -> Result<u64, ProgramError> {
         if self.rewards_owed == 0 {
             return Err(SwapError::InsufficientClaimAmount.into());
         }
@@ -202,8 +201,9 @@ impl LiquidityPosition {
             .cumulative_interest
             .checked_add(self.rewards_owed)
             .ok_or(SwapError::CalculationFailure)?;
+        let ret = self.rewards_owed;
         self.rewards_owed = 0;
-        Ok(())
+        Ok(ret)
     }
 }
 
@@ -271,11 +271,7 @@ impl Pack for LiquidityProvider {
             LIQUIDITY_POSITION_SIZE * MAX_LIQUIDITY_POSITIONS
         ];
 
-        let is_initialized = match is_initialized {
-            [0] => false,
-            [1] => true,
-            _ => return Err(ProgramError::InvalidAccountData),
-        };
+        let is_initialized = unpack_bool(is_initialized)?;
         let positions_len = u8::from_le_bytes(*positions_len);
         let mut positions = Vec::with_capacity(positions_len as usize + 1);
 
@@ -308,5 +304,133 @@ impl Pack for LiquidityProvider {
             owner: Pubkey::new(owner),
             positions,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::solana_program::clock::Clock;
+
+    #[test]
+    fn test_failures() {
+        let mut position = LiquidityPosition::default();
+
+        position.liquidity_amount = u64::MAX;
+        assert_eq!(
+            position.deposit(100),
+            Err(SwapError::CalculationFailure.into())
+        );
+
+        position.liquidity_amount = 100;
+        assert_eq!(
+            position.withdraw(200),
+            Err(SwapError::InsufficientLiquidity.into())
+        );
+
+        position.liquidity_amount = 100;
+        position.next_claim_ts = i64::MAX;
+        assert_eq!(
+            position.update_claim_ts(),
+            Err(SwapError::CalculationFailure.into())
+        );
+
+        assert_eq!(
+            position.claim_rewards(),
+            Err(SwapError::InsufficientClaimAmount.into())
+        );
+
+        position.cumulative_interest = u64::MAX;
+        position.rewards_owed = 100;
+        assert_eq!(
+            position.claim_rewards(),
+            Err(SwapError::CalculationFailure.into())
+        );
+    }
+
+    #[test]
+    fn test_liquidity_provider_packing() {
+        let is_initialized = true;
+        let owner_key_raw = [1u8; 32];
+        let owner = Pubkey::new_from_array(owner_key_raw);
+
+        let pool_1_key_raw = [2u8; 32];
+        let pool_1 = Pubkey::new_from_array(pool_1_key_raw);
+        let liquidity_amount_1: u64 = 300;
+        let rewards_owed_1: u64 = 100;
+        let rewards_estimated_1: u64 = 40;
+        let cumulative_interest_1: u64 = 1000;
+        let last_update_ts_1 = Clock::clone(&Default::default()).unix_timestamp;
+        let next_claim_ts_1 = last_update_ts_1 + MIN_CLAIM_PERIOD;
+
+        let position_1 = LiquidityPosition {
+            pool: pool_1,
+            liquidity_amount: liquidity_amount_1,
+            rewards_owed: rewards_owed_1,
+            rewards_estimated: rewards_estimated_1,
+            cumulative_interest: cumulative_interest_1,
+            last_update_ts: last_update_ts_1,
+            next_claim_ts: next_claim_ts_1,
+        };
+
+        let pool_2_key_raw = [3u8; 32];
+        let pool_2 = Pubkey::new_from_array(pool_2_key_raw);
+        let liquidity_amount_2: u64 = 500;
+        let rewards_owed_2: u64 = 200;
+        let rewards_estimated_2: u64 = 80;
+        let cumulative_interest_2: u64 = 2000;
+        let last_update_ts_2 = Clock::clone(&Default::default()).unix_timestamp + 300;
+        let next_claim_ts_2 = last_update_ts_2 + MIN_CLAIM_PERIOD;
+
+        let position_2 = LiquidityPosition {
+            pool: pool_2,
+            liquidity_amount: liquidity_amount_2,
+            rewards_owed: rewards_owed_2,
+            rewards_estimated: rewards_estimated_2,
+            cumulative_interest: cumulative_interest_2,
+            last_update_ts: last_update_ts_2,
+            next_claim_ts: next_claim_ts_2,
+        };
+
+        let liquidity_provider = LiquidityProvider {
+            is_initialized,
+            owner,
+            positions: vec![position_1.clone(), position_2.clone()],
+        };
+
+        let mut packed = [0u8; LiquidityProvider::LEN];
+        LiquidityProvider::pack_into_slice(&liquidity_provider, &mut packed);
+        let unpacked = LiquidityProvider::unpack(&packed).unwrap();
+        assert_eq!(liquidity_provider, unpacked);
+
+        let mut packed: Vec<u8> = vec![1];
+        packed.extend_from_slice(&owner_key_raw);
+        packed.extend_from_slice(&(2 as u8).to_le_bytes());
+        packed.extend_from_slice(&pool_1_key_raw);
+        packed.extend_from_slice(&liquidity_amount_1.to_le_bytes());
+        packed.extend_from_slice(&rewards_owed_1.to_le_bytes());
+        packed.extend_from_slice(&rewards_estimated_1.to_le_bytes());
+        packed.extend_from_slice(&cumulative_interest_1.to_le_bytes());
+        packed.extend_from_slice(&last_update_ts_1.to_le_bytes());
+        packed.extend_from_slice(&next_claim_ts_1.to_le_bytes());
+        packed.extend_from_slice(&pool_2_key_raw);
+        packed.extend_from_slice(&liquidity_amount_2.to_le_bytes());
+        packed.extend_from_slice(&rewards_owed_2.to_le_bytes());
+        packed.extend_from_slice(&rewards_estimated_2.to_le_bytes());
+        packed.extend_from_slice(&cumulative_interest_2.to_le_bytes());
+        packed.extend_from_slice(&last_update_ts_2.to_le_bytes());
+        packed.extend_from_slice(&next_claim_ts_2.to_le_bytes());
+
+        packed.extend_from_slice(&[0u8; (MAX_LIQUIDITY_POSITIONS - 2) * LIQUIDITY_POSITION_SIZE]);
+
+        let unpacked = LiquidityProvider::unpack(&packed).unwrap();
+        assert_eq!(liquidity_provider, unpacked);
+
+        let packed = [0u8; LiquidityProvider::LEN];
+        let liquidity_provider: LiquidityProvider = Default::default();
+        let unpack_unchecked = LiquidityProvider::unpack_unchecked(&packed).unwrap();
+        assert_eq!(unpack_unchecked, liquidity_provider);
+        let err = LiquidityProvider::unpack(&packed).unwrap_err();
+        assert_eq!(err, ProgramError::UninitializedAccount);
     }
 }

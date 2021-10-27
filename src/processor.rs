@@ -713,7 +713,7 @@ fn process_withdraw(
     let token_program_id = *token_program_info.key;
     let pool_mint = unpack_mint(pool_mint_info, &token_program_id)?;
     if pool_mint.supply == 0 {
-        return Err(SwapError::EmptyPool.into());
+        return Err(SwapError::EmptySupply.into());
     }
 
     let mut liquidity_provider =
@@ -879,8 +879,7 @@ fn process_claim_liquidity_rewards(program_id: &Pubkey, accounts: &[AccountInfo]
     }
 
     let (position, _) = liquidity_provider.find_position(*swap_info.key)?;
-    let rewards_owed = position.rewards_owed;
-    position.claim_rewards()?;
+    let rewards_owed = position.claim_rewards()?;
 
     LiquidityProvider::pack(
         liquidity_provider,
