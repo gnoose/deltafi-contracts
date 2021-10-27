@@ -1,0 +1,12 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc f667b46e4847e4daba856b78d192e675a3f67bcf5d0cf21b7d4fb74f970d9345 # shrinks to (liquidity_amount, rewards_rate) = (3479000000, 1595)
+cc 20d7d85f3a330e583a85f1ef7fa40a8d808b7c97395dffd51ae9cd9e2e947aa7 # shrinks to liquidity_amount = 888340410000000
+cc f4f57ffa932f29b0b99edd1a1568953c42c8afd5a01254e62a75708e2c4c57d7 # shrinks to liquidity_amount = 43812090000000
+cc af638aae3cfe24313daccab55d33d56bef6e83091cbf276b2ff5327f369defa0 # shrinks to liquidity_amount = 50058000000
+cc 41af96a0b045395cf0742696c2722275ec34d865d9564ac8814336d9b743f57a # shrinks to liquidity_amount = 1000000
+cc ad2ead1ac07c7a51992a94586832bc3a1814423652810319cc29a0a22d2f2075 # shrinks to (liquidity_amount, rewards_rate) = (1000000, 1000)

@@ -238,24 +238,19 @@ mod test {
 
     #[test]
     fn test_decimal() {
-        assert_eq!(Decimal::from(0 as u64), Decimal::zero());
-        assert_eq!(Decimal::from(1 as u64), Decimal::one());
-        assert_eq!(Decimal::from(0 as u64), Decimal::zero());
-        assert_eq!(Decimal::from(1 as u64), Decimal::one());
+        assert_eq!(Decimal::from(0u64), Decimal::zero());
+        assert_eq!(Decimal::from(1u64), Decimal::one());
+        assert_eq!(Decimal::from(0u64), Decimal::zero());
+        assert_eq!(Decimal::from(1u64), Decimal::one());
         assert_eq!(Decimal::from(Rate::zero()), Decimal::zero());
         assert_eq!(Decimal::from(Rate::one()), Decimal::one());
 
-        assert_eq!(Decimal::from_percent(0 as u8), Decimal::zero());
-        assert_eq!(Decimal::from_percent(100 as u8), Decimal::one());
+        assert_eq!(Decimal::from_percent(0u8), Decimal::zero());
+        assert_eq!(Decimal::from_percent(100u8), Decimal::one());
 
+        assert_eq!(Decimal::from_scaled_val(0u128).to_scaled_val().unwrap(), 0);
         assert_eq!(
-            Decimal::from_scaled_val(0 as u128).to_scaled_val().unwrap(),
-            0
-        );
-        assert_eq!(
-            Decimal::from_scaled_val(100 as u128)
-                .to_scaled_val()
-                .unwrap(),
+            Decimal::from_scaled_val(100u128).to_scaled_val().unwrap(),
             100
         );
         assert_eq!(
@@ -264,115 +259,96 @@ mod test {
         );
 
         assert_eq!(Decimal::wad(), U192::from(WAD));
-        assert_eq!(Decimal::one().to_scaled_val().unwrap(), WAD as u128);
         assert_eq!(Decimal::half_wad(), U192::from(HALF_WAD));
         assert_eq!(Decimal::zero().to_scaled_val().unwrap(), 0);
         assert_eq!(Decimal::zero().is_zero(), true);
         assert_eq!(Decimal::one().is_zero(), false);
         assert_eq!(Decimal::default(), Decimal::zero());
 
-        assert_eq!(Decimal::one().try_round_u64().unwrap(), 1 as u64);
-        assert_eq!(Decimal::zero().try_round_u64().unwrap(), 0 as u64);
-        assert_eq!(
-            Decimal::from_scaled_val(1).try_round_u64().unwrap(),
-            0 as u64
-        );
-        assert_eq!(
-            Decimal::from_scaled_val(100).try_round_u64().unwrap(),
-            0 as u64
-        );
+        assert_eq!(Decimal::one().try_round_u64().unwrap(), 1u64);
+        assert_eq!(Decimal::zero().try_round_u64().unwrap(), 0u64);
+        assert_eq!(Decimal::from_scaled_val(1).try_round_u64().unwrap(), 0u64);
+        assert_eq!(Decimal::from_scaled_val(100).try_round_u64().unwrap(), 0u64);
         assert_eq!(
             Decimal::from_scaled_val(HALF_WAD as u128)
                 .try_round_u64()
                 .unwrap(),
-            1 as u64
+            1u64
         );
         assert_eq!(
             Decimal::from_scaled_val(WAD as u128)
                 .try_round_u64()
                 .unwrap(),
-            1 as u64
+            1u64
         );
         assert_eq!(
             Decimal::from_scaled_val(WAD as u128 * 2)
                 .try_round_u64()
                 .unwrap(),
-            2 as u64
+            2u64
         );
 
-        assert_eq!(Decimal::one().try_ceil_u64().unwrap(), 1 as u64);
-        assert_eq!(Decimal::zero().try_ceil_u64().unwrap(), 0 as u64);
-        assert_eq!(
-            Decimal::from_scaled_val(1).try_ceil_u64().unwrap(),
-            1 as u64
-        );
-        assert_eq!(
-            Decimal::from_scaled_val(100).try_ceil_u64().unwrap(),
-            1 as u64
-        );
+        assert_eq!(Decimal::one().try_ceil_u64().unwrap(), 1u64);
+        assert_eq!(Decimal::zero().try_ceil_u64().unwrap(), 0u64);
+        assert_eq!(Decimal::from_scaled_val(1).try_ceil_u64().unwrap(), 1u64);
+        assert_eq!(Decimal::from_scaled_val(100).try_ceil_u64().unwrap(), 1u64);
         assert_eq!(
             Decimal::from_scaled_val(HALF_WAD as u128)
                 .try_ceil_u64()
                 .unwrap(),
-            1 as u64
+            1u64
         );
         assert_eq!(
             Decimal::from_scaled_val(WAD as u128)
                 .try_ceil_u64()
                 .unwrap(),
-            1 as u64
+            1u64
         );
         assert_eq!(
             Decimal::from_scaled_val(WAD as u128 * 2)
                 .try_ceil_u64()
                 .unwrap(),
-            2 as u64
+            2u64
         );
 
-        assert_eq!(Decimal::one().try_floor_u64().unwrap(), 1 as u64);
-        assert_eq!(Decimal::zero().try_floor_u64().unwrap(), 0 as u64);
-        assert_eq!(
-            Decimal::from_scaled_val(1).try_floor_u64().unwrap(),
-            0 as u64
-        );
-        assert_eq!(
-            Decimal::from_scaled_val(100).try_floor_u64().unwrap(),
-            0 as u64
-        );
+        assert_eq!(Decimal::one().try_floor_u64().unwrap(), 1u64);
+        assert_eq!(Decimal::zero().try_floor_u64().unwrap(), 0u64);
+        assert_eq!(Decimal::from_scaled_val(1).try_floor_u64().unwrap(), 0u64);
+        assert_eq!(Decimal::from_scaled_val(100).try_floor_u64().unwrap(), 0u64);
         assert_eq!(
             Decimal::from_scaled_val(HALF_WAD as u128)
                 .try_floor_u64()
                 .unwrap(),
-            0 as u64
+            0u64
         );
         assert_eq!(
             Decimal::from_scaled_val(WAD as u128)
                 .try_floor_u64()
                 .unwrap(),
-            1 as u64
+            1u64
         );
         assert_eq!(
             Decimal::from_scaled_val(WAD as u128 * 2)
                 .try_floor_u64()
                 .unwrap(),
-            2 as u64
+            2u64
         );
 
         assert_eq!(
             Decimal::from_scaled_val(2)
-                .try_mul(Rate::from_scaled_val(2 as u64))
+                .try_mul(Rate::from_scaled_val(2u128))
                 .unwrap(),
             Decimal::zero()
         );
         assert_eq!(
             Decimal::from_scaled_val(0)
-                .try_mul(Rate::from_scaled_val(2 as u64))
+                .try_mul(Rate::from_scaled_val(2u128))
                 .unwrap(),
             Decimal::from_scaled_val(0)
         );
         assert_eq!(
             Decimal::from_scaled_val(2)
-                .try_mul(Rate::from_scaled_val(0 as u64))
+                .try_mul(Rate::from_scaled_val(2u128))
                 .unwrap(),
             Decimal::from_scaled_val(0)
         );
@@ -389,13 +365,13 @@ mod test {
 
         assert_eq!(
             Decimal::from_scaled_val(2)
-                .try_div(Rate::from_scaled_val(2 as u64))
+                .try_div(Rate::from_scaled_val(2u128))
                 .unwrap(),
             Decimal::one()
         );
         assert_eq!(
             Decimal::from_scaled_val(0)
-                .try_div(Rate::from_scaled_val(2 as u64))
+                .try_div(Rate::from_scaled_val(2u128))
                 .unwrap(),
             Decimal::from_scaled_val(0)
         );

@@ -7,7 +7,11 @@ use solana_program::{
     pubkey::{Pubkey, PUBKEY_BYTES},
 };
 
-use crate::{error::SwapError, state::unpack_bool};
+use crate::{
+    error::SwapError,
+    math::{Decimal, TryDiv, TryMul},
+    state::unpack_bool,
+};
 
 use std::convert::TryFrom;
 
@@ -89,6 +93,16 @@ impl LiquidityProvider {
         }
         Ok(())
     }
+
+    /// Claim rewards in corresponding position
+    pub fn claim(&mut self, pool: Pubkey) -> Result<u64, ProgramError> {
+        let (position, position_index) = self.find_position(pool)?;
+        let claimed_amount = position.claim_rewards()?;
+        if position.liquidity_amount == 0 && position.rewards_estimated == 0 {
+            self.positions.remove(position_index);
+        }
+        Ok(claimed_amount)
+    }
 }
 
 /// Liquidity position of a pool
@@ -161,27 +175,25 @@ impl LiquidityPosition {
     /// Calculate and update rewards
     pub fn calc_and_update_rewards(
         &mut self,
-        rewards_unit: u64,
+        rewards_ratio: Decimal,
         current_ts: UnixTimestamp,
     ) -> ProgramResult {
         let calc_period = current_ts
             .checked_sub(self.last_update_ts)
             .ok_or(SwapError::CalculationFailure)?;
         if calc_period > 0 {
-            self.rewards_estimated = self
-                .rewards_estimated
-                .checked_add(
-                    rewards_unit
-                        .checked_mul(u64::try_from(calc_period).unwrap())
-                        .ok_or(SwapError::CalculationFailure)?
-                        .checked_div(u64::try_from(MIN_CLAIM_PERIOD).unwrap())
-                        .ok_or(SwapError::CalculationFailure)?,
-                )
+            self.rewards_estimated = rewards_ratio
+                .try_mul(self.liquidity_amount)?
+                .try_div(u64::try_from(MIN_CLAIM_PERIOD).unwrap())?
+                .try_mul(u64::try_from(calc_period).unwrap())?
+                .try_floor_u64()?
+                .checked_add(self.rewards_estimated)
                 .ok_or(SwapError::CalculationFailure)?;
+
             self.last_update_ts = current_ts;
         }
 
-        if current_ts.gt(&self.next_claim_ts) {
+        if current_ts >= self.next_claim_ts {
             self.rewards_owed = self
                 .rewards_owed
                 .checked_add(self.rewards_estimated)
@@ -310,7 +322,51 @@ impl Pack for LiquidityProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::solana_program::clock::Clock;
+    use crate::{math::*, solana_program::clock::Clock};
+    use proptest::prelude::*;
+
+    const REFRESH_PERIOD: i64 = 3600;
+    const REFRESH_TIMES: i64 = 720;
+
+    prop_compose! {
+        fn liquidity_amount_and_ratio()(amount in 0..=u32::MAX)(
+            liquidity_amount in Just(amount as u64 * 1_000_000 as u64),
+            rewards_rate in 1_000..=10_000 as u64, // 0.01 ~ 0.1%
+            period_number in 1..=10 as i64
+        ) -> (u64, u64, i64) {
+            (liquidity_amount, rewards_rate, period_number)
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn test_update_rewards(
+            (liquidity_amount, rewards_rate, period_number) in liquidity_amount_and_ratio()
+        ) {
+            let mut liquidity_position = LiquidityPosition::default();
+            liquidity_position.last_update_ts = 0;
+            liquidity_position.next_claim_ts += MIN_CLAIM_PERIOD;
+            liquidity_position.liquidity_amount = liquidity_amount;
+
+            let exact_rate = WAD as u128 / rewards_rate as u128;
+            let max_period_amount = liquidity_amount / rewards_rate;
+            let min_period_amount = max_period_amount - max_period_amount / 100_000;
+
+            for i in 1..=REFRESH_TIMES * period_number {
+                liquidity_position
+                    .calc_and_update_rewards(
+                        Decimal::from_scaled_val(exact_rate),
+                        i * REFRESH_PERIOD,
+                    )
+                    .unwrap();
+                assert!(liquidity_position.rewards_estimated < max_period_amount);
+            }
+            assert!(liquidity_position.rewards_owed <= max_period_amount * period_number as u64);
+            // 0.0001% confidence
+            assert!(liquidity_position.rewards_owed > min_period_amount * period_number as u64);
+            assert_eq!(liquidity_position.next_claim_ts, MIN_CLAIM_PERIOD * (period_number + 1));
+        }
+    }
 
     #[test]
     fn test_failures() {

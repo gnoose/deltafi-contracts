@@ -878,9 +878,7 @@ fn process_claim_liquidity_rewards(program_id: &Pubkey, accounts: &[AccountInfo]
         return Err(SwapError::InvalidSigner.into());
     }
 
-    let (position, _) = liquidity_provider.find_position(*swap_info.key)?;
-    let rewards_owed = position.claim_rewards()?;
-
+    let reward_amount = liquidity_provider.claim(*swap_info.key)?;
     LiquidityProvider::pack(
         liquidity_provider,
         &mut liquidity_provider_info.data.borrow_mut(),
@@ -893,7 +891,7 @@ fn process_claim_liquidity_rewards(program_id: &Pubkey, accounts: &[AccountInfo]
         claim_destination_info.clone(),
         market_authority_info.clone(),
         market_nonce,
-        rewards_owed,
+        reward_amount,
     )?;
 
     Ok(())
@@ -922,13 +920,7 @@ fn process_refresh_liquidity_obligation(
         let mut liquidity_provider =
             LiquidityProvider::unpack(&liquidity_provider_info.data.borrow_mut())?;
         let (position, _) = liquidity_provider.find_position(*swap_info.key)?;
-
-        let rewards_unit = token_swap.rewards.liquidity_reward_u64(
-            reward_ratio
-                .try_mul(position.liquidity_amount)?
-                .try_floor_u64()?,
-        )?;
-        position.calc_and_update_rewards(rewards_unit, clock.unix_timestamp)?;
+        position.calc_and_update_rewards(reward_ratio, clock.unix_timestamp)?;
 
         LiquidityProvider::pack(
             liquidity_provider,
