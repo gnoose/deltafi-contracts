@@ -266,6 +266,7 @@ fn process_swap(
     let swap_info = next_account_info(account_info_iter)?;
     let market_authority_info = next_account_info(account_info_iter)?;
     let swap_authority_info = next_account_info(account_info_iter)?;
+    let user_transfer_authority_info = next_account_info(account_info_iter)?;
     let source_info = next_account_info(account_info_iter)?;
     let swap_source_info = next_account_info(account_info_iter)?;
     let swap_destination_info = next_account_info(account_info_iter)?;
@@ -443,7 +444,7 @@ fn process_swap(
                 token_program_info.clone(),
                 source_info.clone(),
                 swap_source_info.clone(),
-                swap_authority_info.clone(),
+                user_transfer_authority_info.clone(),
                 swap_nonce,
                 amount_in,
             )?;
@@ -481,7 +482,7 @@ fn process_swap(
                 token_program_info.clone(),
                 destination_info.clone(),
                 swap_destination_info.clone(),
-                swap_authority_info.clone(),
+                user_transfer_authority_info.clone(),
                 swap_nonce,
                 amount_in,
             )?;
@@ -531,6 +532,7 @@ fn process_deposit(
     let account_info_iter = &mut accounts.iter();
     let swap_info = next_account_info(account_info_iter)?;
     let authority_info = next_account_info(account_info_iter)?;
+    let user_transfer_authority_info = next_account_info(account_info_iter)?;
     let source_a_info = next_account_info(account_info_iter)?;
     let source_b_info = next_account_info(account_info_iter)?;
     let token_a_info = next_account_info(account_info_iter)?;
@@ -629,7 +631,7 @@ fn process_deposit(
         token_program_info.clone(),
         source_a_info.clone(),
         token_a_info.clone(),
-        authority_info.clone(),
+        user_transfer_authority_info.clone(),
         nonce,
         token_a_amount,
     )?;
@@ -638,7 +640,7 @@ fn process_deposit(
         token_program_info.clone(),
         source_b_info.clone(),
         token_b_info.clone(),
-        authority_info.clone(),
+        user_transfer_authority_info.clone(),
         nonce,
         token_b_amount,
     )?;
@@ -665,6 +667,7 @@ fn process_withdraw(
     let account_info_iter = &mut accounts.iter();
     let swap_info = next_account_info(account_info_iter)?;
     let authority_info = next_account_info(account_info_iter)?;
+    let user_transfer_authority_info = next_account_info(account_info_iter)?;
     let pool_mint_info = next_account_info(account_info_iter)?;
     let source_info = next_account_info(account_info_iter)?;
     let token_a_info = next_account_info(account_info_iter)?;
@@ -809,7 +812,7 @@ fn process_withdraw(
         token_program_info.clone(),
         source_info.clone(),
         pool_mint_info.clone(),
-        authority_info.clone(),
+        user_transfer_authority_info.clone(),
         nonce,
         pool_token_amount,
     )?;
