@@ -8,7 +8,7 @@ use crate::{
 };
 use solana_program::program_error::ProgramError;
 
-/// General integrate function.
+/// Get target amount given quote amount.
 ///
 /// target_amount = market_price * quote_amount * (1 - slope
 ///         + slope * (target_reserve^2 / future_reserve / current_reserve))
@@ -48,124 +48,127 @@ pub fn get_target_amount(
     fair_amount.try_mul(penalty.try_add(Decimal::one())?.try_sub(slope)?)
 }
 
-/// i*deltaB = (Q2-Q1)*(1-k+kQ0^2/Q1/Q2)
-/// Given Q1 and deltaB, solve Q2
-/// This is a quadratic function and the standard version is
-/// aQ2^2 + bQ2 + c = 0, where
-/// a=1-k
-/// -b=(1-k)Q1-kQ0^2/Q1+i*deltaB
-/// c=-kQ0^2
-/// and Q2=(-b+sqrt(b^2+4(1-k)kQ0^2))/2(1-k)
-/// note: another root is negative, abondan
-/// if deltaBSig=true, then Q2>Q1
-/// if deltaBSig=false, then Q2<Q1
+/// Get target amount given quote amount in reserve direction.
 ///
-/// as we only support sell amount as delta, the deltaB is always negative
-/// the input ideltaB is actually -ideltaB in the equation
+/// # Arguments
 ///
-/// support k=1 & k=0 case
-pub fn solve_quadratic_for_trade(
-    v0: Decimal,
-    v1: Decimal,
-    delta: Decimal,
-    i: Decimal,
-    k: Decimal,
+/// * target_reserve - initial reserve position to track divergent loss.
+/// * current_reserve - current reserve position.
+/// * quote_amount - quote amount.
+/// * market price - fair market price determined by internal and external oracle.
+/// * slope - the higher the curve slope is, the bigger the price splippage.
+///
+/// # Return value
+///
+/// target amount determined by the pricing function.
+pub fn get_target_amount_reverse_direction(
+    target_reserve: Decimal,
+    current_reserve: Decimal,
+    quote_amount: Decimal,
+    market_price: Decimal,
+    slope: Decimal,
 ) -> Result<Decimal, ProgramError> {
-    if v0.is_zero() {
+    if target_reserve.is_zero() {
         return Err(SwapError::CalculationFailure.into());
     }
-    if delta.is_zero() {
+    if quote_amount.is_zero() {
         return Ok(Decimal::zero());
     }
 
-    let idelta = delta.try_mul(i)?;
-    if k.is_zero() {
-        return Ok(idelta.min(v1));
+    let fair_amount = quote_amount.try_mul(market_price)?;
+    if slope.is_zero() {
+        return Ok(fair_amount.min(current_reserve));
     }
 
-    if k == Decimal::one() {
-        // if k==1
-        // Q2=Q1/(1+ideltaBQ1/Q0/Q0)
-        // temp = ideltaBQ1/Q0/Q0
-        // Q2 = Q1/(1+temp)
-        // Q1-Q2 = Q1*(1-1/(1+temp)) = Q1*(temp/(1+temp))
-        let temp = idelta.try_mul(v1)?.try_div(v0)?.try_div(v0)?;
-        return v1.try_mul(temp)?.try_div(temp.try_add(Decimal::one())?);
+    if slope == Decimal::one() {
+        let adjusted_ratio = fair_amount
+            .try_mul(current_reserve)?
+            .try_div(target_reserve)?
+            .try_div(target_reserve)?;
+        return current_reserve
+            .try_mul(adjusted_ratio)?
+            .try_div(adjusted_ratio.try_add(Decimal::one())?);
     }
-    // calculate -b value and sig
-    // -b=(1-k)Q1-kQ0^2/Q1+i*deltaB
-    // part1 = (1-k)Q1 >=0
-    // part2 = kQ0^2/Q1-i*deltaB >=0
-    // bAbs = abs(part1-part2)
-    // if part1>part2 => b is negative => bSig is false
-    // if part2>part1 => b is positive => bSig is true
-    let k_q2_q1 = v0.try_mul(v0)?.try_div(v1)?.try_mul(k)?.try_add(idelta)?; // kQ0^2/Q1-i*deltaB
-    let mut b = Decimal::one().try_sub(k)?.try_mul(v1)?; // (1-k)Q1
 
-    let b_sig = if b < k_q2_q1 {
-        b = k_q2_q1.try_sub(b)?;
+    let future_reserve = target_reserve
+        .try_mul(target_reserve)?
+        .try_div(current_reserve)?
+        .try_mul(slope)?
+        .try_add(fair_amount)?;
+    let mut adjusted_reserve = Decimal::one().try_sub(slope)?.try_mul(current_reserve)?;
+
+    let is_smaller = if adjusted_reserve < future_reserve {
+        adjusted_reserve = future_reserve.try_sub(adjusted_reserve)?;
         true
     } else {
-        b = b.try_sub(k_q2_q1)?;
+        adjusted_reserve = adjusted_reserve.try_sub(future_reserve)?;
         false
     };
 
-    // calculate sqrt
     let square_root = Decimal::one()
-        .try_sub(k)?
+        .try_sub(slope)?
         .try_mul(4)?
-        .try_mul(k)?
-        .try_mul(v0)?
-        .try_mul(v0)?; // 4(1-k)kQ0^2
-    let square_root = b.try_mul(b)?.try_add(square_root)?.sqrt()?; // sqrt(b*b+4(1-k)kQ0^2)
+        .try_mul(slope)?
+        .try_mul(target_reserve)?
+        .try_mul(target_reserve)?;
+    let square_root = adjusted_reserve
+        .try_mul(adjusted_reserve)?
+        .try_add(square_root)?
+        .sqrt()?;
 
-    let denominator = Decimal::one().try_sub(k)?.try_mul(2)?; // 2(1-k)
-    let numerator = if b_sig {
-        square_root.try_sub(b)?
+    let denominator = Decimal::one().try_sub(slope)?.try_mul(2)?;
+    let numerator = if is_smaller {
+        square_root.try_sub(adjusted_reserve)?
     } else {
-        b.try_add(square_root)?
+        adjusted_reserve.try_add(square_root)?
     };
 
-    let v2 = numerator.try_div(denominator)?;
+    let target_reserve = numerator.try_div(denominator)?;
 
-    match v2.cmp(&v1) {
+    match target_reserve.cmp(&current_reserve) {
         Ordering::Greater => Ok(Decimal::zero()),
-        _ => Ok(v1.try_sub(v2)?),
+        _ => Ok(current_reserve.try_sub(target_reserve)?),
     }
 }
 
-/// i*deltaB = (Q2-Q1)*(1-k+kQ0^2/Q1/Q2)
-/// Assume Q2=Q0, Given Q1 and deltaB, solve Q0
+/// Get adjusted target reserve given quote amount.
 ///
-/// support k=1 & k=0 case
-pub fn solve_quadratic_for_target(
-    v1: Decimal,
-    delta: Decimal,
-    i: Decimal,
-    k: Decimal,
+/// # Arguments
+///
+/// * current_reserve - current reserve position.
+/// * quote_amount - quote amount.
+/// * market price - fair market price determined by internal and external oracle.
+/// * slope - the higher the curve slope is, the bigger the price splippage.
+///
+/// # Return value
+///
+/// adjusted target reserve.
+pub fn get_target_reserve(
+    current_reserve: Decimal,
+    quote_amount: Decimal,
+    market_price: Decimal,
+    slope: Decimal,
 ) -> Result<Decimal, ProgramError> {
-    if v1.is_zero() {
+    if current_reserve.is_zero() {
         return Ok(Decimal::zero());
     }
-    if k.is_zero() {
-        return delta.try_mul(i)?.try_add(v1);
+    if slope.is_zero() {
+        return quote_amount.try_mul(market_price)?.try_add(current_reserve);
     }
-    // V0 = V1+V1*(sqrt-1)/2k
-    // sqrt = √(1+4kidelta/V1)
-    // premium = 1+(sqrt-1)/2k
-    let square_root = delta
-        .try_mul(i)?
-        .try_mul(k)?
+
+    let square_root = quote_amount
+        .try_mul(market_price)?
+        .try_mul(slope)?
         .try_mul(4)?
-        .try_div(v1)?
+        .try_div(current_reserve)?
         .try_add(Decimal::one())?
         .sqrt()?;
 
     let premium = square_root
         .try_sub(Decimal::one())?
         .try_div(2)?
-        .try_div(k)?
+        .try_div(slope)?
         .try_add(Decimal::one())?;
 
-    premium.try_mul(v1)
+    premium.try_mul(current_reserve)
 }

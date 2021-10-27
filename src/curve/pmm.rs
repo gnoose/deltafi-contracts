@@ -92,7 +92,7 @@ impl PMMState {
     // ================================ R = 1 case ====================================
 
     fn r_one_sell_base_token(&self, base_amount: Decimal) -> Result<Decimal, ProgramError> {
-        solve_quadratic_for_trade(
+        get_target_amount_reverse_direction(
             self.quote_target,
             self.quote_target,
             base_amount,
@@ -102,7 +102,7 @@ impl PMMState {
     }
 
     fn r_one_sell_quote_token(&self, quote_amount: Decimal) -> Result<Decimal, ProgramError> {
-        solve_quadratic_for_trade(
+        get_target_amount_reverse_direction(
             self.base_target,
             self.base_target,
             quote_amount,
@@ -114,7 +114,7 @@ impl PMMState {
     // ================================ R < 1 case ====================================
 
     fn r_bellow_sell_base_token(&self, base_amount: Decimal) -> Result<Decimal, ProgramError> {
-        solve_quadratic_for_trade(
+        get_target_amount_reverse_direction(
             self.quote_target,
             self.quote_reserve,
             base_amount,
@@ -146,7 +146,7 @@ impl PMMState {
     }
 
     fn r_above_sell_quote_token(&self, quote_amount: Decimal) -> Result<Decimal, ProgramError> {
-        solve_quadratic_for_trade(
+        get_target_amount_reverse_direction(
             self.base_target,
             self.base_reserve,
             quote_amount,
@@ -161,7 +161,7 @@ impl PMMState {
     pub fn adjust_target(&mut self) -> ProgramResult {
         match self.r {
             RState::AboveOne => {
-                self.quote_target = solve_quadratic_for_target(
+                self.quote_target = get_target_reserve(
                     self.quote_reserve,
                     self.base_reserve.try_sub(self.base_target)?,
                     self.market_price,
@@ -169,7 +169,7 @@ impl PMMState {
                 )?
             }
             RState::BelowOne => {
-                self.base_target = solve_quadratic_for_target(
+                self.base_target = get_target_reserve(
                     self.base_reserve,
                     self.quote_reserve.try_sub(self.quote_target)?,
                     self.market_price.reciprocal()?,
