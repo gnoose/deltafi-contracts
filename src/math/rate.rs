@@ -197,47 +197,44 @@ mod test {
         assert_eq!(Rate::half_wad(), U128::from(HALF_WAD));
         assert_eq!(Rate::zero().to_scaled_val(), 0);
 
-        assert_eq!(Rate::from_percent(0 as u8), Rate::zero());
-        assert_eq!(Rate::from_percent(100 as u8), Rate::one());
+        assert_eq!(Rate::from_percent(0u8), Rate::zero());
+        assert_eq!(Rate::from_percent(100u8), Rate::one());
 
-        assert_eq!(Rate::from_scaled_val(0 as u128).to_scaled_val(), 0);
-        assert_eq!(Rate::from_scaled_val(100 as u128).to_scaled_val(), 100);
+        assert_eq!(Rate::from_scaled_val(0u128).to_scaled_val(), 0);
+        assert_eq!(Rate::from_scaled_val(100u128).to_scaled_val(), 100);
         assert_eq!(Rate::from_scaled_val(u128::MAX).to_scaled_val(), u128::MAX);
 
-        assert_eq!(Rate::one().try_round_u64().unwrap(), 1 as u64);
-        assert_eq!(Rate::zero().try_round_u64().unwrap(), 0 as u64);
-        assert_eq!(Rate::from_scaled_val(1).try_round_u64().unwrap(), 0 as u64);
-        assert_eq!(
-            Rate::from_scaled_val(100).try_round_u64().unwrap(),
-            0 as u64
-        );
+        assert_eq!(Rate::one().try_round_u64().unwrap(), 1u64);
+        assert_eq!(Rate::zero().try_round_u64().unwrap(), 0u64);
+        assert_eq!(Rate::from_scaled_val(1).try_round_u64().unwrap(), 0u64);
+        assert_eq!(Rate::from_scaled_val(100).try_round_u64().unwrap(), 0u64);
         assert_eq!(
             Rate::from_scaled_val(HALF_WAD as u128)
                 .try_round_u64()
                 .unwrap(),
-            1 as u64
+            1u64
         );
         assert_eq!(
             Rate::from_scaled_val(WAD as u128).try_round_u64().unwrap(),
-            1 as u64
+            1u64
         );
         assert_eq!(
             Rate::from_scaled_val(WAD as u128 * 2)
                 .try_round_u64()
                 .unwrap(),
-            2 as u64
+            2u64
         );
 
         assert_eq!(
-            Rate::from_scaled_val(2).try_mul(2 as u64).unwrap(),
+            Rate::from_scaled_val(2).try_mul(2u64).unwrap(),
             Rate::from_scaled_val(4)
         );
         assert_eq!(
-            Rate::from_scaled_val(0).try_mul(2 as u64).unwrap(),
+            Rate::from_scaled_val(0).try_mul(2u64).unwrap(),
             Rate::from_scaled_val(0)
         );
         assert_eq!(
-            Rate::from_scaled_val(2).try_mul(0 as u64).unwrap(),
+            Rate::from_scaled_val(2).try_mul(0u64).unwrap(),
             Rate::from_scaled_val(0)
         );
         assert_eq!(
@@ -252,11 +249,11 @@ mod test {
         );
 
         assert_eq!(
-            Rate::from_scaled_val(2).try_div(2 as u64).unwrap(),
+            Rate::from_scaled_val(2).try_div(2u64).unwrap(),
             Rate::from_scaled_val(1)
         );
         assert_eq!(
-            Rate::from_scaled_val(0).try_div(2 as u64).unwrap(),
+            Rate::from_scaled_val(0).try_div(2u64).unwrap(),
             Rate::from_scaled_val(0)
         );
         assert_eq!(
@@ -269,7 +266,7 @@ mod test {
                 .unwrap(),
             Rate::from_scaled_val(1)
         );
-        assert!(Rate::from_scaled_val(2).try_div(0 as u64).is_err());
+        assert!(Rate::from_scaled_val(2).try_div(0u64).is_err());
 
         assert_eq!(
             Rate::from_scaled_val(2)
@@ -305,19 +302,19 @@ mod test {
 
         assert_eq!(
             Rate::from_scaled_val(WAD as u128 * 2)
-                .try_pow(2 as u64)
+                .try_pow(2u64)
                 .unwrap(),
             Rate::from_scaled_val(WAD as u128 * 4)
         );
         assert_eq!(
             Rate::from_scaled_val(WAD as u128 * 2)
-                .try_pow(3 as u64)
+                .try_pow(3u64)
                 .unwrap(),
             Rate::from_scaled_val(WAD as u128 * 8)
         );
         assert_eq!(
             Rate::from_scaled_val(WAD as u128 * 2)
-                .try_pow(0 as u64)
+                .try_pow(0u64)
                 .unwrap(),
             Rate::one()
         );

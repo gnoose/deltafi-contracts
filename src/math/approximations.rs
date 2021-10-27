@@ -64,7 +64,7 @@ mod tests {
     #[test]
     fn test_square_root_negative() {
         let neg_num: i128 = -1;
-        assert_eq!(sqrt(neg_num).is_none(), true);
+        assert!(sqrt(neg_num).is_none());
     }
 
     #[test]

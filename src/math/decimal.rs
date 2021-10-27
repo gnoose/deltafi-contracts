@@ -261,8 +261,8 @@ mod test {
         assert_eq!(Decimal::wad(), U192::from(WAD));
         assert_eq!(Decimal::half_wad(), U192::from(HALF_WAD));
         assert_eq!(Decimal::zero().to_scaled_val().unwrap(), 0);
-        assert_eq!(Decimal::zero().is_zero(), true);
-        assert_eq!(Decimal::one().is_zero(), false);
+        assert!(Decimal::zero().is_zero());
+        assert!(!Decimal::one().is_zero());
         assert_eq!(Decimal::default(), Decimal::zero());
 
         assert_eq!(Decimal::one().try_round_u64().unwrap(), 1u64);

@@ -9,7 +9,7 @@ use solana_program::{
     program_error::ProgramError,
     program_pack::Pack,
     pubkey::{Pubkey, PUBKEY_BYTES},
-    sysvar::clock,
+    sysvar::{clock, rent},
 };
 
 use crate::{
@@ -111,15 +111,6 @@ pub struct AdminInitializeData {
     /// Default rewards
     pub rewards: Rewards,
 }
-/// RampA instruction data
-#[repr(C)]
-#[derive(Clone, Debug, PartialEq)]
-pub struct RampAData {
-    /// Amp. Coefficient to ramp to
-    pub target_amp: u64,
-    /// Unix timestamp to stop ramp
-    pub stop_ramp_ts: i64,
-}
 
 /// Admin only instructions.
 #[repr(C)]
@@ -211,21 +202,27 @@ impl AdminInstruction {
 
 /// Creates an 'initialize' instruction
 pub fn initialize_config(
-    program_id: &Pubkey,
-    config_key: &Pubkey,
-    admin_key: &Pubkey,
+    program_id: Pubkey,
+    config_pubkey: Pubkey,
+    market_authority_pubkey: Pubkey,
+    deltafi_mint_pubkey: Pubkey,
+    admin_pubkey: Pubkey,
     fees: Fees,
     rewards: Rewards,
 ) -> Result<Instruction, ProgramError> {
     let data = AdminInstruction::Initialize(AdminInitializeData { fees, rewards }).pack();
 
     let accounts = vec![
-        AccountMeta::new(*config_key, true),
-        AccountMeta::new_readonly(*admin_key, true),
+        AccountMeta::new(config_pubkey, true),
+        AccountMeta::new_readonly(market_authority_pubkey, false),
+        AccountMeta::new_readonly(deltafi_mint_pubkey, false),
+        AccountMeta::new_readonly(admin_pubkey, true),
+        AccountMeta::new_readonly(rent::id(), false),
+        AccountMeta::new_readonly(spl_token::id(), false),
     ];
 
     Ok(Instruction {
-        program_id: *program_id,
+        program_id,
         accounts,
         data,
     })
@@ -233,21 +230,21 @@ pub fn initialize_config(
 
 /// Creates a 'pause' instruction
 pub fn pause(
-    program_id: &Pubkey,
-    config_pubkey: &Pubkey,
-    swap_pubkey: &Pubkey,
-    admin_pubkey: &Pubkey,
+    program_id: Pubkey,
+    config_pubkey: Pubkey,
+    swap_pubkey: Pubkey,
+    admin_pubkey: Pubkey,
 ) -> Result<Instruction, ProgramError> {
     let data = AdminInstruction::Pause.pack();
 
     let accounts = vec![
-        AccountMeta::new_readonly(*config_pubkey, true),
-        AccountMeta::new_readonly(*swap_pubkey, true),
-        AccountMeta::new_readonly(*admin_pubkey, true),
+        AccountMeta::new_readonly(config_pubkey, false),
+        AccountMeta::new(swap_pubkey, false),
+        AccountMeta::new_readonly(admin_pubkey, true),
     ];
 
     Ok(Instruction {
-        program_id: *program_id,
+        program_id,
         accounts,
         data,
     })
@@ -255,65 +252,21 @@ pub fn pause(
 
 /// Creates a 'unpause' instruction
 pub fn unpause(
-    program_id: &Pubkey,
-    config_pubkey: &Pubkey,
-    swap_pubkey: &Pubkey,
-    admin_pubkey: &Pubkey,
+    program_id: Pubkey,
+    config_pubkey: Pubkey,
+    swap_pubkey: Pubkey,
+    admin_pubkey: Pubkey,
 ) -> Result<Instruction, ProgramError> {
     let data = AdminInstruction::Unpause.pack();
 
     let accounts = vec![
-        AccountMeta::new_readonly(*config_pubkey, true),
-        AccountMeta::new_readonly(*swap_pubkey, true),
-        AccountMeta::new_readonly(*admin_pubkey, true),
+        AccountMeta::new_readonly(config_pubkey, false),
+        AccountMeta::new(swap_pubkey, false),
+        AccountMeta::new_readonly(admin_pubkey, true),
     ];
 
     Ok(Instruction {
-        program_id: *program_id,
-        accounts,
-        data,
-    })
-}
-
-/// Creates a 'apply_new_admin' instruction
-pub fn apply_new_admin(
-    program_id: &Pubkey,
-    config_pubkey: &Pubkey,
-    admin_pubkey: &Pubkey,
-) -> Result<Instruction, ProgramError> {
-    let data = AdminInstruction::ApplyNewAdmin.pack();
-
-    let accounts = vec![
-        AccountMeta::new_readonly(*config_pubkey, true),
-        AccountMeta::new_readonly(*admin_pubkey, true),
-        AccountMeta::new_readonly(clock::id(), false),
-    ];
-
-    Ok(Instruction {
-        program_id: *program_id,
-        accounts,
-        data,
-    })
-}
-
-/// Creates a 'commit_new_admin' instruction
-pub fn commit_new_admin(
-    program_id: &Pubkey,
-    config_pubkey: &Pubkey,
-    admin_pubkey: &Pubkey,
-    new_admin_pubkey: &Pubkey,
-) -> Result<Instruction, ProgramError> {
-    let data = AdminInstruction::CommitNewAdmin.pack();
-
-    let accounts = vec![
-        AccountMeta::new_readonly(*config_pubkey, true),
-        AccountMeta::new_readonly(*admin_pubkey, true),
-        AccountMeta::new_readonly(*new_admin_pubkey, false),
-        AccountMeta::new_readonly(clock::id(), false),
-    ];
-
-    Ok(Instruction {
-        program_id: *program_id,
+        program_id,
         accounts,
         data,
     })
@@ -321,25 +274,70 @@ pub fn commit_new_admin(
 
 /// Creates a 'set_fee_account' instruction
 pub fn set_fee_account(
-    program_id: &Pubkey,
-    config_pubkey: &Pubkey,
-    swap_pubkey: &Pubkey,
-    authority_pubkey: &Pubkey,
-    admin_pubkey: &Pubkey,
-    new_fee_account_pubkey: &Pubkey,
+    program_id: Pubkey,
+    config_pubkey: Pubkey,
+    swap_pubkey: Pubkey,
+    authority_pubkey: Pubkey,
+    admin_pubkey: Pubkey,
+    new_fee_account_pubkey: Pubkey,
 ) -> Result<Instruction, ProgramError> {
     let data = AdminInstruction::SetFeeAccount.pack();
 
     let accounts = vec![
-        AccountMeta::new_readonly(*config_pubkey, true),
-        AccountMeta::new_readonly(*swap_pubkey, true),
-        AccountMeta::new_readonly(*authority_pubkey, false),
-        AccountMeta::new_readonly(*admin_pubkey, true),
-        AccountMeta::new_readonly(*new_fee_account_pubkey, false),
+        AccountMeta::new_readonly(config_pubkey, false),
+        AccountMeta::new(swap_pubkey, false),
+        AccountMeta::new_readonly(authority_pubkey, false),
+        AccountMeta::new_readonly(admin_pubkey, true),
+        AccountMeta::new_readonly(new_fee_account_pubkey, false),
+        AccountMeta::new_readonly(spl_token::id(), false),
     ];
 
     Ok(Instruction {
-        program_id: *program_id,
+        program_id,
+        accounts,
+        data,
+    })
+}
+
+/// Creates a 'apply_new_admin' instruction
+pub fn apply_new_admin(
+    program_id: Pubkey,
+    config_pubkey: Pubkey,
+    admin_pubkey: Pubkey,
+) -> Result<Instruction, ProgramError> {
+    let data = AdminInstruction::ApplyNewAdmin.pack();
+
+    let accounts = vec![
+        AccountMeta::new(config_pubkey, false),
+        AccountMeta::new_readonly(admin_pubkey, true),
+        AccountMeta::new_readonly(clock::id(), false),
+    ];
+
+    Ok(Instruction {
+        program_id,
+        accounts,
+        data,
+    })
+}
+
+/// Creates a 'commit_new_admin' instruction
+pub fn commit_new_admin(
+    program_id: Pubkey,
+    config_pubkey: Pubkey,
+    admin_pubkey: Pubkey,
+    new_admin_pubkey: Pubkey,
+) -> Result<Instruction, ProgramError> {
+    let data = AdminInstruction::CommitNewAdmin.pack();
+
+    let accounts = vec![
+        AccountMeta::new(config_pubkey, false),
+        AccountMeta::new_readonly(admin_pubkey, true),
+        AccountMeta::new_readonly(new_admin_pubkey, true),
+        AccountMeta::new_readonly(clock::id(), false),
+    ];
+
+    Ok(Instruction {
+        program_id,
         accounts,
         data,
     })
@@ -347,45 +345,45 @@ pub fn set_fee_account(
 
 /// Creates a 'set_new_fees' instruction
 pub fn set_new_fees(
-    program_id: &Pubkey,
-    config_pubkey: &Pubkey,
-    swap_pubkey: &Pubkey,
-    admin_pubkey: &Pubkey,
+    program_id: Pubkey,
+    config_pubkey: Pubkey,
+    swap_pubkey: Pubkey,
+    admin_pubkey: Pubkey,
     new_fees: Fees,
 ) -> Result<Instruction, ProgramError> {
     let data = AdminInstruction::SetNewFees(new_fees).pack();
 
     let accounts = vec![
-        AccountMeta::new_readonly(*config_pubkey, false),
-        AccountMeta::new_readonly(*swap_pubkey, true),
-        AccountMeta::new_readonly(*admin_pubkey, true),
+        AccountMeta::new_readonly(config_pubkey, false),
+        AccountMeta::new(swap_pubkey, false),
+        AccountMeta::new_readonly(admin_pubkey, true),
     ];
 
     Ok(Instruction {
-        program_id: *program_id,
+        program_id,
         accounts,
         data,
     })
 }
 
 /// Creates a 'set_rewards' instruction.
-pub fn set_rewards(
-    program_id: &Pubkey,
-    config_pubkey: &Pubkey,
-    swap_pubkey: &Pubkey,
-    admin_pubkey: &Pubkey,
+pub fn set_new_rewards(
+    program_id: Pubkey,
+    config_pubkey: Pubkey,
+    swap_pubkey: Pubkey,
+    admin_pubkey: Pubkey,
     new_rewards: Rewards,
 ) -> Result<Instruction, ProgramError> {
     let data = AdminInstruction::SetNewRewards(new_rewards).pack();
 
     let accounts = vec![
-        AccountMeta::new_readonly(*config_pubkey, true),
-        AccountMeta::new_readonly(*swap_pubkey, true),
-        AccountMeta::new_readonly(*admin_pubkey, true),
+        AccountMeta::new_readonly(config_pubkey, false),
+        AccountMeta::new(swap_pubkey, false),
+        AccountMeta::new_readonly(admin_pubkey, true),
     ];
 
     Ok(Instruction {
-        program_id: *program_id,
+        program_id,
         accounts,
         data,
     })
@@ -624,49 +622,38 @@ impl SwapInstruction {
 
 /// Creates an 'initialize' instruction.
 pub fn initialize(
-    program_id: &Pubkey,
-    token_program_id: &Pubkey, // Token program used for the pool token
-    config_pubkey: &Pubkey,
-    swap_pubkey: &Pubkey,
-    authority_pubkey: &Pubkey,
-    admin_fee_a_pubkey: &Pubkey,
-    admin_fee_b_pubkey: &Pubkey,
-    token_a_pubkey: &Pubkey,
-    token_b_pubkey: &Pubkey,
-    pool_mint_pubkey: &Pubkey,
-    destination_pubkey: &Pubkey, // Desintation to mint pool tokens for bootstrapper
-    deltafi_token_pubkey: &Pubkey,
-    pyth_key: &Pubkey,
-    nonce: u8,
-    slop: u64,
-    mid_price: u128,
-    is_open_twap: bool,
+    program_id: Pubkey,
+    config_pubkey: Pubkey,
+    swap_pubkey: Pubkey,
+    authority_pubkey: Pubkey,
+    admin_fee_a_pubkey: Pubkey,
+    admin_fee_b_pubkey: Pubkey,
+    token_a_pubkey: Pubkey,
+    token_b_pubkey: Pubkey,
+    pool_mint_pubkey: Pubkey,
+    destination_pubkey: Pubkey,
+    pyth_pubkey: Pubkey,
+    init_data: InitializeData,
 ) -> Result<Instruction, ProgramError> {
-    let data = SwapInstruction::Initialize(InitializeData {
-        nonce,
-        slop,
-        mid_price,
-        is_open_twap,
-    })
-    .pack();
+    let data = SwapInstruction::Initialize(init_data).pack();
 
     let accounts = vec![
-        AccountMeta::new_readonly(*config_pubkey, false),
-        AccountMeta::new_readonly(*swap_pubkey, true),
-        AccountMeta::new_readonly(*authority_pubkey, false),
-        AccountMeta::new_readonly(*admin_fee_a_pubkey, false),
-        AccountMeta::new_readonly(*admin_fee_b_pubkey, false),
-        AccountMeta::new_readonly(*token_a_pubkey, false),
-        AccountMeta::new_readonly(*token_b_pubkey, false),
-        AccountMeta::new(*pool_mint_pubkey, false),
-        AccountMeta::new(*destination_pubkey, false),
-        AccountMeta::new_readonly(*deltafi_token_pubkey, false),
-        AccountMeta::new_readonly(*pyth_key, false),
-        AccountMeta::new_readonly(*token_program_id, false),
+        AccountMeta::new_readonly(config_pubkey, false),
+        AccountMeta::new(swap_pubkey, true),
+        AccountMeta::new_readonly(authority_pubkey, false),
+        AccountMeta::new_readonly(admin_fee_a_pubkey, false),
+        AccountMeta::new_readonly(admin_fee_b_pubkey, false),
+        AccountMeta::new_readonly(token_a_pubkey, false),
+        AccountMeta::new_readonly(token_b_pubkey, false),
+        AccountMeta::new(pool_mint_pubkey, false),
+        AccountMeta::new(destination_pubkey, false),
+        AccountMeta::new_readonly(pyth_pubkey, false),
+        AccountMeta::new_readonly(clock::id(), false),
+        AccountMeta::new_readonly(spl_token::id(), false),
     ];
 
     Ok(Instruction {
-        program_id: *program_id,
+        program_id,
         accounts,
         data,
     })
@@ -674,46 +661,44 @@ pub fn initialize(
 
 /// Creates a 'swap' instruction.
 pub fn swap(
-    program_id: &Pubkey,
-    token_program_id: &Pubkey,
-    swap_pubkey: &Pubkey,
-    authority_pubkey: &Pubkey,
-    source_pubkey: &Pubkey,
-    swap_source_pubkey: &Pubkey,
-    swap_destination_pubkey: &Pubkey,
-    destination_pubkey: &Pubkey,
-    reward_token_pubkey: &Pubkey,
-    reward_mint_pubkey: &Pubkey,
-    admin_fee_destination_pubkey: &Pubkey,
-    pyth_key: &Pubkey,
-    amount_in: u64,
-    minimum_amount_out: u64,
-    swap_direction: u8,
+    program_id: Pubkey,
+    config_pubkey: Pubkey,
+    swap_pubkey: Pubkey,
+    market_authority_pubkey: Pubkey,
+    swap_authority_pubkey: Pubkey,
+    user_transfer_authority_pubkey: Pubkey,
+    source_pubkey: Pubkey,
+    swap_source_pubkey: Pubkey,
+    swap_destination_pubkey: Pubkey,
+    destination_pubkey: Pubkey,
+    reward_token_pubkey: Pubkey,
+    reward_mint_pubkey: Pubkey,
+    admin_fee_destination_pubkey: Pubkey,
+    pyth_pubkey: Pubkey,
+    swap_data: SwapData,
 ) -> Result<Instruction, ProgramError> {
-    let data = SwapInstruction::Swap(SwapData {
-        amount_in,
-        minimum_amount_out,
-        swap_direction,
-    })
-    .pack();
+    let data = SwapInstruction::Swap(swap_data).pack();
 
     let accounts = vec![
-        AccountMeta::new(*swap_pubkey, false),
-        AccountMeta::new(*authority_pubkey, false),
-        AccountMeta::new(*source_pubkey, false),
-        AccountMeta::new(*swap_source_pubkey, false),
-        AccountMeta::new(*swap_destination_pubkey, false),
-        AccountMeta::new(*destination_pubkey, false),
-        AccountMeta::new(*reward_token_pubkey, false),
-        AccountMeta::new(*reward_mint_pubkey, false),
-        AccountMeta::new(*admin_fee_destination_pubkey, false),
-        AccountMeta::new(*pyth_key, false),
-        AccountMeta::new(*token_program_id, false),
-        AccountMeta::new(clock::id(), false),
+        AccountMeta::new_readonly(config_pubkey, false),
+        AccountMeta::new(swap_pubkey, true),
+        AccountMeta::new_readonly(market_authority_pubkey, false),
+        AccountMeta::new_readonly(swap_authority_pubkey, false),
+        AccountMeta::new_readonly(user_transfer_authority_pubkey, true),
+        AccountMeta::new(source_pubkey, false),
+        AccountMeta::new(swap_source_pubkey, false),
+        AccountMeta::new(swap_destination_pubkey, false),
+        AccountMeta::new(destination_pubkey, false),
+        AccountMeta::new(reward_token_pubkey, false),
+        AccountMeta::new(reward_mint_pubkey, false),
+        AccountMeta::new(admin_fee_destination_pubkey, false),
+        AccountMeta::new_readonly(pyth_pubkey, false),
+        AccountMeta::new_readonly(spl_token::id(), false),
+        AccountMeta::new_readonly(clock::id(), false),
     ];
 
     Ok(Instruction {
-        program_id: *program_id,
+        program_id,
         accounts,
         data,
     })
@@ -721,48 +706,42 @@ pub fn swap(
 
 /// Creates a 'deposit' instruction.
 pub fn deposit(
-    program_id: &Pubkey,
-    token_program_id: &Pubkey,
-    swap_pubkey: &Pubkey,
-    authority_pubkey: &Pubkey,
-    deposit_token_a_pubkey: &Pubkey,
-    deposit_token_b_pubkey: &Pubkey,
-    swap_token_a_pubkey: &Pubkey,
-    swap_token_b_pubkey: &Pubkey,
-    pool_mint_pubkey: &Pubkey,
-    destination_pubkey: &Pubkey,
-    pyth_key: &Pubkey,
-    liquidity_provider_pubkey: &Pubkey,
-    liquidity_owner_pubkey: &Pubkey,
-    token_a_amount: u64,
-    token_b_amount: u64,
-    min_mint_amount: u64,
+    program_id: Pubkey,
+    swap_pubkey: Pubkey,
+    authority_pubkey: Pubkey,
+    user_transfer_authority_pubkey: Pubkey,
+    deposit_token_a_pubkey: Pubkey,
+    deposit_token_b_pubkey: Pubkey,
+    swap_token_a_pubkey: Pubkey,
+    swap_token_b_pubkey: Pubkey,
+    pool_mint_pubkey: Pubkey,
+    destination_pubkey: Pubkey,
+    pyth_pubkey: Pubkey,
+    liquidity_provider_pubkey: Pubkey,
+    liquidity_owner_pubkey: Pubkey,
+    deposit_data: DepositData,
 ) -> Result<Instruction, ProgramError> {
-    let data = SwapInstruction::Deposit(DepositData {
-        token_a_amount,
-        token_b_amount,
-        min_mint_amount,
-    })
-    .pack();
+    let data = SwapInstruction::Deposit(deposit_data).pack();
 
     let accounts = vec![
-        AccountMeta::new(*swap_pubkey, false),
-        AccountMeta::new(*authority_pubkey, false),
-        AccountMeta::new(*deposit_token_a_pubkey, false),
-        AccountMeta::new(*deposit_token_b_pubkey, false),
-        AccountMeta::new(*swap_token_a_pubkey, false),
-        AccountMeta::new(*swap_token_b_pubkey, false),
-        AccountMeta::new(*pool_mint_pubkey, false),
-        AccountMeta::new(*destination_pubkey, false),
-        AccountMeta::new(*pyth_key, false),
-        AccountMeta::new(*liquidity_provider_pubkey, false),
-        AccountMeta::new(*liquidity_owner_pubkey, true),
-        AccountMeta::new(*token_program_id, false),
-        AccountMeta::new(clock::id(), false),
+        AccountMeta::new(swap_pubkey, false),
+        AccountMeta::new_readonly(authority_pubkey, false),
+        AccountMeta::new_readonly(user_transfer_authority_pubkey, true),
+        AccountMeta::new(deposit_token_a_pubkey, false),
+        AccountMeta::new(deposit_token_b_pubkey, false),
+        AccountMeta::new(swap_token_a_pubkey, false),
+        AccountMeta::new(swap_token_b_pubkey, false),
+        AccountMeta::new(pool_mint_pubkey, false),
+        AccountMeta::new(destination_pubkey, false),
+        AccountMeta::new(liquidity_provider_pubkey, false),
+        AccountMeta::new_readonly(liquidity_owner_pubkey, true),
+        AccountMeta::new_readonly(pyth_pubkey, false),
+        AccountMeta::new_readonly(clock::id(), false),
+        AccountMeta::new_readonly(spl_token::id(), false),
     ];
 
     Ok(Instruction {
-        program_id: *program_id,
+        program_id,
         accounts,
         data,
     })
@@ -770,45 +749,46 @@ pub fn deposit(
 
 /// Creates a 'withdraw' instruction.
 pub fn withdraw(
-    program_id: &Pubkey,
-    token_program_id: &Pubkey,
-    swap_pubkey: &Pubkey,
-    authority_pubkey: &Pubkey,
-    pool_mint_pubkey: &Pubkey,
-    source_pubkey: &Pubkey,
-    swap_token_a_pubkey: &Pubkey,
-    swap_token_b_pubkey: &Pubkey,
-    destination_token_a_pubkey: &Pubkey,
-    destination_token_b_pubkey: &Pubkey,
-    admin_fee_a_pubkey: &Pubkey,
-    admin_fee_b_pubkey: &Pubkey,
-    pool_token_amount: u64,
-    minimum_token_a_amount: u64,
-    minimum_token_b_amount: u64,
+    program_id: Pubkey,
+    swap_pubkey: Pubkey,
+    authority_pubkey: Pubkey,
+    user_transfer_authority_pubkey: Pubkey,
+    pool_mint_pubkey: Pubkey,
+    source_pubkey: Pubkey,
+    swap_token_a_pubkey: Pubkey,
+    swap_token_b_pubkey: Pubkey,
+    destination_token_a_pubkey: Pubkey,
+    destination_token_b_pubkey: Pubkey,
+    admin_fee_a_pubkey: Pubkey,
+    admin_fee_b_pubkey: Pubkey,
+    liquidity_provider_pubkey: Pubkey,
+    liquidity_owner_pubkey: Pubkey,
+    pyth_pubkey: Pubkey,
+    withdraw_data: WithdrawData,
 ) -> Result<Instruction, ProgramError> {
-    let data = SwapInstruction::Withdraw(WithdrawData {
-        pool_token_amount,
-        minimum_token_a_amount,
-        minimum_token_b_amount,
-    })
-    .pack();
+    let data = SwapInstruction::Withdraw(withdraw_data).pack();
 
     let accounts = vec![
-        AccountMeta::new(*swap_pubkey, false),
-        AccountMeta::new(*authority_pubkey, false),
-        AccountMeta::new(*pool_mint_pubkey, false),
-        AccountMeta::new(*source_pubkey, false),
-        AccountMeta::new(*swap_token_a_pubkey, false),
-        AccountMeta::new(*swap_token_b_pubkey, false),
-        AccountMeta::new(*destination_token_a_pubkey, false),
-        AccountMeta::new(*destination_token_b_pubkey, false),
-        AccountMeta::new(*admin_fee_a_pubkey, false),
-        AccountMeta::new(*admin_fee_b_pubkey, false),
-        AccountMeta::new(*token_program_id, false),
+        AccountMeta::new(swap_pubkey, false),
+        AccountMeta::new_readonly(authority_pubkey, false),
+        AccountMeta::new_readonly(user_transfer_authority_pubkey, true),
+        AccountMeta::new(pool_mint_pubkey, false),
+        AccountMeta::new(source_pubkey, false),
+        AccountMeta::new(swap_token_a_pubkey, false),
+        AccountMeta::new(swap_token_b_pubkey, false),
+        AccountMeta::new(destination_token_a_pubkey, false),
+        AccountMeta::new(destination_token_b_pubkey, false),
+        AccountMeta::new(admin_fee_a_pubkey, false),
+        AccountMeta::new(admin_fee_b_pubkey, false),
+        AccountMeta::new(liquidity_provider_pubkey, false),
+        AccountMeta::new_readonly(liquidity_owner_pubkey, true),
+        AccountMeta::new_readonly(pyth_pubkey, false),
+        AccountMeta::new_readonly(clock::id(), false),
+        AccountMeta::new_readonly(spl_token::id(), false),
     ];
 
     Ok(Instruction {
-        program_id: *program_id,
+        program_id,
         accounts,
         data,
     })
@@ -816,19 +796,20 @@ pub fn withdraw(
 
 /// Creates `InitializeLiquidityProvider` instruction
 pub fn init_liquidity_provider(
-    program_id: &Pubkey,
-    liquidity_provider_pubkey: &Pubkey,
-    liquidity_owner_pubkey: &Pubkey,
+    program_id: Pubkey,
+    liquidity_provider_pubkey: Pubkey,
+    liquidity_owner_pubkey: Pubkey,
 ) -> Result<Instruction, ProgramError> {
     let data = SwapInstruction::InitializeLiquidityProvider.pack();
 
     let accounts = vec![
-        AccountMeta::new(*liquidity_provider_pubkey, false),
-        AccountMeta::new_readonly(*liquidity_owner_pubkey, true),
+        AccountMeta::new(liquidity_provider_pubkey, true),
+        AccountMeta::new_readonly(liquidity_owner_pubkey, true),
+        AccountMeta::new_readonly(rent::id(), false),
     ];
 
     Ok(Instruction {
-        program_id: *program_id,
+        program_id,
         data,
         accounts,
     })
@@ -836,29 +817,30 @@ pub fn init_liquidity_provider(
 
 /// Creates `ClaimLiquidityRewards` instruction
 pub fn claim_liquidity_rewards(
-    program_id: &Pubkey,
-    token_program_id: &Pubkey,
-    swap_pubkey: &Pubkey,
-    authority_key: &Pubkey,
-    liquidity_provider_pubkey: &Pubkey,
-    liquidity_owner_pubkey: &Pubkey,
-    claim_destination_pubkey: &Pubkey,
-    claim_mint_pubkey: &Pubkey,
+    program_id: Pubkey,
+    config_pubkey: Pubkey,
+    swap_pubkey: Pubkey,
+    market_authority_info: Pubkey,
+    liquidity_provider_pubkey: Pubkey,
+    liquidity_owner_pubkey: Pubkey,
+    claim_destination_pubkey: Pubkey,
+    claim_mint_pubkey: Pubkey,
 ) -> Result<Instruction, ProgramError> {
     let data = SwapInstruction::ClaimLiquidityRewards.pack();
 
     let accounts = vec![
-        AccountMeta::new_readonly(*swap_pubkey, false),
-        AccountMeta::new_readonly(*authority_key, false),
-        AccountMeta::new(*liquidity_provider_pubkey, false),
-        AccountMeta::new_readonly(*liquidity_owner_pubkey, true),
-        AccountMeta::new(*claim_destination_pubkey, false),
-        AccountMeta::new(*claim_mint_pubkey, false),
-        AccountMeta::new_readonly(*token_program_id, false),
+        AccountMeta::new_readonly(config_pubkey, false),
+        AccountMeta::new_readonly(swap_pubkey, false),
+        AccountMeta::new_readonly(market_authority_info, false),
+        AccountMeta::new(liquidity_provider_pubkey, false),
+        AccountMeta::new_readonly(liquidity_owner_pubkey, true),
+        AccountMeta::new(claim_destination_pubkey, false),
+        AccountMeta::new(claim_mint_pubkey, false),
+        AccountMeta::new_readonly(spl_token::id(), false),
     ];
 
     Ok(Instruction {
-        program_id: *program_id,
+        program_id,
         data,
         accounts,
     })
@@ -866,24 +848,24 @@ pub fn claim_liquidity_rewards(
 
 /// Creates `RefreshLiquidityObligation` instruction
 pub fn refresh_liquidity_obligation(
-    program_id: &Pubkey,
-    swap_pubkey: &Pubkey,
-    liquidity_provider_pubkeys: Vec<&Pubkey>,
+    program_id: Pubkey,
+    swap_pubkey: Pubkey,
+    liquidity_provider_pubkeys: Vec<Pubkey>,
 ) -> Result<Instruction, ProgramError> {
     let data = SwapInstruction::RefreshLiquidityObligation.pack();
 
     let mut accounts = vec![
-        AccountMeta::new_readonly(*swap_pubkey, false),
+        AccountMeta::new_readonly(swap_pubkey, false),
         AccountMeta::new_readonly(clock::id(), false),
     ];
     accounts.extend(
         liquidity_provider_pubkeys
             .into_iter()
-            .map(|pubkey| AccountMeta::new(*pubkey, false)),
+            .map(|pubkey| AccountMeta::new(pubkey, false)),
     );
 
     Ok(Instruction {
-        program_id: *program_id,
+        program_id,
         data,
         accounts,
     })
@@ -976,271 +958,157 @@ fn unpack_pubkey(input: &[u8]) -> Result<(Pubkey, &[u8]), ProgramError> {
     Ok((pk, rest))
 }
 
-#[cfg(feature = "test-bpf")]
+#[cfg(test)]
 mod tests {
     use super::*;
-    use crate::utils::{
-        test_utils::{default_i, default_k, DEFAULT_TEST_REWARDS},
-        SWAP_DIRECTION_SELL_BASE, TWAP_OPENED,
+    use crate::{
+        curve::{default_market_price, default_slop},
+        state::{DEFAULT_TEST_FEES, DEFAULT_TEST_REWARDS},
     };
 
     #[test]
-    fn test_admin_instruction_packing() {
-        let target_amp = 100;
-        let stop_ramp_ts = i64::MAX;
-        let check = AdminInstruction::RampA(RampAData {
-            target_amp,
-            stop_ramp_ts,
+    fn test_pack_admin_init_config() {
+        let fees = DEFAULT_TEST_FEES;
+        let rewards = DEFAULT_TEST_REWARDS;
+        let check = AdminInstruction::Initialize(AdminInitializeData {
+            fees: fees.clone(),
+            rewards: rewards.clone(),
         });
         let packed = check.pack();
-        let mut expect: Vec<u8> = vec![101];
-        expect.extend_from_slice(&target_amp.to_le_bytes());
-        expect.extend_from_slice(&stop_ramp_ts.to_le_bytes());
-        assert_eq!(packed, expect);
-        let unpacked = AdminInstruction::unpack(&expect).unwrap();
-        assert_eq!(
-            unpacked, check,
-            "test packing and unpacking of the admin instruction to RampA"
-        );
-
-        let check = AdminInstruction::StopRampA;
-        let packed = check.pack();
-        let expect: Vec<u8> = vec![102];
-        assert_eq!(packed, expect);
-        let unpacked = AdminInstruction::unpack(&expect).unwrap();
-        assert_eq!(
-            unpacked, check,
-            "test packing and unpacking of the admin instruction to StopRampA"
-        );
-
-        let check = AdminInstruction::Pause;
-        let packed = check.pack();
-        let expect: Vec<u8> = vec![103];
-        assert_eq!(packed, expect);
-        let unpacked = AdminInstruction::unpack(&expect).unwrap();
-        assert_eq!(
-            unpacked, check,
-            "test packing and unpacking of the admin instruction to Pause"
-        );
-
-        let check = AdminInstruction::Unpause;
-        let packed = check.pack();
-        let expect: Vec<u8> = vec![104];
-        assert_eq!(packed, expect);
-        let unpacked = AdminInstruction::unpack(&expect).unwrap();
-        assert_eq!(
-            unpacked, check,
-            "test packing and unpacking of the admin instruction to Unpause"
-        );
-
-        let check = AdminInstruction::SetFeeAccount;
-        let packed = check.pack();
-        let expect: Vec<u8> = vec![105];
-        assert_eq!(packed, expect);
-        let unpacked = AdminInstruction::unpack(&expect).unwrap();
-        assert_eq!(unpacked, check);
-
-        let check = AdminInstruction::ApplyNewAdmin;
-        let packed = check.pack();
-        let expect: Vec<u8> = vec![106];
-        assert_eq!(packed, expect);
-        let unpacked = AdminInstruction::unpack(&expect).unwrap();
-        assert_eq!(
-            unpacked, check,
-            "test packing and unpacking of the admin instruction to ApplyNewAdmin"
-        );
-
-        let check = AdminInstruction::CommitNewAdmin;
-        let packed = check.pack();
-        let expect: Vec<u8> = vec![107];
-        assert_eq!(packed, expect);
-        let unpacked = AdminInstruction::unpack(&expect).unwrap();
-        assert_eq!(
-            unpacked, check,
-            "test packing and unpacking of the admin instruction to CommitNewAdmin"
-        );
-
-        let new_fees = Fees {
-            admin_trade_fee_numerator: 1,
-            admin_trade_fee_denominator: 2,
-            admin_withdraw_fee_numerator: 3,
-            admin_withdraw_fee_denominator: 4,
-            trade_fee_numerator: 5,
-            trade_fee_denominator: 6,
-            withdraw_fee_numerator: 7,
-            withdraw_fee_denominator: 8,
-        };
-        let check = AdminInstruction::SetNewFees(new_fees);
-        let packed = check.pack();
-        let mut expect: Vec<u8> = vec![108];
-        let mut new_fees_slice = [0u8; Fees::LEN];
-        new_fees.pack_into_slice(&mut new_fees_slice[..]);
-        expect.extend_from_slice(&new_fees_slice);
-        assert_eq!(packed, expect);
-        let unpacked = AdminInstruction::unpack(&expect).unwrap();
-        assert_eq!(unpacked, check);
-
-        let new_rewards = DEFAULT_TEST_REWARDS;
-        let check = AdminInstruction::SetNewRewards(new_rewards);
-        let packed = check.pack();
-        let mut expect: Vec<u8> = vec![112];
-        let mut new_rewards_slice = [0u8; Rewards::LEN];
-        new_rewards.pack_into_slice(&mut new_rewards_slice[..]);
-        expect.extend_from_slice(&new_rewards_slice);
+        let mut expect = vec![100];
+        expect.extend_from_slice(&fees.admin_trade_fee_numerator.to_le_bytes());
+        expect.extend_from_slice(&fees.admin_trade_fee_denominator.to_le_bytes());
+        expect.extend_from_slice(&fees.admin_withdraw_fee_numerator.to_le_bytes());
+        expect.extend_from_slice(&fees.admin_withdraw_fee_denominator.to_le_bytes());
+        expect.extend_from_slice(&fees.trade_fee_numerator.to_le_bytes());
+        expect.extend_from_slice(&fees.trade_fee_denominator.to_le_bytes());
+        expect.extend_from_slice(&fees.withdraw_fee_numerator.to_le_bytes());
+        expect.extend_from_slice(&fees.withdraw_fee_denominator.to_le_bytes());
+        expect.extend_from_slice(&rewards.trade_reward_numerator.to_le_bytes());
+        expect.extend_from_slice(&rewards.trade_reward_denominator.to_le_bytes());
+        expect.extend_from_slice(&rewards.trade_reward_cap.to_le_bytes());
+        expect.extend_from_slice(&rewards.liquidity_reward_numerator.to_le_bytes());
+        expect.extend_from_slice(&rewards.liquidity_reward_denominator.to_le_bytes());
         assert_eq!(packed, expect);
         let unpacked = AdminInstruction::unpack(&expect).unwrap();
         assert_eq!(unpacked, check);
     }
 
     #[test]
-    fn test_swap_instruction_packing() {
-        // Initialize instruction packing
-        {
-            let nonce: u8 = 255;
-            let k = default_k().inner();
-            let i = default_i().inner();
-            let is_open_twap = TWAP_OPENED;
-            let curve_mode = CURVE_PMM;
+    fn test_pack_admin_set_new_fees() {
+        let fees = DEFAULT_TEST_FEES;
+        let check = AdminInstruction::SetNewFees(fees.clone());
+        let packed = check.pack();
+        let mut expect = vec![106];
+        expect.extend_from_slice(&fees.admin_trade_fee_numerator.to_le_bytes());
+        expect.extend_from_slice(&fees.admin_trade_fee_denominator.to_le_bytes());
+        expect.extend_from_slice(&fees.admin_withdraw_fee_numerator.to_le_bytes());
+        expect.extend_from_slice(&fees.admin_withdraw_fee_denominator.to_le_bytes());
+        expect.extend_from_slice(&fees.trade_fee_numerator.to_le_bytes());
+        expect.extend_from_slice(&fees.trade_fee_denominator.to_le_bytes());
+        expect.extend_from_slice(&fees.withdraw_fee_numerator.to_le_bytes());
+        expect.extend_from_slice(&fees.withdraw_fee_denominator.to_le_bytes());
+        assert_eq!(packed, expect);
+        let unpacked = AdminInstruction::unpack(&expect).unwrap();
+        assert_eq!(unpacked, check);
+    }
 
-            let check = SwapInstruction::Initialize(InitializeData {
-                nonce,
-                k,
-                i,
-                is_open_twap,
-                curve_mode,
-            });
-            let packed = check.pack();
-            let mut expect: Vec<u8> = vec![0, nonce];
-            expect.extend_from_slice(&k.to_le_bytes());
-            expect.extend_from_slice(&i.to_le_bytes());
-            expect.extend_from_slice(&is_open_twap.to_le_bytes());
-            expect.extend_from_slice(&curve_mode.to_le_bytes());
-            assert_eq!(packed, expect);
-            let unpacked_result = SwapInstruction::unpack(&expect);
-            match unpacked_result {
-                Ok(unpacked) => match unpacked {
-                    Some(instruction) => {
-                        assert_eq!(instruction, check);
-                    }
-                    None => (),
-                },
-                Err(_) => {}
-            }
-        }
+    #[test]
+    fn test_pack_admin_set_new_rewards() {
+        let rewards = DEFAULT_TEST_REWARDS;
+        let check = AdminInstruction::SetNewRewards(rewards.clone());
+        let packed = check.pack();
+        let mut expect = vec![107];
+        expect.extend_from_slice(&rewards.trade_reward_numerator.to_le_bytes());
+        expect.extend_from_slice(&rewards.trade_reward_denominator.to_le_bytes());
+        expect.extend_from_slice(&rewards.trade_reward_cap.to_le_bytes());
+        expect.extend_from_slice(&rewards.liquidity_reward_numerator.to_le_bytes());
+        expect.extend_from_slice(&rewards.liquidity_reward_denominator.to_le_bytes());
+        assert_eq!(packed, expect);
+        let unpacked = AdminInstruction::unpack(&expect).unwrap();
+        assert_eq!(unpacked, check);
+    }
 
-        // Swap instruction packing
-        {
-            let amount_in: u64 = 2;
-            let minimum_amount_out: u64 = 10;
-            let swap_direction: u8 = SWAP_DIRECTION_SELL_BASE;
-            let curve_mode: u8 = CURVE_PMM;
-            let check = SwapInstruction::Swap(SwapData {
-                amount_in,
-                minimum_amount_out,
-                swap_direction,
-                curve_mode,
-            });
-            let packed = check.pack();
-            let mut expect = vec![1];
-            expect.extend_from_slice(&amount_in.to_le_bytes());
-            expect.extend_from_slice(&minimum_amount_out.to_le_bytes());
-            expect.extend_from_slice(&swap_direction.to_le_bytes());
-            expect.extend_from_slice(&curve_mode.to_le_bytes());
-            assert_eq!(packed, expect);
-            let unpacked_result = SwapInstruction::unpack(&expect);
-            match unpacked_result {
-                Ok(unpacked) => match unpacked {
-                    Some(instruction) => {
-                        assert_eq!(instruction, check);
-                    }
-                    None => (),
-                },
-                Err(_) => {}
-            }
-        }
+    #[test]
+    fn test_pack_swap_initialization() {
+        let nonce: u8 = 255;
+        let slop: u64 = default_slop().to_scaled_val().unwrap().try_into().unwrap();
+        let mid_price = default_market_price().to_scaled_val().unwrap();
+        let is_open_twap = true;
+        let check = SwapInstruction::Initialize(InitializeData {
+            nonce,
+            slop,
+            mid_price,
+            is_open_twap,
+        });
+        let packed = check.pack();
+        let mut expect = vec![0];
+        expect.extend_from_slice(&nonce.to_le_bytes());
+        expect.extend_from_slice(&slop.to_le_bytes());
+        expect.extend_from_slice(&mid_price.to_le_bytes());
+        expect.extend_from_slice(&(is_open_twap as u8).to_le_bytes());
+        assert_eq!(packed, expect);
+        let unpacked = SwapInstruction::unpack(&expect).unwrap();
+        assert_eq!(unpacked, check);
+    }
 
-        // Deposit instruction packing
-        {
-            let token_a_amount: u64 = 10;
-            let token_b_amount: u64 = 20;
-            let min_mint_amount: u64 = 5;
-            let curve_mode: u8 = CURVE_PMM;
-            let check = SwapInstruction::Deposit(DepositData {
-                token_a_amount,
-                token_b_amount,
-                min_mint_amount,
-                curve_mode,
-            });
-            let packed = check.pack();
-            let mut expect = vec![2];
-            expect.extend_from_slice(&token_a_amount.to_le_bytes());
-            expect.extend_from_slice(&token_b_amount.to_le_bytes());
-            expect.extend_from_slice(&min_mint_amount.to_le_bytes());
-            expect.extend_from_slice(&curve_mode.to_le_bytes());
-            assert_eq!(packed, expect);
-            let unpacked_result = SwapInstruction::unpack(&expect);
-            match unpacked_result {
-                Ok(unpacked) => match unpacked {
-                    Some(instruction) => {
-                        assert_eq!(instruction, check);
-                    }
-                    None => (),
-                },
-                Err(_) => {}
-            }
-        }
+    #[test]
+    fn test_pack_swap() {
+        let amount_in: u64 = 1_000_000;
+        let minimum_amount_out: u64 = 500_000;
+        let swap_direction: u8 = 0;
+        let check = SwapInstruction::Swap(SwapData {
+            amount_in,
+            minimum_amount_out,
+            swap_direction,
+        });
+        let packed = check.pack();
+        let mut expect = vec![1];
+        expect.extend_from_slice(&amount_in.to_le_bytes());
+        expect.extend_from_slice(&minimum_amount_out.to_le_bytes());
+        expect.extend_from_slice(&swap_direction.to_le_bytes());
+        assert_eq!(packed, expect);
+        let unpacked = SwapInstruction::unpack(&expect).unwrap();
+        assert_eq!(unpacked, check);
+    }
 
-        // Withdraw instruction packing
-        {
-            let pool_token_amount: u64 = 1212438012089;
-            let minimum_token_a_amount: u64 = 102198761982612;
-            let minimum_token_b_amount: u64 = 2011239855213;
-            let check = SwapInstruction::Withdraw(WithdrawData {
-                pool_token_amount,
-                minimum_token_a_amount,
-                minimum_token_b_amount,
-            });
-            let packed = check.pack();
-            let mut expect = vec![3];
-            expect.extend_from_slice(&pool_token_amount.to_le_bytes());
-            expect.extend_from_slice(&minimum_token_a_amount.to_le_bytes());
-            expect.extend_from_slice(&minimum_token_b_amount.to_le_bytes());
-            assert_eq!(packed, expect);
-            let unpacked_result = SwapInstruction::unpack(&expect);
-            match unpacked_result {
-                Ok(unpacked) => match unpacked {
-                    Some(instruction) => {
-                        assert_eq!(instruction, check);
-                    }
-                    None => (),
-                },
-                Err(_) => {}
-            }
-        }
+    #[test]
+    fn test_pack_deposit() {
+        let token_a_amount: u64 = 1_000_000;
+        let token_b_amount: u64 = 500_000;
+        let min_mint_amount: u64 = 500_000;
+        let check = SwapInstruction::Deposit(DepositData {
+            token_a_amount,
+            token_b_amount,
+            min_mint_amount,
+        });
+        let packed = check.pack();
+        let mut expect = vec![2];
+        expect.extend_from_slice(&token_a_amount.to_le_bytes());
+        expect.extend_from_slice(&token_b_amount.to_le_bytes());
+        expect.extend_from_slice(&min_mint_amount.to_le_bytes());
+        assert_eq!(packed, expect);
+        let unpacked = SwapInstruction::unpack(&expect).unwrap();
+        assert_eq!(unpacked, check);
+    }
 
-        // WithdrawOne instruction packing
-        {
-            let pool_token_amount: u64 = 1212438012089;
-            let minimum_token_amount: u64 = 102198761982612;
-            let check = SwapInstruction::WithdrawOne(WithdrawOneData {
-                pool_token_amount,
-                minimum_token_amount,
-            });
-            let packed = check.pack();
-            let mut expect = vec![4];
-            expect.extend_from_slice(&pool_token_amount.to_le_bytes());
-            expect.extend_from_slice(&minimum_token_amount.to_le_bytes());
-            assert_eq!(packed, expect);
-            let unpacked_result = SwapInstruction::unpack(&expect);
-            match unpacked_result {
-                Ok(unpacked) => match unpacked {
-                    Some(instruction) => {
-                        assert_eq!(instruction, check);
-                    }
-                    None => (),
-                },
-                Err(_) => {}
-            }
-        }
+    #[test]
+    fn test_pack_withdraw() {
+        let minimum_token_a_amount: u64 = 1_000_000;
+        let minimum_token_b_amount: u64 = 500_000;
+        let pool_token_amount: u64 = 500_000;
+        let check = SwapInstruction::Withdraw(WithdrawData {
+            pool_token_amount,
+            minimum_token_a_amount,
+            minimum_token_b_amount,
+        });
+        let packed = check.pack();
+        let mut expect = vec![3];
+        expect.extend_from_slice(&pool_token_amount.to_le_bytes());
+        expect.extend_from_slice(&minimum_token_a_amount.to_le_bytes());
+        expect.extend_from_slice(&minimum_token_b_amount.to_le_bytes());
+        assert_eq!(packed, expect);
+        let unpacked = SwapInstruction::unpack(&expect).unwrap();
+        assert_eq!(unpacked, check);
     }
 }

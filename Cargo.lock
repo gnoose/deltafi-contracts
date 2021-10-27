@@ -383,7 +383,7 @@ dependencies = [
  "num-derive",
  "num-traits",
  "proptest",
- "rand 0.7.3",
+ "rand 0.8.4",
  "sim",
  "solana-program",
  "solana-sdk",

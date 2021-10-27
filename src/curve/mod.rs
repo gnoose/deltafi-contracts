@@ -6,7 +6,8 @@ mod pmm;
 pub use calc::*;
 pub use pmm::*;
 
-use crate::math::*;
+#[cfg(test)]
+use crate::math::{Decimal, HALF_WAD};
 
 #[cfg(test)]
 /// Slope Value for testing

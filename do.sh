@@ -85,6 +85,9 @@ perform_action() {
             yarn --cwd lib/client new-swap
         ;;
     test)
+            cargo test ${@:2}
+        ;;
+    test-bpf)
             cargo test-bpf ${@:2}
         ;;
     exact-test)

@@ -150,7 +150,7 @@ mod tests {
             rewards.trade_reward_cap = trade_reward_cap;
 
             let expected_trade_reward = trade_reward_cap;
-            let trade_reward = rewards.trade_reward_u64(trade_amount.into()).unwrap();
+            let trade_reward = rewards.trade_reward_u64(trade_amount).unwrap();
             assert_eq!(trade_reward, expected_trade_reward);
         }
 
@@ -160,7 +160,7 @@ mod tests {
             rewards.trade_reward_cap = trade_reward_cap;
 
             let expected_trade_reward = 5_000u64;
-            let trade_reward = rewards.trade_reward_u64(trade_amount.into()).unwrap();
+            let trade_reward = rewards.trade_reward_u64(trade_amount).unwrap();
             assert_eq!(trade_reward, expected_trade_reward);
         }
 

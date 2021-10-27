@@ -4,17 +4,13 @@
 
 pub mod admin;
 pub mod curve;
-// pub mod curve_1;
 pub mod entrypoint;
 pub mod error;
 pub mod instruction;
 pub mod math;
-// pub mod math2;
-// pub mod pool_converter;
 pub mod processor;
 pub mod pyth;
 pub mod state;
-pub mod utils;
 
 // Export current solana-program types for downstream users who may also be
 // building with a different solana-program version

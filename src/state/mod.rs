@@ -12,7 +12,7 @@ pub use liquidity::*;
 pub use rewards::*;
 pub use swap::*;
 
-pub use crate::math::*;
+pub use crate::math::Decimal;
 
 use solana_program::program_error::ProgramError;
 

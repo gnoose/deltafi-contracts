@@ -3,7 +3,7 @@
 use super::*;
 use crate::{
     error::SwapError,
-    math::Decimal,
+    math::{Decimal, TryAdd, TryDiv, TryMul, TrySub},
     state::{pack_decimal, unpack_decimal},
 };
 
@@ -452,5 +452,28 @@ impl Pack for PMMState {
         pack_decimal(self.base_target, base_target);
         pack_decimal(self.quote_target, quote_target);
         r[0] = self.r as u8;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_packing_pmm() {
+        let pmm_state = PMMState {
+            market_price: default_market_price(),
+            slop: default_slop(),
+            base_target: Decimal::from(1_000_000_000u64),
+            quote_target: Decimal::from(500_000_000u64),
+            base_reserve: Decimal::from(1_000_000_000u64),
+            quote_reserve: Decimal::from(500_000_000u64),
+            r: RState::One,
+        };
+
+        let mut packed = [0u8; PMMState::LEN];
+        PMMState::pack_into_slice(&pmm_state, &mut packed);
+        let unpacked = PMMState::unpack_from_slice(&packed).unwrap();
+        assert_eq!(pmm_state, unpacked);
     }
 }

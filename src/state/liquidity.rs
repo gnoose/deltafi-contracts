@@ -330,9 +330,9 @@ mod tests {
 
     prop_compose! {
         fn liquidity_amount_and_ratio()(amount in 0..=u32::MAX)(
-            liquidity_amount in Just(amount as u64 * 1_000_000 as u64),
-            rewards_rate in 1_000..=10_000 as u64, // 0.01 ~ 0.1%
-            period_number in 1..=10 as i64
+            liquidity_amount in Just(amount as u64 * 1_000_000u64),
+            rewards_rate in 1_000..=10_000u64, // 0.01 ~ 0.1%
+            period_number in 1i64..=10i64
         ) -> (u64, u64, i64) {
             (liquidity_amount, rewards_rate, period_number)
         }
@@ -343,10 +343,11 @@ mod tests {
         fn test_update_rewards(
             (liquidity_amount, rewards_rate, period_number) in liquidity_amount_and_ratio()
         ) {
-            let mut liquidity_position = LiquidityPosition::default();
-            liquidity_position.last_update_ts = 0;
+            let mut liquidity_position = LiquidityPosition {
+                liquidity_amount,
+                ..Default::default()
+            };
             liquidity_position.next_claim_ts += MIN_CLAIM_PERIOD;
-            liquidity_position.liquidity_amount = liquidity_amount;
 
             let exact_rate = WAD as u128 / rewards_rate as u128;
             let max_period_amount = liquidity_amount / rewards_rate;
@@ -370,9 +371,11 @@ mod tests {
 
     #[test]
     fn test_failures() {
-        let mut position = LiquidityPosition::default();
+        let mut position = LiquidityPosition {
+            liquidity_amount: u64::MAX,
+            ..Default::default()
+        };
 
-        position.liquidity_amount = u64::MAX;
         assert_eq!(
             position.deposit(100),
             Err(SwapError::CalculationFailure.into())
@@ -451,7 +454,7 @@ mod tests {
         let liquidity_provider = LiquidityProvider {
             is_initialized,
             owner,
-            positions: vec![position_1.clone(), position_2.clone()],
+            positions: vec![position_1, position_2],
         };
 
         let mut packed = [0u8; LiquidityProvider::LEN];
@@ -461,7 +464,7 @@ mod tests {
 
         let mut packed: Vec<u8> = vec![1];
         packed.extend_from_slice(&owner_key_raw);
-        packed.extend_from_slice(&(2 as u8).to_le_bytes());
+        packed.extend_from_slice(&(2u8).to_le_bytes());
         packed.extend_from_slice(&pool_1_key_raw);
         packed.extend_from_slice(&liquidity_amount_1.to_le_bytes());
         packed.extend_from_slice(&rewards_owed_1.to_le_bytes());
