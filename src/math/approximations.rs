@@ -5,7 +5,7 @@ use {
     std::cmp::Ordering,
 };
 
-/// Safe and secure square root computation function.
+/// Safe and efficient square root computation function.
 ///
 /// # Arguments
 ///

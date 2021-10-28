@@ -39,7 +39,7 @@ pub fn get_target_amount(
     if slope.is_zero() {
         return Ok(fair_amount);
     }
-    // current_reserve should be div_ceil
+    // TODO: current_reserve should be try_ceil_div. Need to add this function to Decimal and update here.
     let penalty_ratio = target_reserve
         .try_mul(target_reserve)?
         .try_div(future_reserve)?
