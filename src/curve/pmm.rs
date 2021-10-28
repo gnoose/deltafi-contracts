@@ -113,7 +113,7 @@ impl PMMState {
 
     // ================================ R < 1 case ====================================
 
-    fn r_bellow_sell_base_token(&self, base_amount: Decimal) -> Result<Decimal, ProgramError> {
+    fn r_below_sell_base_token(&self, base_amount: Decimal) -> Result<Decimal, ProgramError> {
         get_target_amount_reverse_direction(
             self.quote_target,
             self.quote_reserve,
@@ -123,7 +123,7 @@ impl PMMState {
         )
     }
 
-    fn r_bellow_sell_quote_token(&self, quote_amount: Decimal) -> Result<Decimal, ProgramError> {
+    fn r_below_sell_quote_token(&self, quote_amount: Decimal) -> Result<Decimal, ProgramError> {
         get_target_amount(
             self.quote_target,
             self.quote_reserve.try_add(quote_amount)?,
@@ -220,7 +220,7 @@ impl PMMState {
                 RState::BelowOne,
             ),
             RState::BelowOne => (
-                self.r_bellow_sell_base_token(base_amount.into())?,
+                self.r_below_sell_base_token(base_amount.into())?,
                 RState::BelowOne,
             ),
             RState::AboveOne => {
@@ -264,7 +264,7 @@ impl PMMState {
 
                 match back_to_one_pay_quote.cmp(&Decimal::from(quote_amount)) {
                     Ordering::Greater => (
-                        self.r_bellow_sell_quote_token(quote_amount.into())?
+                        self.r_below_sell_quote_token(quote_amount.into())?
                             .min(back_to_one_receive_base),
                         RState::BelowOne,
                     ),
@@ -425,6 +425,19 @@ impl Sealed for PMMState {}
 pub const PMM_STATE_SIZE: usize = 97; // 16 + 16 + 16 + 16 + 16 + 16 +1
 impl Pack for PMMState {
     const LEN: usize = PMM_STATE_SIZE;
+    fn pack_into_slice(&self, output: &mut [u8]) {
+        let output = array_mut_ref![output, 0, PMM_STATE_SIZE];
+        let (market_price, slop, base_reserve, quote_reserve, base_target, quote_target, r) =
+            mut_array_refs![output, 16, 16, 16, 16, 16, 16, 1];
+        pack_decimal(self.market_price, market_price);
+        pack_decimal(self.slop, slop);
+        pack_decimal(self.base_reserve, base_reserve);
+        pack_decimal(self.quote_reserve, quote_reserve);
+        pack_decimal(self.base_target, base_target);
+        pack_decimal(self.quote_target, quote_target);
+        r[0] = self.r as u8;
+    }
+
     fn unpack_from_slice(input: &[u8]) -> Result<Self, ProgramError> {
         let input = array_ref![input, 0, PMM_STATE_SIZE];
         #[allow(clippy::ptr_offset_with_cast)]
@@ -440,24 +453,99 @@ impl Pack for PMMState {
             r: r[0].try_into()?,
         })
     }
-
-    fn pack_into_slice(&self, output: &mut [u8]) {
-        let output = array_mut_ref![output, 0, PMM_STATE_SIZE];
-        let (market_price, slop, base_reserve, quote_reserve, base_target, quote_target, r) =
-            mut_array_refs![output, 16, 16, 16, 16, 16, 16, 1];
-        pack_decimal(self.market_price, market_price);
-        pack_decimal(self.slop, slop);
-        pack_decimal(self.base_reserve, base_reserve);
-        pack_decimal(self.quote_reserve, quote_reserve);
-        pack_decimal(self.base_target, base_target);
-        pack_decimal(self.quote_target, quote_target);
-        r[0] = self.r as u8;
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_init() {
+        let pmm_state = PMMState {
+            market_price: default_market_price(),
+            slop: default_slop(),
+            base_target: Decimal::from(1_000_000_000u64),
+            quote_target: Decimal::from(500_000_000u64),
+            base_reserve: Decimal::from(1_000_000_000u64),
+            quote_reserve: Decimal::from(500_000_000u64),
+            r: RState::One,
+        };
+
+        let mut new_pmm_state = PMMState::default();
+        new_pmm_state.init(pmm_state.clone());
+        assert_eq!(new_pmm_state, pmm_state);
+    }
+
+    #[test]
+    fn test_one_sell_token() {
+        let pmm_state = PMMState {
+            market_price: default_market_price(),
+            slop: default_slop(),
+            base_target: Decimal::from(1_000_000_000u64),
+            quote_target: Decimal::from(1_000_000_000u64),
+            base_reserve: Decimal::from(1_000_000_000u64),
+            quote_reserve: Decimal::from(1_000_000_000u64),
+            r: RState::One,
+        };
+
+        let quote_token = pmm_state.sell_base_token(100u64).unwrap();
+        assert_eq!(quote_token, (10000u64, RState::BelowOne));
+
+        let base_token = pmm_state.sell_quote_token(100u64).unwrap();
+        assert_eq!(base_token, (1u64, RState::AboveOne));
+    }
+
+    #[test]
+    fn test_get_mid_price() {
+        let mut pmm_state = PMMState {
+            market_price: default_market_price(),
+            slop: default_slop(),
+            base_target: Decimal::from(1_000_000_000u64),
+            quote_target: Decimal::from(1_000_000_000u64),
+            base_reserve: Decimal::from(1_000_000_000u64),
+            quote_reserve: Decimal::from(1_000_000_000u64),
+            r: RState::One,
+        };
+
+        let mid_price = pmm_state.get_mid_price().unwrap();
+        assert_eq!(mid_price, Decimal::from(100u64));
+    }
+
+    #[test]
+    fn test_failure() {
+        assert_eq!(RState::try_from(3u8), Err(ProgramError::InvalidAccountData));
+
+        let mut pmm_state = PMMState {
+            market_price: default_market_price(),
+            slop: default_slop(),
+            base_target: Decimal::from(1_000_000_000u64),
+            quote_target: Decimal::from(500_000_000u64),
+            base_reserve: Decimal::from(1_000_000_000u64),
+            quote_reserve: Decimal::from(500_000_000u64),
+            r: RState::One,
+        };
+        assert_eq!(
+            pmm_state.buy_shares(1_000_000_000u64, 500_000_000u64, 1_000_000_000u64),
+            Err(SwapError::InsufficientFunds.into())
+        );
+
+        pmm_state.base_reserve = Decimal::from(0u64);
+        assert_eq!(
+            pmm_state.buy_shares(500_000_000u64, 1_000_000_000u64, 1_000_000_000u64),
+            Err(SwapError::IncorrectMint.into())
+        );
+
+        pmm_state.base_reserve = Decimal::from(1_000_000_000u64);
+        assert_eq!(
+            pmm_state.sell_shares(
+                500_000_000u64,
+                1_000_000_000u64,
+                1_000_000_000u64,
+                1_000_000_000u64
+            ),
+            Err(SwapError::WithdrawNotEnough.into())
+        );
+    }
 
     #[test]
     fn test_packing_pmm() {
