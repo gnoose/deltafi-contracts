@@ -213,7 +213,7 @@ pub fn initialize_config(
     let data = AdminInstruction::Initialize(AdminInitializeData { fees, rewards }).pack();
 
     let accounts = vec![
-        AccountMeta::new(config_pubkey, true),
+        AccountMeta::new(config_pubkey, false),
         AccountMeta::new_readonly(market_authority_pubkey, false),
         AccountMeta::new_readonly(deltafi_mint_pubkey, false),
         AccountMeta::new_readonly(admin_pubkey, true),

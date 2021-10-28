@@ -24,11 +24,15 @@ thiserror = "1.0"
 uint = "0.9"
 
 [dev-dependencies]
+assert_matches = "1.5.0"
 log = "0.4"
 proptest = "1.0"
 rand = "0.8.0"
 sim =  { path = "./lib/sim" }
+solana-program-test = "1.7.11"
 solana-sdk = "1.7.11"
+serde = "1.0"
+serde_yaml = "0.8"
 
 [lib]
 crate-type = ["cdylib", "lib"]

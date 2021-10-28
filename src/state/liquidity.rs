@@ -351,7 +351,7 @@ mod tests {
 
             let exact_rate = WAD as u128 / rewards_rate as u128;
             let max_period_amount = liquidity_amount / rewards_rate;
-            let min_period_amount = max_period_amount - max_period_amount / 100_000;
+            let min_period_amount = max_period_amount - max_period_amount / 1_000;
 
             for i in 1..=REFRESH_TIMES * period_number {
                 liquidity_position
@@ -363,7 +363,7 @@ mod tests {
                 assert!(liquidity_position.rewards_estimated < max_period_amount);
             }
             assert!(liquidity_position.rewards_owed <= max_period_amount * period_number as u64);
-            // 0.0001% confidence
+            // 0.01% confidence
             assert!(liquidity_position.rewards_owed > min_period_amount * period_number as u64);
             assert_eq!(liquidity_position.next_claim_ts, MIN_CLAIM_PERIOD * (period_number + 1));
         }

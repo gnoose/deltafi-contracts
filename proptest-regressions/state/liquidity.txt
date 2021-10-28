@@ -10,3 +10,4 @@ cc f4f57ffa932f29b0b99edd1a1568953c42c8afd5a01254e62a75708e2c4c57d7 # shrinks to
 cc af638aae3cfe24313daccab55d33d56bef6e83091cbf276b2ff5327f369defa0 # shrinks to liquidity_amount = 50058000000
 cc 41af96a0b045395cf0742696c2722275ec34d865d9564ac8814336d9b743f57a # shrinks to liquidity_amount = 1000000
 cc ad2ead1ac07c7a51992a94586832bc3a1814423652810319cc29a0a22d2f2075 # shrinks to (liquidity_amount, rewards_rate) = (1000000, 1000)
+cc 828bab09205feade9c1eb48a3949b76184fa04d4042a41579c65eb546c583b33 # shrinks to (liquidity_amount, rewards_rate, period_number) = (0, 1000, 1)

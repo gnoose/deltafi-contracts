@@ -16,4 +16,4 @@ pub mod state;
 // building with a different solana-program version
 pub use solana_program;
 
-solana_program::declare_id!("TokenSwap1111111111111111111111111111111111");
+solana_program::declare_id!("Gbnfd7ubYaziYJ4LcnQjK7ZYGtt8hfowg5dFYaHDgeMH");

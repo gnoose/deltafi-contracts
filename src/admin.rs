@@ -123,6 +123,7 @@ fn initialize(
     config.bump_seed = bump_seed;
     config.future_admin_key = Pubkey::default();
     config.future_admin_deadline = ZERO_TS;
+    config.admin_key = *admin_info.key;
     config.deltafi_mint = *deltafi_mint_info.key;
     config.fees = Fees::new(fees);
     config.rewards = Rewards::new(rewards);

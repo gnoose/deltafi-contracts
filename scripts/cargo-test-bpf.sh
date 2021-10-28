@@ -11,6 +11,7 @@ export RUSTBACKTRACE=1
 
 set -x
 
+cargo +"$rust_stable" build-bpf
 cargo +"$rust_stable" test-bpf -- --nocapture
 
 exit 0
