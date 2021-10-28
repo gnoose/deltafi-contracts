@@ -45,8 +45,8 @@ impl InstructionType {
 pub struct InitializeData {
     /// Nonce used to create valid program address
     pub nonce: u8,
-    /// Slope variable - real value * 10**18, 0 <= slop <= 1
-    pub slop: u64,
+    /// Slope variable - real value * 10**18, 0 <= slope <= 1
+    pub slope: u64,
     /// mid price
     pub mid_price: u128,
     /// flag to know about twap open
@@ -503,12 +503,12 @@ impl SwapInstruction {
                 let (&nonce, rest) = rest
                     .split_first()
                     .ok_or(SwapError::InstructionUnpackError)?;
-                let (slop, rest) = unpack_u64(rest)?;
+                let (slope, rest) = unpack_u64(rest)?;
                 let (mid_price, rest) = unpack_u128(rest)?;
                 let (is_open_twap, _) = unpack_bool(rest)?;
                 Self::Initialize(InitializeData {
                     nonce,
-                    slop,
+                    slope,
                     mid_price,
                     is_open_twap,
                 })
@@ -556,13 +556,13 @@ impl SwapInstruction {
         match *self {
             Self::Initialize(InitializeData {
                 nonce,
-                slop,
+                slope,
                 mid_price,
                 is_open_twap,
             }) => {
                 buf.push(0x0);
                 buf.push(nonce);
-                buf.extend_from_slice(&slop.to_le_bytes());
+                buf.extend_from_slice(&slope.to_le_bytes());
                 buf.extend_from_slice(&mid_price.to_le_bytes());
                 buf.extend_from_slice(&(is_open_twap as u8).to_le_bytes());
             }
@@ -952,7 +952,7 @@ fn unpack_pubkey(input: &[u8]) -> Result<(Pubkey, &[u8]), ProgramError> {
 mod tests {
     use super::*;
     use crate::{
-        curve::{default_market_price, default_slop},
+        curve::{default_market_price, default_slope},
         state::{DEFAULT_TEST_FEES, DEFAULT_TEST_REWARDS},
     };
 
@@ -1022,19 +1022,19 @@ mod tests {
     #[test]
     fn test_pack_swap_initialization() {
         let nonce: u8 = 255;
-        let slop: u64 = default_slop().to_scaled_val().unwrap().try_into().unwrap();
+        let slope: u64 = default_slope().to_scaled_val().unwrap().try_into().unwrap();
         let mid_price = default_market_price().to_scaled_val().unwrap();
         let is_open_twap = true;
         let check = SwapInstruction::Initialize(InitializeData {
             nonce,
-            slop,
+            slope,
             mid_price,
             is_open_twap,
         });
         let packed = check.pack();
         let mut expect = vec![0];
         expect.extend_from_slice(&nonce.to_le_bytes());
-        expect.extend_from_slice(&slop.to_le_bytes());
+        expect.extend_from_slice(&slope.to_le_bytes());
         expect.extend_from_slice(&mid_price.to_le_bytes());
         expect.extend_from_slice(&(is_open_twap as u8).to_le_bytes());
         assert_eq!(packed, expect);

@@ -55,12 +55,12 @@ fn process_swap_instruction(
     match instruction {
         SwapInstruction::Initialize(InitializeData {
             nonce,
-            slop,
+            slope,
             mid_price,
             is_open_twap,
         }) => {
             msg!("Instruction: Initialize");
-            process_initialize(program_id, nonce, slop, mid_price, is_open_twap, accounts)
+            process_initialize(program_id, nonce, slope, mid_price, is_open_twap, accounts)
         }
         SwapInstruction::Swap(SwapData {
             amount_in,
@@ -122,7 +122,7 @@ fn process_swap_instruction(
 fn process_initialize(
     program_id: &Pubkey,
     nonce: u8,
-    slop: u64,
+    slope: u64,
     mid_price: u128,
     is_open_twap: bool,
     accounts: &[AccountInfo],
@@ -213,7 +213,7 @@ fn process_initialize(
 
     let mut pmm_state = PMMState::new(PMMState {
         market_price,
-        slop: Decimal::from_scaled_val(slop.into()),
+        slope: Decimal::from_scaled_val(slope.into()),
         base_target: Decimal::zero(),
         quote_target: Decimal::zero(),
         base_reserve: Decimal::zero(),

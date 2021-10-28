@@ -11,7 +11,7 @@ use crate::math::{Decimal, HALF_WAD};
 
 #[cfg(test)]
 /// Slope Value for testing
-pub fn default_slop() -> Decimal {
+pub fn default_slope() -> Decimal {
     Decimal::from_scaled_val(HALF_WAD as u128)
 }
 

@@ -1,4 +1,4 @@
-//! Proactive Market Maker from dodo
+//! Intelligent Market Maker V1
 
 use super::*;
 use crate::{
@@ -53,10 +53,10 @@ impl TryFrom<u8> for RState {
 #[repr(C)]
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PMMState {
-    /// mid price
+    /// market price
     pub market_price: Decimal,
-    /// slop
-    pub slop: Decimal,
+    /// slope
+    pub slope: Decimal,
     /// base token regression target
     pub base_target: Decimal,
     /// quote token regression target
@@ -81,7 +81,7 @@ impl PMMState {
     /// Init PMM state
     pub fn init(&mut self, params: PMMState) {
         self.market_price = params.market_price;
-        self.slop = params.slop;
+        self.slope = params.slope;
         self.base_target = params.base_target;
         self.base_reserve = params.base_reserve;
         self.quote_target = params.quote_target;
@@ -97,7 +97,7 @@ impl PMMState {
             self.quote_target,
             base_amount,
             self.market_price,
-            self.slop,
+            self.slope,
         )
     }
 
@@ -107,7 +107,7 @@ impl PMMState {
             self.base_target,
             quote_amount,
             self.market_price.reciprocal()?,
-            self.slop,
+            self.slope,
         )
     }
 
@@ -119,7 +119,7 @@ impl PMMState {
             self.quote_reserve,
             base_amount,
             self.market_price,
-            self.slop,
+            self.slope,
         )
     }
 
@@ -129,7 +129,7 @@ impl PMMState {
             self.quote_reserve.try_add(quote_amount)?,
             self.quote_reserve,
             self.market_price.reciprocal()?,
-            self.slop,
+            self.slope,
         )
     }
 
@@ -141,7 +141,7 @@ impl PMMState {
             self.base_reserve.try_add(base_amount)?,
             self.base_reserve,
             self.market_price,
-            self.slop,
+            self.slope,
         )
     }
 
@@ -151,7 +151,7 @@ impl PMMState {
             self.base_reserve,
             quote_amount,
             self.market_price.reciprocal()?,
-            self.slop,
+            self.slope,
         )
     }
 
@@ -165,7 +165,7 @@ impl PMMState {
                     self.quote_reserve,
                     self.base_reserve.try_sub(self.base_target)?,
                     self.market_price,
-                    self.slop,
+                    self.slope,
                 )?
             }
             RState::BelowOne => {
@@ -173,7 +173,7 @@ impl PMMState {
                     self.base_reserve,
                     self.quote_reserve.try_sub(self.quote_target)?,
                     self.market_price.reciprocal()?,
-                    self.slop,
+                    self.slope,
                 )?
             }
             _ => {}
@@ -192,9 +192,9 @@ impl PMMState {
                     .try_div(self.quote_reserve)?
                     .try_div(self.quote_reserve)?;
                 let r = r
-                    .try_mul(self.slop)?
+                    .try_mul(self.slope)?
                     .try_add(Decimal::one())?
-                    .try_sub(self.slop)?;
+                    .try_sub(self.slope)?;
                 self.market_price.try_div(r)
             }
             _ => {
@@ -204,9 +204,9 @@ impl PMMState {
                     .try_div(self.base_reserve)?
                     .try_div(self.base_reserve)?;
                 let r = r
-                    .try_mul(self.slop)?
+                    .try_mul(self.slope)?
                     .try_add(Decimal::one())?
-                    .try_sub(self.slop)?;
+                    .try_sub(self.slope)?;
                 self.market_price.try_mul(r)
             }
         }
@@ -427,10 +427,10 @@ impl Pack for PMMState {
     const LEN: usize = PMM_STATE_SIZE;
     fn pack_into_slice(&self, output: &mut [u8]) {
         let output = array_mut_ref![output, 0, PMM_STATE_SIZE];
-        let (market_price, slop, base_reserve, quote_reserve, base_target, quote_target, r) =
+        let (market_price, slope, base_reserve, quote_reserve, base_target, quote_target, r) =
             mut_array_refs![output, 16, 16, 16, 16, 16, 16, 1];
         pack_decimal(self.market_price, market_price);
-        pack_decimal(self.slop, slop);
+        pack_decimal(self.slope, slope);
         pack_decimal(self.base_reserve, base_reserve);
         pack_decimal(self.quote_reserve, quote_reserve);
         pack_decimal(self.base_target, base_target);
@@ -441,11 +441,11 @@ impl Pack for PMMState {
     fn unpack_from_slice(input: &[u8]) -> Result<Self, ProgramError> {
         let input = array_ref![input, 0, PMM_STATE_SIZE];
         #[allow(clippy::ptr_offset_with_cast)]
-        let (market_price, slop, base_reserve, quote_reserve, base_target, quote_target, r) =
+        let (market_price, slope, base_reserve, quote_reserve, base_target, quote_target, r) =
             array_refs![input, 16, 16, 16, 16, 16, 16, 1];
         Ok(Self {
             market_price: unpack_decimal(market_price),
-            slop: unpack_decimal(slop),
+            slope: unpack_decimal(slope),
             base_reserve: unpack_decimal(base_reserve),
             quote_reserve: unpack_decimal(quote_reserve),
             base_target: unpack_decimal(base_target),
@@ -463,7 +463,7 @@ mod tests {
     fn test_init() {
         let pmm_state = PMMState {
             market_price: default_market_price(),
-            slop: default_slop(),
+            slope: default_slope(),
             base_target: Decimal::from(1_000_000_000u64),
             quote_target: Decimal::from(500_000_000u64),
             base_reserve: Decimal::from(1_000_000_000u64),
@@ -480,7 +480,7 @@ mod tests {
     fn test_one_sell_token() {
         let pmm_state = PMMState {
             market_price: default_market_price(),
-            slop: default_slop(),
+            slope: default_slope(),
             base_target: Decimal::from(1_000_000_000u64),
             quote_target: Decimal::from(1_000_000_000u64),
             base_reserve: Decimal::from(1_000_000_000u64),
@@ -499,7 +499,7 @@ mod tests {
     fn test_get_mid_price() {
         let mut pmm_state = PMMState {
             market_price: default_market_price(),
-            slop: default_slop(),
+            slope: default_slope(),
             base_target: Decimal::from(1_000_000_000u64),
             quote_target: Decimal::from(1_000_000_000u64),
             base_reserve: Decimal::from(1_000_000_000u64),
@@ -517,7 +517,7 @@ mod tests {
 
         let mut pmm_state = PMMState {
             market_price: default_market_price(),
-            slop: default_slop(),
+            slope: default_slope(),
             base_target: Decimal::from(1_000_000_000u64),
             quote_target: Decimal::from(500_000_000u64),
             base_reserve: Decimal::from(1_000_000_000u64),
@@ -551,7 +551,7 @@ mod tests {
     fn test_packing_pmm() {
         let pmm_state = PMMState {
             market_price: default_market_price(),
-            slop: default_slop(),
+            slope: default_slope(),
             base_target: Decimal::from(1_000_000_000u64),
             quote_target: Decimal::from(500_000_000u64),
             base_reserve: Decimal::from(1_000_000_000u64),
