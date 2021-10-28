@@ -31,7 +31,7 @@ impl InstructionType {
     pub fn check(input: &[u8]) -> Option<Self> {
         let (&tag, _rest) = input.split_first()?;
         match tag {
-            100..=109 => Some(Self::Admin),
+            100..=106 => Some(Self::Admin),
             0..=7 => Some(Self::Swap),
             _ => None,
         }
@@ -101,7 +101,7 @@ pub struct WithdrawOneData {
     pub minimum_token_amount: u64,
 }
 
-/// ADMIN INSTRUCTION DATA
+/// ADMIN INSTRUCTION PARAMS
 /// Admin initialize config data
 #[repr(C)]
 #[derive(Clone, Debug, PartialEq)]
@@ -110,6 +110,14 @@ pub struct AdminInitializeData {
     pub fees: Fees,
     /// Default rewards
     pub rewards: Rewards,
+}
+
+/// Set new admin key
+#[repr(C)]
+#[derive(Clone, Debug, PartialEq)]
+pub struct CommitNewAdmin {
+    /// The new admin
+    pub new_admin_key: Pubkey,
 }
 
 /// Admin only instructions.
@@ -125,9 +133,7 @@ pub enum AdminInstruction {
     /// TODO: Docs
     SetFeeAccount,
     /// TODO: Docs
-    ApplyNewAdmin,
-    /// TODO: Docs
-    CommitNewAdmin,
+    CommitNewAdmin(CommitNewAdmin),
     /// TODO: Docs
     SetNewFees(Fees),
     /// TODO: Docs
@@ -151,13 +157,15 @@ impl AdminInstruction {
             101 => Self::Pause,
             102 => Self::Unpause,
             103 => Self::SetFeeAccount,
-            104 => Self::ApplyNewAdmin,
-            105 => Self::CommitNewAdmin,
-            106 => {
+            104 => {
+                let (new_admin_key, _) = unpack_pubkey(rest)?;
+                Self::CommitNewAdmin(CommitNewAdmin { new_admin_key })
+            }
+            105 => {
                 let fees = Fees::unpack_unchecked(rest)?;
                 Self::SetNewFees(fees)
             }
-            107 => {
+            106 => {
                 let rewards = Rewards::unpack_unchecked(rest)?;
                 Self::SetNewRewards(rewards)
             }
@@ -181,16 +189,18 @@ impl AdminInstruction {
             Self::Pause => buf.push(101),
             Self::Unpause => buf.push(102),
             Self::SetFeeAccount => buf.push(103),
-            Self::ApplyNewAdmin => buf.push(104),
-            Self::CommitNewAdmin => buf.push(105),
+            Self::CommitNewAdmin(CommitNewAdmin { new_admin_key }) => {
+                buf.push(104);
+                buf.extend_from_slice(new_admin_key.as_ref());
+            }
             Self::SetNewFees(fees) => {
-                buf.push(106);
+                buf.push(105);
                 let mut fees_slice = [0u8; Fees::LEN];
                 Pack::pack_into_slice(fees, &mut fees_slice[..]);
                 buf.extend_from_slice(&fees_slice);
             }
             Self::SetNewRewards(rewards) => {
-                buf.push(107);
+                buf.push(106);
                 let mut rewards_slice = [0u8; Rewards::LEN];
                 Pack::pack_into_slice(rewards, &mut rewards_slice[..]);
                 buf.extend_from_slice(&rewards_slice);
@@ -299,41 +309,21 @@ pub fn set_fee_account(
     })
 }
 
-/// Creates a 'apply_new_admin' instruction
-pub fn apply_new_admin(
-    program_id: Pubkey,
-    config_pubkey: Pubkey,
-    admin_pubkey: Pubkey,
-) -> Result<Instruction, ProgramError> {
-    let data = AdminInstruction::ApplyNewAdmin.pack();
-
-    let accounts = vec![
-        AccountMeta::new(config_pubkey, false),
-        AccountMeta::new_readonly(admin_pubkey, true),
-        AccountMeta::new_readonly(clock::id(), false),
-    ];
-
-    Ok(Instruction {
-        program_id,
-        accounts,
-        data,
-    })
-}
-
 /// Creates a 'commit_new_admin' instruction
 pub fn commit_new_admin(
     program_id: Pubkey,
     config_pubkey: Pubkey,
     admin_pubkey: Pubkey,
-    new_admin_pubkey: Pubkey,
+    deltafi_mint_pubkey: Pubkey,
+    new_admin_key: Pubkey,
 ) -> Result<Instruction, ProgramError> {
-    let data = AdminInstruction::CommitNewAdmin.pack();
+    let data = AdminInstruction::CommitNewAdmin(CommitNewAdmin { new_admin_key }).pack();
 
     let accounts = vec![
         AccountMeta::new(config_pubkey, false),
         AccountMeta::new_readonly(admin_pubkey, true),
-        AccountMeta::new_readonly(new_admin_pubkey, true),
-        AccountMeta::new_readonly(clock::id(), false),
+        AccountMeta::new(deltafi_mint_pubkey, false),
+        AccountMeta::new_readonly(spl_token::id(), false),
     ];
 
     Ok(Instruction {
@@ -999,7 +989,7 @@ mod tests {
         let fees = DEFAULT_TEST_FEES;
         let check = AdminInstruction::SetNewFees(fees.clone());
         let packed = check.pack();
-        let mut expect = vec![106];
+        let mut expect = vec![105];
         expect.extend_from_slice(&fees.admin_trade_fee_numerator.to_le_bytes());
         expect.extend_from_slice(&fees.admin_trade_fee_denominator.to_le_bytes());
         expect.extend_from_slice(&fees.admin_withdraw_fee_numerator.to_le_bytes());
@@ -1018,7 +1008,7 @@ mod tests {
         let rewards = DEFAULT_TEST_REWARDS;
         let check = AdminInstruction::SetNewRewards(rewards.clone());
         let packed = check.pack();
-        let mut expect = vec![107];
+        let mut expect = vec![106];
         expect.extend_from_slice(&rewards.trade_reward_numerator.to_le_bytes());
         expect.extend_from_slice(&rewards.trade_reward_denominator.to_le_bytes());
         expect.extend_from_slice(&rewards.trade_reward_cap.to_le_bytes());

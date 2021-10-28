@@ -8,13 +8,16 @@ use solana_program::{
     account_info::{next_account_info, AccountInfo},
     entrypoint::ProgramResult,
     msg,
-    program::invoke_signed,
+    program::{invoke, invoke_signed},
     program_error::ProgramError,
     program_pack::{IsInitialized, Pack},
     pubkey::Pubkey,
     sysvar::{clock::Clock, rent::Rent, Sysvar},
 };
-use spl_token::state::{Account, Mint};
+use spl_token::{
+    instruction::AuthorityType,
+    state::{Account, Mint},
+};
 
 use crate::{
     admin::process_admin_instruction,
@@ -1202,6 +1205,33 @@ fn token_burn<'a>(
         &[burn_account, mint, authority, token_program],
         signers,
     )
+}
+
+/// Set account authority
+pub fn set_authority<'a>(
+    token_program: &AccountInfo<'a>,
+    account_to_transfer_ownership: &AccountInfo<'a>,
+    new_authority: Option<Pubkey>,
+    authority_type: AuthorityType,
+    owner: &AccountInfo<'a>,
+) -> ProgramResult {
+    let ix = spl_token::instruction::set_authority(
+        token_program.key,
+        account_to_transfer_ownership.key,
+        new_authority.as_ref(),
+        authority_type,
+        owner.key,
+        &[],
+    )?;
+    invoke(
+        &ix,
+        &[
+            account_to_transfer_ownership.clone(),
+            owner.clone(),
+            token_program.clone(),
+        ],
+    )?;
+    Ok(())
 }
 
 /// Calculates the authority id by generating a program address.

@@ -86,6 +86,7 @@ pub fn add_swap_config(test: &mut ProgramTest) -> TestSwapConfig {
             is_initialized: true,
             decimals: DECIMALS,
             mint_authority: COption::Some(market_authority),
+            freeze_authority: COption::Some(admin.pubkey()),
             supply: 0,
             ..Mint::default()
         },
@@ -98,8 +99,6 @@ pub fn add_swap_config(test: &mut ProgramTest) -> TestSwapConfig {
         &ConfigInfo {
             version: PROGRAM_VERSION,
             bump_seed,
-            future_admin_key: Pubkey::new_unique(),
-            future_admin_deadline: ZERO_TS,
             admin_key: admin.pubkey(),
             deltafi_mint,
             fees: TEST_FEES,
@@ -153,7 +152,7 @@ impl TestSwapConfig {
                     &spl_token::id(),
                     &deltafi_mint.pubkey(),
                     &market_authority_pubkey,
-                    None,
+                    Some(&admin_pubkey),
                     DECIMALS,
                 )
                 .unwrap(),
@@ -186,7 +185,7 @@ impl TestSwapConfig {
 
         assert_matches!(banks_client.process_transaction(transaction).await, Ok(()));
 
-        TestSwapConfig {
+        Self {
             pubkey: swap_config_pubkey,
             admin,
             market_authority: market_authority_pubkey,

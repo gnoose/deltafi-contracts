@@ -2,27 +2,26 @@
 
 use solana_program::{
     account_info::{next_account_info, AccountInfo},
-    clock::UnixTimestamp,
     entrypoint::ProgramResult,
     msg,
     program_error::ProgramError,
     program_option::COption,
     program_pack::Pack,
     pubkey::Pubkey,
-    sysvar::{clock::Clock, rent::Rent, Sysvar},
+    sysvar::{rent::Rent, Sysvar},
 };
+use spl_token::instruction::AuthorityType;
 
 use crate::{
     error::SwapError,
-    instruction::{AdminInitializeData, AdminInstruction},
+    instruction::{AdminInitializeData, AdminInstruction, CommitNewAdmin},
     processor::{
-        assert_rent_exempt, assert_uninitialized, authority_id, unpack_mint, unpack_token_account,
+        assert_rent_exempt, assert_uninitialized, authority_id, set_authority, unpack_mint,
+        unpack_token_account,
     },
     state::{ConfigInfo, SwapInfo, PROGRAM_VERSION},
     state::{Fees, Rewards},
 };
-
-const ZERO_TS: UnixTimestamp = 0;
 
 /// Process admin instruction
 pub fn process_admin_instruction(
@@ -48,13 +47,9 @@ pub fn process_admin_instruction(
             msg!("Instruction: SetFeeAccount");
             set_fee_account(program_id, accounts)
         }
-        AdminInstruction::ApplyNewAdmin => {
-            msg!("Instruction: ApplyNewAdmin");
-            apply_new_admin(program_id, accounts)
-        }
-        AdminInstruction::CommitNewAdmin => {
+        AdminInstruction::CommitNewAdmin(CommitNewAdmin { new_admin_key }) => {
             msg!("Instruction: CommitNewAdmin");
-            commit_new_admin(program_id, accounts)
+            commit_new_admin(program_id, new_admin_key, accounts)
         }
         AdminInstruction::SetNewFees(new_fees) => {
             msg!("Instruction: SetNewFees");
@@ -115,14 +110,14 @@ fn initialize(
     if COption::Some(*market_autority_info.key) != deltafi_mint.mint_authority {
         return Err(SwapError::InvalidOwner.into());
     }
-    if deltafi_mint.freeze_authority.is_some() {
+    if deltafi_mint.freeze_authority.is_some()
+        && deltafi_mint.freeze_authority != COption::Some(*admin_info.key)
+    {
         return Err(SwapError::InvalidFreezeAuthority.into());
     }
 
     config.version = PROGRAM_VERSION;
     config.bump_seed = bump_seed;
-    config.future_admin_key = Pubkey::default();
-    config.future_admin_deadline = ZERO_TS;
     config.admin_key = *admin_info.key;
     config.deltafi_mint = *deltafi_mint_info.key;
     config.fees = Fees::new(fees);
@@ -210,43 +205,18 @@ fn set_fee_account(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResu
     Ok(())
 }
 
-/// Apply new admin (finalize admin transfer)
-#[inline(never)]
-fn apply_new_admin(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
-    let account_info_iter = &mut accounts.iter();
-    let config_info = next_account_info(account_info_iter)?;
-    let admin_info = next_account_info(account_info_iter)?;
-    let clock_sysvar_info = next_account_info(account_info_iter)?;
-
-    if config_info.owner != program_id {
-        return Err(SwapError::InvalidAccountOwner.into());
-    }
-
-    let mut config = ConfigInfo::unpack(&config_info.data.borrow())?;
-    is_admin(&config.admin_key, admin_info)?;
-    if config.future_admin_deadline == ZERO_TS {
-        return Err(SwapError::NoActiveTransfer.into());
-    }
-    let clock = Clock::from_account_info(clock_sysvar_info)?;
-    if clock.unix_timestamp > config.future_admin_deadline {
-        return Err(SwapError::AdminDeadlineExceeded.into());
-    }
-
-    config.admin_key = config.future_admin_key;
-    config.future_admin_key = Pubkey::default();
-    config.future_admin_deadline = ZERO_TS;
-    ConfigInfo::pack(config, &mut config_info.data.borrow_mut())?;
-    Ok(())
-}
-
 /// Commit new admin (initiate admin transfer)
 #[inline(never)]
-fn commit_new_admin(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
+fn commit_new_admin(
+    program_id: &Pubkey,
+    new_admin_key: Pubkey,
+    accounts: &[AccountInfo],
+) -> ProgramResult {
     let account_info_iter = &mut accounts.iter();
     let config_info = next_account_info(account_info_iter)?;
     let admin_info = next_account_info(account_info_iter)?;
-    let new_admin_info = next_account_info(account_info_iter)?;
-    let clock_sysvar_info = next_account_info(account_info_iter)?;
+    let deltafi_mint_info = next_account_info(account_info_iter)?;
+    let token_program_info = next_account_info(account_info_iter)?;
 
     if config_info.owner != program_id {
         return Err(SwapError::InvalidAccountOwner.into());
@@ -254,21 +224,18 @@ fn commit_new_admin(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramRes
 
     let mut config = ConfigInfo::unpack(&config_info.data.borrow())?;
     is_admin(&config.admin_key, admin_info)?;
-    if !new_admin_info.is_signer {
-        return Err(ProgramError::MissingRequiredSignature);
-    }
-    let clock = Clock::from_account_info(clock_sysvar_info)?;
-    const ADMIN_TRANSFER_DELAY: i64 = 259200;
-    if clock.unix_timestamp < config.future_admin_deadline {
-        return Err(SwapError::ActiveTransfer.into());
-    }
 
-    config.future_admin_key = *new_admin_info.key;
-    config.future_admin_deadline = clock
-        .unix_timestamp
-        .checked_add(ADMIN_TRANSFER_DELAY)
-        .ok_or(SwapError::CalculationFailure)?;
+    config.admin_key = new_admin_key;
     ConfigInfo::pack(config, &mut config_info.data.borrow_mut())?;
+
+    set_authority(
+        token_program_info,
+        deltafi_mint_info,
+        Some(new_admin_key),
+        AuthorityType::FreezeAccount,
+        admin_info,
+    )?;
+
     Ok(())
 }
 

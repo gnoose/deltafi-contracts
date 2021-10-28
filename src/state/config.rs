@@ -1,6 +1,5 @@
 use arrayref::{array_mut_ref, array_ref, array_refs, mut_array_refs};
 use solana_program::{
-    clock::UnixTimestamp,
     program_error::ProgramError,
     program_pack::{IsInitialized, Pack, Sealed},
     pubkey::{Pubkey, PUBKEY_BYTES},
@@ -26,10 +25,6 @@ pub struct ConfigInfo {
     /// Especially for deltafi mint
     pub bump_seed: u8,
 
-    /// Deadline to transfer admin control to future_admin_key
-    pub future_admin_deadline: UnixTimestamp,
-    /// Public key of the admin account to be applied
-    pub future_admin_key: Pubkey,
     /// Public key of admin account to execute admin instructions
     pub admin_key: Pubkey,
 
@@ -50,28 +45,17 @@ impl IsInitialized for ConfigInfo {
 }
 
 #[doc(hidden)]
-pub const CONFIG_INFO_SIZE: usize = 210;
+pub const CONFIG_INFO_SIZE: usize = 170;
 impl Pack for ConfigInfo {
     const LEN: usize = CONFIG_INFO_SIZE;
     #[doc(hidden)]
     fn unpack_from_slice(src: &[u8]) -> Result<Self, ProgramError> {
         let src = array_ref![src, 0, CONFIG_INFO_SIZE];
         #[allow(clippy::ptr_offset_with_cast)]
-        let (
-            version,
-            bump_seed,
-            future_admin_deadline,
-            future_admin_key,
-            admin_key,
-            deltafi_mint,
-            fees,
-            rewards,
-        ) = array_refs![
+        let (version, bump_seed, admin_key, deltafi_mint, fees, rewards) = array_refs![
             src,
             1,
             1,
-            8,
-            PUBKEY_BYTES,
             PUBKEY_BYTES,
             PUBKEY_BYTES,
             Fees::LEN,
@@ -86,8 +70,6 @@ impl Pack for ConfigInfo {
         Ok(Self {
             version,
             bump_seed: u8::from_le_bytes(*bump_seed),
-            future_admin_deadline: i64::from_le_bytes(*future_admin_deadline),
-            future_admin_key: Pubkey::new_from_array(*future_admin_key),
             admin_key: Pubkey::new_from_array(*admin_key),
             deltafi_mint: Pubkey::new_from_array(*deltafi_mint),
             fees: Fees::unpack_from_slice(fees)?,
@@ -98,21 +80,10 @@ impl Pack for ConfigInfo {
     fn pack_into_slice(&self, dst: &mut [u8]) {
         let dst = array_mut_ref![dst, 0, CONFIG_INFO_SIZE];
         #[allow(clippy::ptr_offset_with_cast)]
-        let (
-            version,
-            bump_seed,
-            future_admin_deadline,
-            future_admin_key,
-            admin_key,
-            deltafi_mint,
-            fees,
-            rewards,
-        ) = mut_array_refs![
+        let (version, bump_seed, admin_key, deltafi_mint, fees, rewards) = mut_array_refs![
             dst,
             1,
             1,
-            8,
-            PUBKEY_BYTES,
             PUBKEY_BYTES,
             PUBKEY_BYTES,
             Fees::LEN,
@@ -120,8 +91,6 @@ impl Pack for ConfigInfo {
         ];
         *version = self.version.to_le_bytes();
         *bump_seed = self.bump_seed.to_le_bytes();
-        *future_admin_deadline = self.future_admin_deadline.to_le_bytes();
-        future_admin_key.copy_from_slice(self.future_admin_key.as_ref());
         admin_key.copy_from_slice(self.admin_key.as_ref());
         deltafi_mint.copy_from_slice(self.deltafi_mint.as_ref());
         self.fees.pack_into_slice(&mut fees[..]);
@@ -137,11 +106,8 @@ mod tests {
     fn test_config_info_packing() {
         let version = PROGRAM_VERSION;
         let bump_seed = 255;
-        let future_admin_deadline: i64 = i64::MAX;
-        let future_admin_key_raw = [1u8; 32];
         let admin_key_raw = [2u8; 32];
         let deltafi_mint_raw = [3u8; 32];
-        let future_admin_key = Pubkey::new_from_array(future_admin_key_raw);
         let admin_key = Pubkey::new_from_array(admin_key_raw);
         let deltafi_mint = Pubkey::new_from_array(deltafi_mint_raw);
         let fees = DEFAULT_TEST_FEES;
@@ -150,8 +116,6 @@ mod tests {
         let config_info = ConfigInfo {
             version,
             bump_seed,
-            future_admin_deadline,
-            future_admin_key,
             admin_key,
             deltafi_mint,
             fees,
@@ -165,8 +129,6 @@ mod tests {
 
         let mut packed: Vec<u8> = vec![PROGRAM_VERSION];
         packed.extend_from_slice(&bump_seed.to_le_bytes());
-        packed.extend_from_slice(&future_admin_deadline.to_le_bytes());
-        packed.extend_from_slice(&future_admin_key_raw);
         packed.extend_from_slice(&admin_key_raw);
         packed.extend_from_slice(&deltafi_mint_raw);
         packed.extend_from_slice(&DEFAULT_TEST_FEES.admin_trade_fee_numerator.to_le_bytes());
