@@ -32,14 +32,19 @@ pub fn get_target_amount(
     market_price: Decimal,
     slope: Decimal,
 ) -> Result<Decimal, ProgramError> {
-    // TODO: add code to enforce target_reserve >= future_reserve >= current_reserve > 0
+    if current_reserve <= Decimal::zero()
+        || future_reserve < current_reserve
+        || future_reserve > target_reserve
+    {
+        return Err(SwapError::CalculationFailure.into());
+    }
+
     let fair_amount = future_reserve
         .try_sub(current_reserve)?
         .try_mul(market_price)?;
     if slope.is_zero() {
         return Ok(fair_amount);
     }
-    // TODO: current_reserve should be try_ceil_div. Need to add this function to Decimal and update here.
     let penalty_ratio = target_reserve
         .try_mul(target_reserve)?
         .try_div(future_reserve)?
@@ -171,4 +176,89 @@ pub fn get_target_reserve(
         .try_add(Decimal::one())?;
 
     premium.try_mul(current_reserve)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::curve::{default_market_price, default_slope};
+    use proptest::prelude::*;
+
+    prop_compose! {
+        fn get_reserve_range()(next_value in 1..=u32::MAX/2-1)(
+            target_reserve in next_value * 2..=u32::MAX,
+            future_reserve in next_value..=next_value * 2,
+            current_reserve in 1..=next_value
+        ) -> (Decimal, Decimal, Decimal) {
+            (Decimal::from(target_reserve as u64), Decimal::from(future_reserve as u64), Decimal::from(current_reserve as u64))
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn test_get_target_amount(
+            (target_reserve, future_reserve, current_reserve) in get_reserve_range()
+        ) {
+            let slope: Decimal = default_slope();
+            let market_price: Decimal = default_market_price();
+            let fair_amount = future_reserve
+                .try_sub(current_reserve)?
+                .try_mul(market_price)?;
+            let expected_target_amount: Decimal = if slope.is_zero() {
+                fair_amount
+            } else {
+                let penalty_ratio = target_reserve
+                    .try_mul(target_reserve)?
+                    .try_div(future_reserve)?
+                    .try_div(current_reserve)?;
+                let penalty = penalty_ratio.try_mul(slope)?;
+                fair_amount.try_mul(penalty.try_add(Decimal::one())?.try_sub(slope)?)?
+            };
+
+            assert_eq!(
+                expected_target_amount,
+                get_target_amount(
+                    target_reserve,
+                    future_reserve,
+                    current_reserve,
+                    market_price,
+                    slope
+                )?
+            );
+        }
+    }
+
+    #[test]
+    fn test_basics() {
+        let small = Decimal::from(1_000_000u64);
+        let medium = Decimal::from(2_000_000u64);
+        let large = Decimal::from(3_000_000u64);
+        let slope: Decimal = default_slope();
+        let market_price: Decimal = default_market_price();
+        // test failure cases for get_target_amount
+        {
+            assert!(
+                get_target_amount(large, medium, Decimal::zero(), market_price, slope).is_err()
+            );
+
+            assert!(get_target_amount(small, medium, large, market_price, slope).is_err());
+
+            assert!(
+                get_target_amount(Decimal::zero(), medium, large, market_price, slope).is_err()
+            );
+        }
+
+        // test case for slope = 0 on get_target_amount
+        {
+            let fair_amount = medium
+                .try_sub(small)
+                .unwrap()
+                .try_mul(market_price)
+                .unwrap();
+            assert_eq!(
+                get_target_amount(large, medium, small, market_price, Decimal::zero()).unwrap(),
+                fair_amount
+            );
+        }
+    }
 }
