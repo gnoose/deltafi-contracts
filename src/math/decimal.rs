@@ -69,6 +69,37 @@ impl Decimal {
         Self(U192::from(scaled_val))
     }
 
+    /// Round scaled decimal to u128
+    pub fn try_round_u128(&self) -> Result<u128, ProgramError> {
+        let rounded_val = Self::half_wad()
+            .checked_add(self.0)
+            .ok_or(SwapError::CalculationFailure)?
+            .checked_div(Self::wad())
+            .ok_or(SwapError::CalculationFailure)?;
+        Ok(u128::try_from(rounded_val).map_err(|_| SwapError::CalculationFailure)?)
+    }
+
+    /// Ceiling scaled decimal to u128
+    pub fn try_ceil_u128(&self) -> Result<u128, ProgramError> {
+        let ceil_val = Self::wad()
+            .checked_sub(U192::from(1u64))
+            .ok_or(SwapError::CalculationFailure)?
+            .checked_add(self.0)
+            .ok_or(SwapError::CalculationFailure)?
+            .checked_div(Self::wad())
+            .ok_or(SwapError::CalculationFailure)?;
+        Ok(u128::try_from(ceil_val).map_err(|_| SwapError::CalculationFailure)?)
+    }
+
+    /// Floor scaled decimal to u128
+    pub fn try_floor_u128(&self) -> Result<u128, ProgramError> {
+        let ceil_val = self
+            .0
+            .checked_div(Self::wad())
+            .ok_or(SwapError::CalculationFailure)?;
+        Ok(u128::try_from(ceil_val).map_err(|_| SwapError::CalculationFailure)?)
+    }
+
     /// Round scaled decimal to u64
     pub fn try_round_u64(&self) -> Result<u64, ProgramError> {
         let rounded_val = Self::half_wad()
@@ -103,7 +134,7 @@ impl Decimal {
     /// Square root decimal
     pub fn sqrt(&self) -> Result<Self, ProgramError> {
         Ok(Self::from(
-            sqrt(self.try_round_u64()?).ok_or(SwapError::CalculationFailure)?,
+            sqrt(self.try_round_u128()?).ok_or(SwapError::CalculationFailure)?,
         ))
     }
 
@@ -418,11 +449,8 @@ mod test {
             .try_sub(Decimal::from_scaled_val(2))
             .is_err());
 
-        assert_eq!(&format!("{}", Decimal::one()), "1.000000000000000000");
-        assert_eq!(
-            &format!("{}", Decimal::from_scaled_val(2)),
-            "0.000000000000000002"
-        );
+        assert_eq!(&format!("{}", Decimal::one()), "1.000000000");
+        assert_eq!(&format!("{}", Decimal::from_scaled_val(2)), "0.000000002");
 
         assert_eq!(U192::exp10(SCALE), Decimal::wad());
     }

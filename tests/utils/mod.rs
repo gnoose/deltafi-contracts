@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+#![allow(clippy::too_many_arguments)]
 
 use assert_matches::*;
 use deltafi_swap::{
@@ -109,7 +110,6 @@ pub fn add_swap_config(test: &mut ProgramTest) -> TestSwapConfig {
             mint_authority: COption::Some(market_authority),
             freeze_authority: COption::Some(admin.pubkey()),
             supply: 0,
-            ..Mint::default()
         },
         &spl_token::id(),
     );
@@ -656,7 +656,7 @@ impl TestSwapInfo {
 
     pub async fn validate_state(&self, banks_client: &mut BanksClient) {
         let swap_info = self.get_state(banks_client).await;
-        assert_eq!(swap_info.is_initialized, true);
+        assert!(swap_info.is_initialized);
         assert_eq!(swap_info.token_a, self.token_a);
         assert_eq!(swap_info.token_b, self.token_b);
         assert_eq!(swap_info.admin_fee_key_a, self.admin_fee_a_key);

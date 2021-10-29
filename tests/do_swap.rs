@@ -38,8 +38,8 @@ async fn test_success() {
         AddSwapInfoArgs {
             token_a_mint: spl_token::native_mint::id(),
             token_b_mint: srm_mint.pubkey,
-            token_a_amount: 42,
-            token_b_amount: 800,
+            token_a_amount: 42_000_000_000,
+            token_b_amount: 800_000_000_000,
             is_open_twap: true,
             oracle_a: sol_oracle.price_pubkey,
             oracle_b: srm_oracle.price_pubkey,
@@ -57,7 +57,7 @@ async fn test_success() {
         None,
         &payer,
         user_account_owner.pubkey(),
-        42,
+        10_000_000_000,
     )
     .await;
 
@@ -67,7 +67,7 @@ async fn test_success() {
         Some(&srm_mint.authority),
         &payer,
         user_account_owner.pubkey(),
-        800,
+        0,
     )
     .await;
 
@@ -89,10 +89,17 @@ async fn test_success() {
             sol_user_account,
             srm_user_account,
             deltafi_user_account,
-            2,
-            35,
+            2_000_000_000,
+            35_000_000_000,
             0,
             &payer,
         )
         .await;
+
+    assert_eq!(
+        get_token_balance(&mut banks_client, sol_user_account).await,
+        8_000_000_000,
+    );
+    assert!(get_token_balance(&mut banks_client, srm_user_account).await > 35_000_000_000);
+    assert!(get_token_balance(&mut banks_client, deltafi_user_account).await > 0);
 }

@@ -1,7 +1,5 @@
 //! Calculation functions
 
-use std::cmp::Ordering;
-
 use crate::{
     error::SwapError,
     math::{Decimal, TryAdd, TryDiv, TryMul, TrySub},
@@ -130,9 +128,10 @@ pub fn get_target_amount_reverse_direction(
 
     let target_reserve = numerator.try_div(denominator)?;
 
-    match target_reserve.cmp(&current_reserve) {
-        Ordering::Greater => Ok(Decimal::zero()),
-        _ => Ok(current_reserve.try_sub(target_reserve)?),
+    if target_reserve > current_reserve {
+        Ok(Decimal::zero())
+    } else {
+        current_reserve.try_sub(target_reserve)
     }
 }
 

@@ -319,11 +319,8 @@ mod test {
             Rate::one()
         );
 
-        assert_eq!(&format!("{}", Rate::one()), "1.000000000000000000");
-        assert_eq!(
-            &format!("{}", Rate::from_scaled_val(2)),
-            "0.000000000000000002"
-        );
+        assert_eq!(&format!("{}", Rate::one()), "1.000000000");
+        assert_eq!(&format!("{}", Rate::from_scaled_val(2)), "0.000000002");
 
         assert_eq!(
             Rate::try_from(Decimal::from_scaled_val(2)).unwrap(),

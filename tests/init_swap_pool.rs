@@ -40,7 +40,7 @@ async fn test_success() {
         None,
         &payer,
         user_accounts_owner.pubkey(),
-        42,
+        42_000_000_000,
     )
     .await;
     let srm_user_account = create_and_mint_to_token_account(
@@ -49,7 +49,7 @@ async fn test_success() {
         Some(&srm_mint.authority),
         &payer,
         user_accounts_owner.pubkey(),
-        800,
+        800_000_000_000,
     )
     .await;
 
@@ -124,8 +124,8 @@ async fn test_already_initialized() {
         AddSwapInfoArgs {
             token_a_mint: spl_token::native_mint::id(),
             token_b_mint: srm_mint.pubkey,
-            token_a_amount: 42,
-            token_b_amount: 800,
+            token_a_amount: 42_000_000_000,
+            token_b_amount: 800_000_000_000,
             is_open_twap: true,
             oracle_a: sol_oracle.price_pubkey,
             oracle_b: srm_oracle.price_pubkey,

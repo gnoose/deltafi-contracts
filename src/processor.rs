@@ -388,6 +388,7 @@ fn process_swap(
         market_price: new_market_price,
         ..token_swap.pool_state
     })?;
+
     let (receive_amount, new_multiplier) = match swap_direction {
         SWAP_DIRECTION_SELL_BASE => state.sell_base_token(amount_in)?,
         SWAP_DIRECTION_SELL_QUOTE => state.sell_quote_token(amount_in)?,
@@ -395,7 +396,6 @@ fn process_swap(
             return Err(SwapError::InvalidInstruction.into());
         }
     };
-
     let fees = &token_swap.fees;
     let trade_fee = fees.trade_fee(receive_amount)?;
     let admin_fee = fees.admin_trade_fee(trade_fee)?;
