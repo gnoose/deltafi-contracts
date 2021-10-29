@@ -25,6 +25,14 @@ pub struct Rewards {
 
 impl Rewards {
     /// Create new rewards
+    ///
+    /// # Arguments
+    ///
+    /// * params - rewards params.
+    ///
+    /// # Return value
+    ///
+    /// rewards constructed.
     pub fn new(params: &Self) -> Self {
         Rewards {
             trade_reward_numerator: params.trade_reward_numerator,
@@ -36,6 +44,14 @@ impl Rewards {
     }
 
     /// Calc trade reward amount with [`u64`]
+    ///
+    /// # Arguments
+    ///
+    /// * amount - trade amount.
+    ///
+    /// # Return value
+    ///
+    /// trade reward.
     pub fn trade_reward_u64(&self, amount: u64) -> Result<u64, ProgramError> {
         let c_reward = Decimal::from(amount)
             .sqrt()?
@@ -50,6 +66,14 @@ impl Rewards {
     }
 
     /// Calc lp reward amount with [`u64`]
+    ///
+    /// # Arguments
+    ///
+    /// * amount - liquidity amount.
+    ///
+    /// # Return value
+    ///
+    /// liquidity reward.
     pub fn liquidity_reward_u64(&self, amount: u64) -> Result<u64, ProgramError> {
         Decimal::from(amount)
             .try_mul(self.liquidity_reward_numerator)?

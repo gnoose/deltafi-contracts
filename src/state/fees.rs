@@ -30,7 +30,15 @@ pub struct Fees {
 }
 
 impl Fees {
-    /// Create new fees
+    /// Constructor to create new fees
+    ///
+    /// # Arguments
+    ///
+    /// * params - fee parameters.
+    ///
+    /// # Return value
+    ///
+    /// fees
     pub fn new(params: &Self) -> Self {
         Fees {
             admin_trade_fee_numerator: params.admin_trade_fee_numerator,
@@ -45,6 +53,14 @@ impl Fees {
     }
 
     /// Apply admin trade fee
+    ///
+    /// # Arguments
+    ///
+    /// * fee_amount - fee amount.
+    ///
+    /// # Return value
+    ///
+    /// admin trade fee
     pub fn admin_trade_fee(&self, fee_amount: u64) -> Result<u64, ProgramError> {
         fee_amount
             .checked_mul(self.admin_trade_fee_numerator)
@@ -54,6 +70,14 @@ impl Fees {
     }
 
     /// Apply admin withdraw fee
+    ///
+    /// # Arguments
+    ///
+    /// * fee_amount - fee amount.
+    ///
+    /// # Return value
+    ///
+    /// admin withdraw fee
     pub fn admin_withdraw_fee(&self, fee_amount: u64) -> Result<u64, ProgramError> {
         fee_amount
             .checked_mul(self.admin_withdraw_fee_numerator)
@@ -63,6 +87,14 @@ impl Fees {
     }
 
     /// Compute trade fee from amount
+    ///
+    /// # Arguments
+    ///
+    /// * trade_amount - trade amount.
+    ///
+    /// # Return value
+    ///
+    /// trade fee
     pub fn trade_fee(&self, trade_amount: u64) -> Result<u64, ProgramError> {
         trade_amount
             .checked_mul(self.trade_fee_numerator)
@@ -72,25 +104,20 @@ impl Fees {
     }
 
     /// Compute withdraw fee from amount
+    ///
+    /// # Arguments
+    ///
+    /// * withdraw_amount - withdraw amount.
+    ///
+    /// # Return value
+    ///
+    /// withdraw fee
     pub fn withdraw_fee(&self, withdraw_amount: u64) -> Result<u64, ProgramError> {
         withdraw_amount
             .checked_mul(self.withdraw_fee_numerator)
             .ok_or(SwapError::CalculationFailure)?
             .checked_div(self.withdraw_fee_denominator)
             .ok_or_else(|| SwapError::CalculationFailure.into())
-    }
-
-    /// Compute normalized fee for symmetric/asymmetric deposits/withdraws
-    pub fn normalized_trade_fee(&self, n_coins: u64, amount: u64) -> Option<u64> {
-        // adjusted_fee_numerator: uint256 = self.fee * N_COINS / (4 * (N_COINS - 1))
-        let adjusted_trade_fee_numerator = self
-            .trade_fee_numerator
-            .checked_mul(n_coins)?
-            .checked_div((n_coins.checked_sub(1)?).checked_mul(4)?)?; // XXX: Why divide by 4?
-
-        amount
-            .checked_mul(adjusted_trade_fee_numerator)?
-            .checked_div(self.trade_fee_denominator)
     }
 }
 
@@ -205,15 +232,6 @@ mod tests {
         assert_eq!(
             fees.admin_withdraw_fee(expected_withdraw_fee).unwrap(),
             expected_admin_withdraw_fee
-        );
-
-        let n_coins = 2;
-        let adjusted_trade_fee_numerator = fees.trade_fee_numerator * n_coins / (4 * (n_coins - 1));
-        let expected_normalized_fee =
-            trade_amount * adjusted_trade_fee_numerator / fees.trade_fee_denominator;
-        assert_eq!(
-            fees.normalized_trade_fee(n_coins, trade_amount).unwrap(),
-            expected_normalized_fee
         );
     }
 }

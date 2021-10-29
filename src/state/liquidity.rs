@@ -32,7 +32,16 @@ pub struct LiquidityProvider {
 }
 
 impl LiquidityProvider {
-    /// Create new provider
+    /// Constructor to create new liquidity provider
+    ///
+    /// # Arguments
+    ///
+    /// * owner - liquidity provider owner address.
+    /// * positions - liquidity provider's current position.
+    ///
+    /// # Return value
+    ///
+    /// liquidity provider
     pub fn new(owner: Pubkey, positions: Vec<LiquidityPosition>) -> Self {
         let mut provider = Self::default();
         provider.init(owner, positions);
@@ -40,6 +49,11 @@ impl LiquidityProvider {
     }
 
     /// Initialize a liquidity provider
+    ///
+    /// # Arguments
+    ///
+    /// * owner - liquidity provider owner address.
+    /// * positions - liquidity provider's current position.
     pub fn init(&mut self, owner: Pubkey, positions: Vec<LiquidityPosition>) {
         self.is_initialized = true;
         self.owner = owner;
@@ -47,6 +61,14 @@ impl LiquidityProvider {
     }
 
     /// Find position by pool
+    ///
+    /// # Arguments
+    ///
+    /// * pool - pool address.
+    ///
+    /// # Return value
+    ///
+    /// liquidity position, position index
     pub fn find_position(
         &mut self,
         pool: Pubkey,
@@ -64,6 +86,15 @@ impl LiquidityProvider {
     }
 
     /// Find or add position by pool
+    ///
+    /// # Arguments
+    ///
+    /// * pool - pool address.
+    /// * current_ts - unix time stamp
+    ///
+    /// # Return value
+    ///
+    /// liquidity position
     pub fn find_or_add_position(
         &mut self,
         pool: Pubkey,
@@ -77,6 +108,15 @@ impl LiquidityProvider {
         Ok(self.positions.last_mut().unwrap())
     }
 
+    /// Find position index given pool address
+    ///
+    /// # Arguments
+    ///
+    /// * pool - pool address.
+    ///
+    /// # Return value
+    ///
+    /// pool position index
     fn find_position_index(&self, pool: Pubkey) -> Option<usize> {
         self.positions
             .iter()
@@ -84,6 +124,15 @@ impl LiquidityProvider {
     }
 
     /// Withdraw liquidity and remove it from deposits if zeroed out
+    ///
+    /// # Arguments
+    ///
+    /// * withdraw_amount - amount to withdraw from the pool.
+    /// * position_index - pool position index
+    ///
+    /// # Return value
+    ///
+    /// withdraw status
     pub fn withdraw(&mut self, withdraw_amount: u64, position_index: usize) -> ProgramResult {
         let position = &mut self.positions[position_index];
         if withdraw_amount == position.liquidity_amount && position.rewards_owed == 0 {
@@ -95,6 +144,14 @@ impl LiquidityProvider {
     }
 
     /// Claim rewards in corresponding position
+    ///
+    /// # Arguments
+    ///
+    /// * pool - pool address.
+    ///
+    /// # Return value
+    ///
+    /// claimed amount
     pub fn claim(&mut self, pool: Pubkey) -> Result<u64, ProgramError> {
         let (position, position_index) = self.find_position(pool)?;
         let claimed_amount = position.claim_rewards()?;
@@ -125,7 +182,16 @@ pub struct LiquidityPosition {
 }
 
 impl LiquidityPosition {
-    /// Create new liquidity
+    /// Create new liquidity position
+    ///
+    /// # Arguments
+    ///
+    /// * pool - pool address.
+    /// * current_ts - unix timestamp
+    ///
+    /// # Return value
+    ///
+    /// liquidity position
     pub fn new(pool: Pubkey, current_ts: UnixTimestamp) -> Result<Self, ProgramError> {
         Ok(Self {
             pool,
@@ -141,6 +207,14 @@ impl LiquidityPosition {
     }
 
     /// Deposit liquidity
+    ///
+    /// # Arguments
+    ///
+    /// * deposit_amount - amount to deposit.
+    ///
+    /// # Return value
+    ///
+    /// deposit status
     pub fn deposit(&mut self, deposit_amount: u64) -> ProgramResult {
         self.liquidity_amount = self
             .liquidity_amount
@@ -150,6 +224,14 @@ impl LiquidityPosition {
     }
 
     /// Withdraw liquidity
+    ///
+    /// # Arguments
+    ///
+    /// * withdraw_amount - amount to withdraw.
+    ///
+    /// # Return value
+    ///
+    /// withdraw status
     pub fn withdraw(&mut self, withdraw_amount: u64) -> ProgramResult {
         if withdraw_amount > self.liquidity_amount {
             return Err(SwapError::InsufficientLiquidity.into());
@@ -162,6 +244,10 @@ impl LiquidityPosition {
     }
 
     /// Update next claim timestamp
+    ///
+    /// # Return value
+    ///
+    /// timestamp update status
     pub fn update_claim_ts(&mut self) -> ProgramResult {
         if self.liquidity_amount != 0 {
             self.next_claim_ts = self
@@ -173,6 +259,15 @@ impl LiquidityPosition {
     }
 
     /// Calculate and update rewards
+    ///
+    /// # Arguments
+    ///
+    /// * rewards_ratio - rewards ratio calculated by lp token and deltafi token price.
+    /// * current_ts - current unix timestamp.
+    ///
+    /// # Return value
+    ///
+    /// reward update status
     pub fn calc_and_update_rewards(
         &mut self,
         rewards_ratio: Decimal,
@@ -205,6 +300,10 @@ impl LiquidityPosition {
     }
 
     /// Claim rewards owed
+    ///
+    /// # Return value
+    ///
+    /// claimed rewards
     pub fn claim_rewards(&mut self) -> Result<u64, ProgramError> {
         if self.rewards_owed == 0 {
             return Err(SwapError::InsufficientClaimAmount.into());

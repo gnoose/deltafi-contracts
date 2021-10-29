@@ -325,7 +325,7 @@ fn process_swap(
     let reward_token = unpack_token_account(reward_token_info, &token_program_id)?;
     let reward_mint = unpack_mint(reward_mint_info, &token_program_id)?;
 
-    // ======== Need check more =========
+    // TODO: ======== Need check more =========
     let market_nonce = config.bump_seed;
     if *market_authority_info.key != authority_id(program_id, config_info.key, market_nonce)? {
         return Err(SwapError::InvalidProgramAddress.into());
@@ -973,7 +973,7 @@ fn get_new_market_price(
     clock: &Clock,
 ) -> Result<(Decimal, Decimal), ProgramError> {
     let pool_state = &mut token_swap.pool_state;
-    let pmm_price = pool_state.get_mid_price()?;
+    let pool_mid_price = pool_state.get_mid_price()?;
     let block_timestamp_last: u64 = clock.unix_timestamp.try_into().unwrap();
     let mut base_price_cumulative_last = token_swap.base_price_cumulative_last;
     if token_swap.is_open_twap {
@@ -983,7 +983,7 @@ fn get_new_market_price(
             && !pool_state.quote_reserve.is_zero()
         {
             base_price_cumulative_last =
-                base_price_cumulative_last.try_add(pmm_price.try_mul(time_elapsed as u64)?)?;
+                base_price_cumulative_last.try_add(pool_mid_price.try_mul(time_elapsed as u64)?)?;
         }
     }
 
@@ -996,21 +996,21 @@ fn get_new_market_price(
         // internal oracle price
         base_price_cumulative_last.try_div(block_timestamp_last - token_swap.cumulative_ticks)?
     } else {
-        // current pmm middle price
-        pmm_price
+        // current pool middle price
+        pool_mid_price
     };
 
-    let deviation = if pmm_price > market_price {
-        pmm_price.try_sub(market_price)?
+    let deviation = if pool_mid_price > market_price {
+        pool_mid_price.try_sub(market_price)?
     } else {
-        market_price.try_sub(pmm_price)?
+        market_price.try_sub(pool_mid_price)?
     };
 
     Ok((
-        if deviation.try_mul(100u64)? > pmm_price {
+        if deviation.try_mul(100u64)? > pool_mid_price {
             market_price
         } else {
-            pmm_price
+            pool_mid_price
         },
         base_price_cumulative_last,
     ))
