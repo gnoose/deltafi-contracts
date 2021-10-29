@@ -89,92 +89,6 @@ impl PoolState {
         self.multiplier = params.multiplier;
     }
 
-    // ================================ multiplier = 1 case ====================================
-
-    fn sell_base_token_with_multiplier_one(
-        &self,
-        base_amount: Decimal,
-    ) -> Result<Decimal, ProgramError> {
-        get_target_amount_reverse_direction(
-            self.quote_target,
-            self.quote_target,
-            base_amount,
-            self.market_price,
-            self.slope,
-        )
-    }
-
-    fn sell_quote_token_with_multiplier_one(
-        &self,
-        quote_amount: Decimal,
-    ) -> Result<Decimal, ProgramError> {
-        get_target_amount_reverse_direction(
-            self.base_target,
-            self.base_target,
-            quote_amount,
-            self.market_price.reciprocal()?,
-            self.slope,
-        )
-    }
-
-    // ================================ multiplier < 1 case ====================================
-
-    fn sell_base_token_with_multiplier_belowone(
-        &self,
-        base_amount: Decimal,
-    ) -> Result<Decimal, ProgramError> {
-        get_target_amount_reverse_direction(
-            self.quote_target,
-            self.quote_reserve,
-            base_amount,
-            self.market_price,
-            self.slope,
-        )
-    }
-
-    fn sell_quote_token_with_multiplier_belowone(
-        &self,
-        quote_amount: Decimal,
-    ) -> Result<Decimal, ProgramError> {
-        get_target_amount(
-            self.quote_target,
-            self.quote_reserve.try_add(quote_amount)?,
-            self.quote_reserve,
-            self.market_price.reciprocal()?,
-            self.slope,
-        )
-    }
-
-    // ================================ multiplier > 1 case ====================================
-
-    fn sell_base_token_with_multiplier_aboveone(
-        &self,
-        base_amount: Decimal,
-    ) -> Result<Decimal, ProgramError> {
-        get_target_amount(
-            self.base_target,
-            self.base_reserve.try_add(base_amount)?,
-            self.base_reserve,
-            self.market_price,
-            self.slope,
-        )
-    }
-
-    fn sell_quote_token_with_multiplier_aboveone(
-        &self,
-        quote_amount: Decimal,
-    ) -> Result<Decimal, ProgramError> {
-        get_target_amount_reverse_direction(
-            self.base_target,
-            self.base_reserve,
-            quote_amount,
-            self.market_price.reciprocal()?,
-            self.slope,
-        )
-    }
-
-    // ==================== Helper functions ========================
-
     /// Adjust pool token target.
     ///
     /// # Return value
@@ -239,6 +153,46 @@ impl PoolState {
         }
     }
 
+    /// Sell base token for quote token with multiplier input.
+    ///
+    /// # Arguments
+    ///
+    /// * base_amount - base amount to sell.
+    /// * multiplier - multiplier status.
+    ///
+    /// # Return value
+    ///
+    /// purchased quote token amount.
+    fn sell_base_token_with_multiplier(
+        &self,
+        base_amount: Decimal,
+        multiplier: Multiplier,
+    ) -> Result<Decimal, ProgramError> {
+        match multiplier {
+            Multiplier::One => get_target_amount_reverse_direction(
+                self.quote_target,
+                self.quote_target,
+                base_amount,
+                self.market_price,
+                self.slope,
+            ),
+            Multiplier::AboveOne => get_target_amount(
+                self.base_target,
+                self.base_reserve.try_add(base_amount)?,
+                self.base_reserve,
+                self.market_price,
+                self.slope,
+            ),
+            Multiplier::BelowOne => get_target_amount_reverse_direction(
+                self.quote_target,
+                self.quote_reserve,
+                base_amount,
+                self.market_price,
+                self.slope,
+            ),
+        }
+    }
+
     /// Sell base token for quote token.
     ///
     /// # Arguments
@@ -251,11 +205,11 @@ impl PoolState {
     pub fn sell_base_token(&self, base_amount: u64) -> Result<(u64, Multiplier), ProgramError> {
         let (quote_amount, new_multiplier) = match self.multiplier {
             Multiplier::One => (
-                self.sell_base_token_with_multiplier_one(base_amount.into())?,
+                self.sell_base_token_with_multiplier(base_amount.into(), Multiplier::One)?,
                 Multiplier::BelowOne,
             ),
             Multiplier::BelowOne => (
-                self.sell_base_token_with_multiplier_belowone(base_amount.into())?,
+                self.sell_base_token_with_multiplier(base_amount.into(), Multiplier::BelowOne)?,
                 Multiplier::BelowOne,
             ),
             Multiplier::AboveOne => {
@@ -264,14 +218,18 @@ impl PoolState {
 
                 match back_to_one_pay_base.cmp(&Decimal::from(base_amount)) {
                     Ordering::Greater => (
-                        self.sell_base_token_with_multiplier_aboveone(base_amount.into())?
-                            .min(back_to_one_receive_quote),
+                        self.sell_base_token_with_multiplier(
+                            base_amount.into(),
+                            Multiplier::AboveOne,
+                        )?
+                        .min(back_to_one_receive_quote),
                         Multiplier::AboveOne,
                     ),
                     Ordering::Equal => (back_to_one_receive_quote, Multiplier::One),
                     Ordering::Less => (
-                        self.sell_base_token_with_multiplier_one(
+                        self.sell_base_token_with_multiplier(
                             Decimal::from(base_amount).try_sub(back_to_one_pay_base)?,
+                            Multiplier::One,
                         )?
                         .try_add(back_to_one_receive_quote)?,
                         Multiplier::BelowOne,
@@ -280,6 +238,46 @@ impl PoolState {
             }
         };
         Ok((quote_amount.try_floor_u64()?, new_multiplier))
+    }
+
+    /// Sell quote token for base token with multiplier input.
+    ///
+    /// # Arguments
+    ///
+    /// * quote_amount - quote amount to sell.
+    /// * multiplier - multiplier status.
+    ///
+    /// # Return value
+    ///
+    /// purchased base token amount.
+    fn sell_quote_token_with_multiplier(
+        &self,
+        quote_amount: Decimal,
+        multiplier: Multiplier,
+    ) -> Result<Decimal, ProgramError> {
+        match multiplier {
+            Multiplier::One => get_target_amount_reverse_direction(
+                self.base_target,
+                self.base_target,
+                quote_amount,
+                self.market_price.reciprocal()?,
+                self.slope,
+            ),
+            Multiplier::AboveOne => get_target_amount_reverse_direction(
+                self.base_target,
+                self.base_reserve,
+                quote_amount,
+                self.market_price.reciprocal()?,
+                self.slope,
+            ),
+            Multiplier::BelowOne => get_target_amount(
+                self.quote_target,
+                self.quote_reserve.try_add(quote_amount)?,
+                self.quote_reserve,
+                self.market_price.reciprocal()?,
+                self.slope,
+            ),
+        }
     }
 
     /// Sell quote token for base token.
@@ -294,11 +292,11 @@ impl PoolState {
     pub fn sell_quote_token(&self, quote_amount: u64) -> Result<(u64, Multiplier), ProgramError> {
         let (base_amount, new_multiplier) = match self.multiplier {
             Multiplier::One => (
-                self.sell_quote_token_with_multiplier_one(quote_amount.into())?,
+                self.sell_quote_token_with_multiplier(quote_amount.into(), Multiplier::One)?,
                 Multiplier::AboveOne,
             ),
             Multiplier::AboveOne => (
-                self.sell_quote_token_with_multiplier_aboveone(quote_amount.into())?,
+                self.sell_quote_token_with_multiplier(quote_amount.into(), Multiplier::AboveOne)?,
                 Multiplier::AboveOne,
             ),
             Multiplier::BelowOne => {
@@ -307,14 +305,18 @@ impl PoolState {
 
                 match back_to_one_pay_quote.cmp(&Decimal::from(quote_amount)) {
                     Ordering::Greater => (
-                        self.sell_quote_token_with_multiplier_belowone(quote_amount.into())?
-                            .min(back_to_one_receive_base),
+                        self.sell_quote_token_with_multiplier(
+                            quote_amount.into(),
+                            Multiplier::BelowOne,
+                        )?
+                        .min(back_to_one_receive_base),
                         Multiplier::BelowOne,
                     ),
                     Ordering::Equal => (back_to_one_receive_base, Multiplier::One),
                     Ordering::Less => (
-                        self.sell_quote_token_with_multiplier_one(
+                        self.sell_quote_token_with_multiplier(
                             Decimal::from(quote_amount).try_sub(back_to_one_pay_quote)?,
+                            Multiplier::One,
                         )?
                         .try_add(back_to_one_receive_base)?,
                         Multiplier::AboveOne,
