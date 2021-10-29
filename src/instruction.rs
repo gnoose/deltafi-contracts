@@ -622,14 +622,15 @@ pub fn initialize(
     token_b_pubkey: Pubkey,
     pool_mint_pubkey: Pubkey,
     destination_pubkey: Pubkey,
-    pyth_pubkey: Pubkey,
+    pyth_a_pubkey: Pubkey,
+    pyth_b_pubkey: Pubkey,
     init_data: InitializeData,
 ) -> Result<Instruction, ProgramError> {
     let data = SwapInstruction::Initialize(init_data).pack();
 
     let accounts = vec![
         AccountMeta::new_readonly(config_pubkey, false),
-        AccountMeta::new(swap_pubkey, true),
+        AccountMeta::new(swap_pubkey, false),
         AccountMeta::new_readonly(authority_pubkey, false),
         AccountMeta::new_readonly(admin_fee_a_pubkey, false),
         AccountMeta::new_readonly(admin_fee_b_pubkey, false),
@@ -637,7 +638,8 @@ pub fn initialize(
         AccountMeta::new_readonly(token_b_pubkey, false),
         AccountMeta::new(pool_mint_pubkey, false),
         AccountMeta::new(destination_pubkey, false),
-        AccountMeta::new_readonly(pyth_pubkey, false),
+        AccountMeta::new_readonly(pyth_a_pubkey, false),
+        AccountMeta::new_readonly(pyth_b_pubkey, false),
         AccountMeta::new_readonly(clock::id(), false),
         AccountMeta::new_readonly(spl_token::id(), false),
     ];
@@ -664,14 +666,15 @@ pub fn swap(
     reward_token_pubkey: Pubkey,
     reward_mint_pubkey: Pubkey,
     admin_fee_destination_pubkey: Pubkey,
-    pyth_pubkey: Pubkey,
+    pyth_a_pubkey: Pubkey,
+    pyth_b_pubkey: Pubkey,
     swap_data: SwapData,
 ) -> Result<Instruction, ProgramError> {
     let data = SwapInstruction::Swap(swap_data).pack();
 
     let accounts = vec![
         AccountMeta::new_readonly(config_pubkey, false),
-        AccountMeta::new(swap_pubkey, true),
+        AccountMeta::new(swap_pubkey, false),
         AccountMeta::new_readonly(market_authority_pubkey, false),
         AccountMeta::new_readonly(swap_authority_pubkey, false),
         AccountMeta::new_readonly(user_transfer_authority_pubkey, true),
@@ -682,9 +685,10 @@ pub fn swap(
         AccountMeta::new(reward_token_pubkey, false),
         AccountMeta::new(reward_mint_pubkey, false),
         AccountMeta::new(admin_fee_destination_pubkey, false),
-        AccountMeta::new_readonly(pyth_pubkey, false),
-        AccountMeta::new_readonly(spl_token::id(), false),
+        AccountMeta::new_readonly(pyth_a_pubkey, false),
+        AccountMeta::new_readonly(pyth_b_pubkey, false),
         AccountMeta::new_readonly(clock::id(), false),
+        AccountMeta::new_readonly(spl_token::id(), false),
     ];
 
     Ok(Instruction {
@@ -706,9 +710,10 @@ pub fn deposit(
     swap_token_b_pubkey: Pubkey,
     pool_mint_pubkey: Pubkey,
     destination_pubkey: Pubkey,
-    pyth_pubkey: Pubkey,
     liquidity_provider_pubkey: Pubkey,
     liquidity_owner_pubkey: Pubkey,
+    pyth_a_pubkey: Pubkey,
+    pyth_b_pubkey: Pubkey,
     deposit_data: DepositData,
 ) -> Result<Instruction, ProgramError> {
     let data = SwapInstruction::Deposit(deposit_data).pack();
@@ -725,7 +730,8 @@ pub fn deposit(
         AccountMeta::new(destination_pubkey, false),
         AccountMeta::new(liquidity_provider_pubkey, false),
         AccountMeta::new_readonly(liquidity_owner_pubkey, true),
-        AccountMeta::new_readonly(pyth_pubkey, false),
+        AccountMeta::new_readonly(pyth_a_pubkey, false),
+        AccountMeta::new_readonly(pyth_b_pubkey, false),
         AccountMeta::new_readonly(clock::id(), false),
         AccountMeta::new_readonly(spl_token::id(), false),
     ];
@@ -753,7 +759,8 @@ pub fn withdraw(
     admin_fee_b_pubkey: Pubkey,
     liquidity_provider_pubkey: Pubkey,
     liquidity_owner_pubkey: Pubkey,
-    pyth_pubkey: Pubkey,
+    pyth_a_pubkey: Pubkey,
+    pyth_b_pubkey: Pubkey,
     withdraw_data: WithdrawData,
 ) -> Result<Instruction, ProgramError> {
     let data = SwapInstruction::Withdraw(withdraw_data).pack();
@@ -772,7 +779,8 @@ pub fn withdraw(
         AccountMeta::new(admin_fee_b_pubkey, false),
         AccountMeta::new(liquidity_provider_pubkey, false),
         AccountMeta::new_readonly(liquidity_owner_pubkey, true),
-        AccountMeta::new_readonly(pyth_pubkey, false),
+        AccountMeta::new_readonly(pyth_a_pubkey, false),
+        AccountMeta::new_readonly(pyth_b_pubkey, false),
         AccountMeta::new_readonly(clock::id(), false),
         AccountMeta::new_readonly(spl_token::id(), false),
     ];

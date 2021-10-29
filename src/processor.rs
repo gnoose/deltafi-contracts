@@ -136,8 +136,9 @@ fn process_initialize(
     let token_a_info = next_account_info(account_info_iter)?;
     let token_b_info = next_account_info(account_info_iter)?;
     let pool_mint_info = next_account_info(account_info_iter)?;
-    let destination_info = next_account_info(account_info_iter)?; // Destination account to mint LP tokens to
-    let pyth_price_info = next_account_info(account_info_iter)?; // pyth price account added : 2021.10.21
+    let destination_info = next_account_info(account_info_iter)?;
+    let pyth_a_price_info = next_account_info(account_info_iter)?;
+    let pyth_b_price_info = next_account_info(account_info_iter)?;
     let clock = &Clock::from_account_info(next_account_info(account_info_iter)?)?;
     let token_program_info = next_account_info(account_info_iter)?;
 
@@ -208,7 +209,7 @@ fn process_initialize(
     }
 
     // getting price from pyth or initial mid_price
-    let market_price = get_pyth_price(pyth_price_info, clock)
+    let market_price = get_market_price_from_pyth(pyth_a_price_info, pyth_b_price_info, clock)
         .unwrap_or_else(|_| Decimal::from_scaled_val(mid_price));
 
     let mut pool_state = PoolState::new(PoolState {
@@ -282,7 +283,8 @@ fn process_swap(
     let reward_token_info = next_account_info(account_info_iter)?;
     let reward_mint_info = next_account_info(account_info_iter)?;
     let admin_destination_info = next_account_info(account_info_iter)?;
-    let pyth_price_info = next_account_info(account_info_iter)?; // pyth price account added : 2021.10.21
+    let pyth_a_price_info = next_account_info(account_info_iter)?;
+    let pyth_b_price_info = next_account_info(account_info_iter)?;
     let clock = &Clock::from_account_info(next_account_info(account_info_iter)?)?;
     let token_program_info = next_account_info(account_info_iter)?;
 
@@ -295,7 +297,6 @@ fn process_swap(
     if token_swap.is_paused {
         return Err(SwapError::IsPaused.into());
     }
-
     let swap_nonce = token_swap.nonce;
     if *swap_authority_info.key != authority_id(program_id, swap_info.key, swap_nonce)? {
         return Err(SwapError::InvalidProgramAddress.into());
@@ -357,7 +358,7 @@ fn process_swap(
                 return Err(SwapError::InvalidAdmin.into());
             }
             if token_a.amount < amount_in {
-                return Err(ProgramError::InsufficientFunds);
+                return Err(SwapError::InsufficientFunds.into());
             }
         }
         SWAP_DIRECTION_SELL_QUOTE => {
@@ -372,27 +373,26 @@ fn process_swap(
                 return Err(SwapError::InvalidAdmin.into());
             }
             if token_b.amount < amount_in {
-                return Err(ProgramError::InsufficientFunds);
+                return Err(SwapError::InsufficientFunds.into());
             }
         }
         _ => {
-            return Err(ProgramError::InvalidArgument);
+            return Err(SwapError::InvalidInstruction.into());
         }
     }
 
     let (new_market_price, base_price_cumulative_last) =
-        get_new_market_price(&mut token_swap, pyth_price_info, clock)?;
+        get_new_market_price(&mut token_swap, pyth_a_price_info, pyth_b_price_info, clock)?;
 
     let state = PoolState::new(PoolState {
         market_price: new_market_price,
         ..token_swap.pool_state
     })?;
-
     let (receive_amount, new_multiplier) = match swap_direction {
         SWAP_DIRECTION_SELL_BASE => state.sell_base_token(amount_in)?,
         SWAP_DIRECTION_SELL_QUOTE => state.sell_quote_token(amount_in)?,
         _ => {
-            return Err(ProgramError::InvalidArgument);
+            return Err(SwapError::InvalidInstruction.into());
         }
     };
 
@@ -431,7 +431,7 @@ fn process_swap(
                 .ok_or(SwapError::CalculationFailure)?,
         ),
         _ => {
-            return Err(ProgramError::InvalidArgument);
+            return Err(SwapError::InvalidInstruction.into());
         }
     };
 
@@ -441,6 +441,13 @@ fn process_swap(
         multiplier: new_multiplier,
         ..state
     })?;
+
+    token_swap.cumulative_ticks = token_swap
+        .cumulative_ticks
+        .checked_add(clock.unix_timestamp.try_into().unwrap())
+        .ok_or(SwapError::CalculationFailure)?
+        .checked_sub(token_swap.block_timestamp_last)
+        .ok_or(SwapError::CalculationFailure)?;
     token_swap.block_timestamp_last = clock.unix_timestamp.try_into().unwrap();
     token_swap.base_price_cumulative_last = base_price_cumulative_last;
     SwapInfo::pack(token_swap, &mut swap_info.data.borrow_mut())?;
@@ -523,7 +530,7 @@ fn process_swap(
             )?;
         }
         _ => {
-            return Err(ProgramError::InvalidArgument);
+            return Err(SwapError::InvalidInstruction.into());
         }
     };
 
@@ -549,7 +556,8 @@ fn process_deposit(
     let destination_info = next_account_info(account_info_iter)?;
     let liquidity_provider_info = next_account_info(account_info_iter)?;
     let liquidity_owner_info = next_account_info(account_info_iter)?;
-    let pyth_price_info = next_account_info(account_info_iter)?; // pyth price account added : 2021.10.21
+    let pyth_a_price_info = next_account_info(account_info_iter)?;
+    let pyth_b_price_info = next_account_info(account_info_iter)?;
     let clock = &Clock::from_account_info(next_account_info(account_info_iter)?)?;
     let token_program_info = next_account_info(account_info_iter)?;
 
@@ -601,7 +609,7 @@ fn process_deposit(
 
     // updating price from pyth price
     let (new_market_price, base_price_cumulative_last) =
-        get_new_market_price(&mut token_swap, pyth_price_info, clock)?;
+        get_new_market_price(&mut token_swap, pyth_a_price_info, pyth_b_price_info, clock)?;
 
     let mut state = PoolState::new(PoolState {
         market_price: new_market_price,
@@ -630,6 +638,12 @@ fn process_deposit(
     )?;
 
     token_swap.pool_state = state;
+    token_swap.cumulative_ticks = token_swap
+        .cumulative_ticks
+        .checked_add(clock.unix_timestamp.try_into().unwrap())
+        .ok_or(SwapError::CalculationFailure)?
+        .checked_div(token_swap.block_timestamp_last)
+        .ok_or(SwapError::CalculationFailure)?;
     token_swap.block_timestamp_last = clock.unix_timestamp.try_into().unwrap();
     token_swap.base_price_cumulative_last = base_price_cumulative_last;
     SwapInfo::pack(token_swap, &mut swap_info.data.borrow_mut())?;
@@ -686,7 +700,8 @@ fn process_withdraw(
     let admin_fee_dest_b_info = next_account_info(account_info_iter)?;
     let liquidity_provider_info = next_account_info(account_info_iter)?;
     let liquidity_owner_info = next_account_info(account_info_iter)?;
-    let pyth_price_info = next_account_info(account_info_iter)?;
+    let pyth_a_price_info = next_account_info(account_info_iter)?;
+    let pyth_b_price_info = next_account_info(account_info_iter)?;
     let clock = &Clock::from_account_info(next_account_info(account_info_iter)?)?;
     let token_program_info = next_account_info(account_info_iter)?;
 
@@ -740,7 +755,7 @@ fn process_withdraw(
     }
 
     let (new_market_price, base_price_cumulative_last) =
-        get_new_market_price(&mut token_swap, pyth_price_info, clock)?;
+        get_new_market_price(&mut token_swap, pyth_a_price_info, pyth_b_price_info, clock)?;
 
     let mut state = PoolState::new(PoolState {
         market_price: new_market_price,
@@ -775,6 +790,12 @@ fn process_withdraw(
     )?;
 
     token_swap.pool_state = state;
+    token_swap.cumulative_ticks = token_swap
+        .cumulative_ticks
+        .checked_add(clock.unix_timestamp.try_into().unwrap())
+        .ok_or(SwapError::CalculationFailure)?
+        .checked_div(token_swap.block_timestamp_last)
+        .ok_or(SwapError::CalculationFailure)?;
     token_swap.block_timestamp_last = clock.unix_timestamp.try_into().unwrap();
     token_swap.base_price_cumulative_last = base_price_cumulative_last;
     SwapInfo::pack(token_swap, &mut swap_info.data.borrow_mut())?;
@@ -947,11 +968,12 @@ fn process_refresh_liquidity_obligation(
 
 fn get_new_market_price(
     token_swap: &mut SwapInfo,
-    pyth_price_info: &AccountInfo,
+    pyth_a_price_info: &AccountInfo,
+    pyth_b_price_info: &AccountInfo,
     clock: &Clock,
 ) -> Result<(Decimal, Decimal), ProgramError> {
     let pool_state = &mut token_swap.pool_state;
-    let mid_price = pool_state.get_mid_price()?;
+    let pmm_price = pool_state.get_mid_price()?;
     let block_timestamp_last: u64 = clock.unix_timestamp.try_into().unwrap();
     let mut base_price_cumulative_last = token_swap.base_price_cumulative_last;
     if token_swap.is_open_twap {
@@ -961,32 +983,52 @@ fn get_new_market_price(
             && !pool_state.quote_reserve.is_zero()
         {
             base_price_cumulative_last =
-                base_price_cumulative_last.try_add(mid_price.try_mul(time_elapsed as u64)?)?;
+                base_price_cumulative_last.try_add(pmm_price.try_mul(time_elapsed as u64)?)?;
         }
     }
 
-    let market_price = if let Ok(market_price) = get_pyth_price(pyth_price_info, clock) {
+    let market_price = if let Ok(market_price) =
+        get_market_price_from_pyth(pyth_a_price_info, pyth_b_price_info, clock)
+    {
+        // pyth price
         market_price
     } else if token_swap.is_open_twap {
+        // internal oracle price
         base_price_cumulative_last.try_div(block_timestamp_last - token_swap.cumulative_ticks)?
     } else {
-        mid_price
+        // current pmm middle price
+        pmm_price
     };
 
-    let deviation = if mid_price > market_price {
-        mid_price.try_sub(market_price)?
+    let deviation = if pmm_price > market_price {
+        pmm_price.try_sub(market_price)?
     } else {
-        market_price.try_sub(mid_price)?
+        market_price.try_sub(pmm_price)?
     };
 
     Ok((
-        if deviation.try_mul(100u64)? > mid_price {
+        if deviation.try_mul(100u64)? > pmm_price {
             market_price
         } else {
-            mid_price
+            pmm_price
         },
         base_price_cumulative_last,
     ))
+}
+
+fn get_market_price_from_pyth(
+    pyth_a_price_info: &AccountInfo,
+    pyth_b_price_info: &AccountInfo,
+    clock: &Clock,
+) -> Result<Decimal, ProgramError> {
+    let price_a = get_pyth_price(pyth_a_price_info, clock)?;
+    let price_b = get_pyth_price(pyth_b_price_info, clock)?;
+
+    if price_a > price_b {
+        price_a.try_div(price_b)
+    } else {
+        price_b.try_div(price_a)
+    }
 }
 
 fn _get_pyth_product_quote_currency(
@@ -1187,7 +1229,7 @@ fn token_burn<'a>(
     authority: AccountInfo<'a>,
     nonce: u8,
     amount: u64,
-) -> Result<(), ProgramError> {
+) -> ProgramResult {
     let swap_bytes = swap.to_bytes();
     let authority_signature_seeds = [&swap_bytes[..32], &[nonce]];
     let signers = &[&authority_signature_seeds[..]];
@@ -1244,11 +1286,11 @@ pub fn authority_id(program_id: &Pubkey, my_info: &Pubkey, nonce: u8) -> Result<
 pub fn unpack_token_account(
     account_info: &AccountInfo,
     token_program_id: &Pubkey,
-) -> Result<Account, SwapError> {
+) -> Result<Account, ProgramError> {
     if account_info.owner != token_program_id {
-        Err(SwapError::IncorrectTokenProgramId)
+        Err(SwapError::IncorrectTokenProgramId.into())
     } else {
         spl_token::state::Account::unpack(&account_info.data.borrow())
-            .map_err(|_| SwapError::ExpectedAccount)
+            .map_err(|_| SwapError::ExpectedAccount.into())
     }
 }

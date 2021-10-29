@@ -2,9 +2,7 @@
 
 mod utils;
 
-use deltafi_swap::{
-    admin::process_admin_instruction, error::SwapError, instruction::initialize_config,
-};
+use deltafi_swap::{error::SwapError, instruction::initialize_config, processor::process};
 use solana_program_test::*;
 use solana_sdk::{
     instruction::InstructionError,
@@ -16,14 +14,10 @@ use utils::*;
 
 #[tokio::test]
 async fn test_success() {
-    let mut test = ProgramTest::new(
-        "deltafi_swap",
-        deltafi_swap::id(),
-        processor!(process_admin_instruction),
-    );
+    let mut test = ProgramTest::new("deltafi_swap", deltafi_swap::id(), processor!(process));
 
     // limit to track compute unit increase
-    test.set_bpf_compute_max_units(10_000);
+    test.set_bpf_compute_max_units(20_000);
 
     let (mut banks_client, payer, _recent_blockhash) = test.start().await;
 
@@ -34,11 +28,7 @@ async fn test_success() {
 
 #[tokio::test]
 async fn test_already_initialized() {
-    let mut test = ProgramTest::new(
-        "deltafi_swap",
-        deltafi_swap::id(),
-        processor!(process_admin_instruction),
-    );
+    let mut test = ProgramTest::new("deltafi_swap", deltafi_swap::id(), processor!(process));
 
     let existing_config = add_swap_config(&mut test);
     let (mut banks_client, payer, recent_blockhash) = test.start().await;

@@ -96,7 +96,7 @@ impl PoolState {
     /// adjusted token target.
     pub fn adjust_target(&mut self) -> ProgramResult {
         match self.multiplier {
-            Multiplier::AboveOne => {
+            Multiplier::BelowOne => {
                 self.quote_target = get_target_reserve(
                     self.quote_reserve,
                     self.base_reserve.try_sub(self.base_target)?,
@@ -104,7 +104,7 @@ impl PoolState {
                     self.slope,
                 )?
             }
-            Multiplier::BelowOne => {
+            Multiplier::AboveOne => {
                 self.base_target = get_target_reserve(
                     self.base_reserve,
                     self.quote_reserve.try_sub(self.quote_target)?,
