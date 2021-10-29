@@ -71,9 +71,10 @@ pub fn get_target_amount_reverse_direction(
     market_price: Decimal,
     slope: Decimal,
 ) -> Result<Decimal, ProgramError> {
-    if target_reserve.is_zero() {
+    if target_reserve <= Decimal::zero() {
         return Err(SwapError::CalculationFailure.into());
     }
+
     if quote_amount.is_zero() {
         return Ok(Decimal::zero());
     }
@@ -84,19 +85,30 @@ pub fn get_target_amount_reverse_direction(
     }
 
     if slope == Decimal::one() {
-        let adjusted_ratio = fair_amount
-            .try_mul(current_reserve)?
-            .try_div(target_reserve)?
-            .try_div(target_reserve)?;
+        let adjusted_ratio = if fair_amount.is_zero() {
+            Decimal::zero()
+        } else if fair_amount.try_mul(current_reserve)?.try_div(fair_amount)? == current_reserve {
+            fair_amount
+                .try_mul(current_reserve)?
+                .try_div(target_reserve)?
+                .try_div(target_reserve)?
+        } else {
+            quote_amount
+                .try_mul(current_reserve)?
+                .try_div(target_reserve)?
+                .try_mul(market_price)?
+                .try_div(target_reserve)?
+        };
+
         return current_reserve
             .try_mul(adjusted_ratio)?
             .try_div(adjusted_ratio.try_add(Decimal::one())?);
     }
 
-    let future_reserve = target_reserve
+    let future_reserve = slope
         .try_mul(target_reserve)?
         .try_div(current_reserve)?
-        .try_mul(slope)?
+        .try_mul(target_reserve)?
         .try_add(fair_amount)?;
     let mut adjusted_reserve = Decimal::one().try_sub(slope)?.try_mul(current_reserve)?;
 
@@ -107,6 +119,7 @@ pub fn get_target_amount_reverse_direction(
         adjusted_reserve = adjusted_reserve.try_sub(future_reserve)?;
         false
     };
+    adjusted_reserve = Decimal::from(adjusted_reserve.try_floor_u64()?);
 
     let square_root = Decimal::one()
         .try_sub(slope)?
@@ -126,12 +139,11 @@ pub fn get_target_amount_reverse_direction(
         adjusted_reserve.try_add(square_root)?
     };
 
-    let target_reserve = numerator.try_div(denominator)?;
-
-    if target_reserve > current_reserve {
+    let candidate_reserve = numerator.try_div(denominator)?;
+    if candidate_reserve > current_reserve {
         Ok(Decimal::zero())
     } else {
-        current_reserve.try_sub(target_reserve)
+        current_reserve.try_sub(candidate_reserve)
     }
 }
 
@@ -194,10 +206,10 @@ mod tests {
     use proptest::prelude::*;
 
     prop_compose! {
-        fn get_reserve_and_amount()(
-            target_reserve in 0..=u32::MAX,
-            current_reserve in 0..=u32::MAX,
-            quote_amount in 0..=u32::MAX
+        fn get_reserve_and_amount()(next_value in 1..=u16::MAX-1)(
+            target_reserve in next_value..=u16::MAX,
+            current_reserve in 0..=next_value,
+            quote_amount in 0..=u16::MAX
         ) -> (Decimal, Decimal, Decimal) {
             (Decimal::from(target_reserve as u64), Decimal::from(current_reserve as u64), Decimal::from(quote_amount as u64))
         }
@@ -215,6 +227,80 @@ mod tests {
 
     proptest! {
         #[test]
+        fn test_get_target_amount_reverse_direction(
+            (target_reserve, current_reserve, quote_amount) in get_reserve_and_amount()
+        ) {
+            let slope: Decimal = default_slope();
+            let market_price: Decimal = default_market_price();
+            if !target_reserve.is_zero() && current_reserve > Decimal::zero()  {
+                let expected_amount = if quote_amount.is_zero() {
+                    Decimal::zero()
+                } else {
+                    let fair_amount = quote_amount.try_mul(market_price)?;
+                    if slope.is_zero() {
+                        fair_amount.min(current_reserve)
+                    } else if slope == Decimal::one() {
+                        let adjusted_ratio = if fair_amount.is_zero() {
+                            Decimal::zero()
+                        } else if fair_amount.try_mul(current_reserve)?.try_div(fair_amount)? == current_reserve {
+                            fair_amount.try_mul(current_reserve)?.try_div(target_reserve)?.try_div(target_reserve)?
+                        } else {
+                            quote_amount.try_mul(current_reserve)?.try_div(target_reserve)?.try_mul(market_price)?.try_div(target_reserve)?
+                        };
+                        current_reserve
+                            .try_mul(adjusted_ratio)?
+                            .try_div(adjusted_ratio.try_add(Decimal::one())?)?
+                    } else {
+                        let future_reserve = slope.try_mul(target_reserve)?.try_div(current_reserve)?.try_mul(target_reserve)?.try_add(fair_amount)?;
+                        let mut adjusted_reserve = Decimal::one().try_sub(slope)?.try_mul(current_reserve)?;
+                        let is_smaller = if adjusted_reserve < future_reserve {
+                            adjusted_reserve = future_reserve.try_sub(adjusted_reserve)?;
+                            true
+                        } else {
+                            adjusted_reserve = adjusted_reserve.try_sub(future_reserve)?;
+                            false
+                        };
+                        adjusted_reserve = Decimal::from(adjusted_reserve.try_floor_u64()?);
+
+                        let square_root = Decimal::one()
+                            .try_sub(slope)?
+                            .try_mul(4)?
+                            .try_mul(slope)?
+                            .try_mul(target_reserve)?
+                            .try_mul(target_reserve)?;
+                        let square_root = adjusted_reserve
+                            .try_mul(adjusted_reserve)?
+                            .try_add(square_root)?
+                            .sqrt()?;
+
+                        let denominator = Decimal::one().try_sub(slope)?.try_mul(2)?;
+                        let numerator = if is_smaller {
+                            square_root.try_sub(adjusted_reserve)?
+                        } else {
+                            adjusted_reserve.try_add(square_root)?
+                        };
+
+                        let target_reserve = numerator.try_div(denominator)?;
+                        if target_reserve > current_reserve {
+                            Decimal::zero()
+                        } else {
+                            current_reserve.try_sub(target_reserve)?
+                        }
+                    }
+                };
+                assert_eq!(
+                    expected_amount,
+                    get_target_amount_reverse_direction(
+                        target_reserve,
+                        current_reserve,
+                        quote_amount,
+                        market_price,
+                        slope
+                    )?
+                );
+            }
+        }
+
         fn test_get_target_reserve(
             (_target_reserve, current_reserve, quote_amount) in get_reserve_and_amount()
         ) {
@@ -302,16 +388,80 @@ mod tests {
 
     #[test]
     fn test_basics() {
+        let target_reserve = Decimal::from(2_000_000u64);
         let current_reserve = Decimal::from(1_000_000u64);
-        let quote_amount = Decimal::from(2_000u64);
+        let quote_amount = Decimal::from(3_000u64);
         let slope: Decimal = default_slope();
         let market_price: Decimal = default_market_price();
+
+        // Test failures on get_target_amount_reverse_direction
+        {
+            assert!(get_target_amount_reverse_direction(
+                target_reserve,
+                Decimal::zero(),
+                quote_amount,
+                market_price,
+                slope
+            )
+            .is_err());
+        }
+
+        {
+            assert_eq!(
+                get_target_amount_reverse_direction(
+                    target_reserve,
+                    current_reserve,
+                    Decimal::zero(),
+                    market_price,
+                    slope
+                )
+                .unwrap(),
+                Decimal::zero()
+            );
+
+            let fair_amount = quote_amount.try_mul(market_price).unwrap();
+            assert_eq!(
+                get_target_amount_reverse_direction(
+                    target_reserve,
+                    current_reserve,
+                    quote_amount,
+                    market_price,
+                    Decimal::zero()
+                )
+                .unwrap(),
+                fair_amount.min(current_reserve)
+            );
+
+            let adjusted_ratio = fair_amount
+                .try_mul(current_reserve)
+                .unwrap()
+                .try_div(target_reserve)
+                .unwrap()
+                .try_div(target_reserve)
+                .unwrap();
+            let expected_amount = current_reserve
+                .try_mul(adjusted_ratio)
+                .unwrap()
+                .try_div(adjusted_ratio.try_add(Decimal::one()).unwrap())
+                .unwrap();
+            assert_eq!(
+                get_target_amount_reverse_direction(
+                    target_reserve,
+                    current_reserve,
+                    quote_amount,
+                    market_price,
+                    Decimal::one()
+                )
+                .unwrap(),
+                expected_amount
+            );
+        }
 
         {
             assert_eq!(
                 get_target_reserve(Decimal::zero(), quote_amount, market_price, slope).unwrap(),
                 Decimal::zero()
-            )
+            );
         }
 
         {
@@ -324,7 +474,7 @@ mod tests {
                 get_target_reserve(current_reserve, quote_amount, market_price, Decimal::zero())
                     .unwrap(),
                 expected_amount
-            )
+            );
         }
 
         let small = Decimal::from(1_000_000u64);
