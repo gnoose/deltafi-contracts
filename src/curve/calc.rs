@@ -161,13 +161,23 @@ pub fn get_target_reserve(
         return quote_amount.try_mul(market_price)?.try_add(current_reserve);
     }
 
-    let square_root = quote_amount
-        .try_mul(market_price)?
-        .try_mul(slope)?
-        .try_mul(4)?
-        .try_div(current_reserve)?
-        .try_add(Decimal::one())?
-        .sqrt()?;
+    let price_offset = market_price.try_mul(slope)?.try_mul(4)?;
+
+    let square_root = if price_offset.is_zero() {
+        Decimal::one()
+    } else if price_offset.try_mul(quote_amount)?.try_div(price_offset)? == quote_amount {
+        price_offset
+            .try_mul(quote_amount)?
+            .try_div(current_reserve)?
+            .try_add(Decimal::one())?
+            .sqrt()?
+    } else {
+        price_offset
+            .try_div(current_reserve)?
+            .try_mul(quote_amount)?
+            .try_add(Decimal::one())?
+            .sqrt()?
+    };
 
     let premium = square_root
         .try_sub(Decimal::one())?
@@ -185,6 +195,16 @@ mod tests {
     use proptest::prelude::*;
 
     prop_compose! {
+        fn get_reserve_and_amount()(
+            target_reserve in 0..=u32::MAX,
+            current_reserve in 0..=u32::MAX,
+            quote_amount in 0..=u32::MAX
+        ) -> (Decimal, Decimal, Decimal) {
+            (Decimal::from(target_reserve as u64), Decimal::from(current_reserve as u64), Decimal::from(quote_amount as u64))
+        }
+    }
+
+    prop_compose! {
         fn get_reserve_range()(next_value in 1..=u32::MAX/2-1)(
             target_reserve in next_value * 2..=u32::MAX,
             future_reserve in next_value..=next_value * 2,
@@ -195,6 +215,59 @@ mod tests {
     }
 
     proptest! {
+        #[test]
+        fn test_get_target_reserve(
+            (_target_reserve, current_reserve, quote_amount) in get_reserve_and_amount()
+        ) {
+            let slope: Decimal = default_slope();
+            let market_price: Decimal = default_market_price();
+            let expected_target_reserve = if current_reserve.is_zero() {
+                Decimal::zero()
+            } else if slope.is_zero() {
+                quote_amount.try_mul(market_price)?.try_add(current_reserve)?
+            } else {
+                let price_offset = market_price
+                        .try_mul(slope)?
+                        .try_mul(4)?;
+                    let square_root = if price_offset.is_zero() {
+                        Decimal::one()
+                    } else if price_offset
+                        .try_mul(quote_amount)?
+                        .try_div(price_offset)? == quote_amount
+                    {
+                        price_offset
+                            .try_mul(quote_amount)?
+                            .try_div(current_reserve)?
+                            .try_add(Decimal::one())?
+                            .sqrt()?
+                    } else {
+                        price_offset
+                            .try_div(current_reserve)?
+                            .try_mul(quote_amount)?
+                            .try_add(Decimal::one())?
+                            .sqrt()?
+                    };
+
+                    let premium = square_root
+                        .try_sub(Decimal::one())?
+                        .try_div(2)?
+                        .try_div(slope)?
+                        .try_add(Decimal::one())?;
+
+                    premium.try_mul(current_reserve)?
+            };
+
+            assert_eq!(
+                expected_target_reserve,
+                get_target_reserve(
+                    current_reserve,
+                    quote_amount,
+                    market_price,
+                    slope
+                )?
+            );
+        }
+
         #[test]
         fn test_get_target_amount(
             (target_reserve, future_reserve, current_reserve) in get_reserve_range()
@@ -230,11 +303,34 @@ mod tests {
 
     #[test]
     fn test_basics() {
+        let current_reserve = Decimal::from(1_000_000u64);
+        let quote_amount = Decimal::from(2_000u64);
+        let slope: Decimal = default_slope();
+        let market_price: Decimal = default_market_price();
+
+        {
+            assert_eq!(
+                get_target_reserve(Decimal::zero(), quote_amount, market_price, slope).unwrap(),
+                Decimal::zero()
+            )
+        }
+
+        {
+            let expected_amount = quote_amount
+                .try_mul(market_price)
+                .unwrap()
+                .try_add(current_reserve)
+                .unwrap();
+            assert_eq!(
+                get_target_reserve(current_reserve, quote_amount, market_price, Decimal::zero())
+                    .unwrap(),
+                expected_amount
+            )
+        }
+
         let small = Decimal::from(1_000_000u64);
         let medium = Decimal::from(2_000_000u64);
         let large = Decimal::from(3_000_000u64);
-        let slope: Decimal = default_slope();
-        let market_price: Decimal = default_market_price();
         // test failure cases for get_target_amount
         {
             assert!(
