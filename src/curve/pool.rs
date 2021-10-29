@@ -548,6 +548,70 @@ impl Pack for PoolState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
+
+    prop_compose! {
+        fn get_pool_argument_range()(
+            next_value in 2..=u16::MAX-1
+        )(
+            multiplier_index in 0..=2usize,
+            base_target in 1..=next_value,
+            quote_target in 1..=next_value,
+            base_reserve in next_value..=u16::MAX,
+            quote_reserve in next_value..=u16::MAX
+        ) -> (Multiplier ,Decimal, Decimal, Decimal, Decimal) {
+            let multiplier_arry = [Multiplier::One, Multiplier::AboveOne, Multiplier::BelowOne];
+            (multiplier_arry[multiplier_index], Decimal::from(base_target as u64), Decimal::from(quote_target as u64), Decimal::from(base_reserve as u64), Decimal::from(quote_reserve as u64))
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn test_get_mid_price(
+            (multiplier, base_target, quote_target, base_reserve, quote_reserve) in get_pool_argument_range()
+        ) {
+            let mut initial_state = PoolState {
+                market_price: default_market_price(),
+                slope: default_slope(),
+                base_target,
+                quote_target,
+                base_reserve,
+                quote_reserve,
+                multiplier,
+            };
+            let mut pool_state = initial_state.clone();
+            pool_state.adjust_target()?;
+            let expected_mid_price = if pool_state.multiplier == Multiplier::BelowOne {
+                let multiplier = pool_state
+                    .quote_target
+                    .try_mul(pool_state.quote_target)?
+                    .try_div(pool_state.quote_reserve)?
+                    .try_div(pool_state.quote_reserve)?;
+                let multiplier = multiplier
+                    .try_mul(pool_state.slope)?
+                    .try_add(Decimal::one())?
+                    .try_sub(pool_state.slope)?;
+                pool_state.market_price.try_div(multiplier)?
+            } else {
+                let multiplier = pool_state
+                    .base_target
+                    .try_mul(pool_state.base_target)?
+                    .try_div(pool_state.base_reserve)?
+                    .try_div(pool_state.base_reserve)?;
+                let multiplier = multiplier
+                    .try_mul(pool_state.slope)?
+                    .try_add(Decimal::one())?
+                    .try_sub(pool_state.slope)?;
+                pool_state.market_price.try_mul(multiplier)?
+            };
+
+            assert_eq!(
+                initial_state.get_mid_price()?,
+                expected_mid_price
+            );
+
+        }
+    }
 
     #[test]
     fn test_init() {
@@ -564,6 +628,52 @@ mod tests {
         let mut new_pool_state = PoolState::default();
         new_pool_state.init(pool_state.clone());
         assert_eq!(new_pool_state, pool_state);
+    }
+
+    #[test]
+    fn test_adjust_target() {
+        let initial_state = PoolState {
+            market_price: default_market_price(),
+            slope: default_slope(),
+            base_target: Decimal::from(1_000_000_000u64),
+            quote_target: Decimal::from(100_000_000_000u64),
+            base_reserve: Decimal::from(1_000_000_000u64),
+            quote_reserve: Decimal::from(100_000_000_000u64),
+            multiplier: Multiplier::One,
+        };
+        let mut pool_state = initial_state.clone();
+        pool_state.adjust_target().unwrap();
+        assert_eq!(pool_state, initial_state);
+
+        pool_state.multiplier = Multiplier::AboveOne;
+        pool_state.adjust_target().unwrap();
+
+        let expected_quote_target = get_target_reserve(
+            initial_state.quote_reserve,
+            initial_state
+                .base_reserve
+                .try_sub(initial_state.base_target)
+                .unwrap(),
+            initial_state.market_price,
+            initial_state.slope,
+        )
+        .unwrap();
+        assert_eq!(pool_state.quote_target, expected_quote_target);
+
+        pool_state.multiplier = Multiplier::BelowOne;
+        pool_state.adjust_target().unwrap();
+
+        let expected_base_target = get_target_reserve(
+            initial_state.base_reserve,
+            initial_state
+                .quote_reserve
+                .try_sub(expected_quote_target)
+                .unwrap(),
+            initial_state.market_price.reciprocal().unwrap(),
+            initial_state.slope,
+        )
+        .unwrap();
+        assert_eq!(pool_state.base_target, expected_base_target);
     }
 
     #[test]
@@ -586,19 +696,21 @@ mod tests {
     }
 
     #[test]
-    fn test_get_mid_price() {
-        let mut pool_state = PoolState {
+    fn test_calculate_deposit_amount() {
+        let pool_state = PoolState {
             market_price: default_market_price(),
             slope: default_slope(),
             base_target: Decimal::from(1_000_000_000u64),
-            quote_target: Decimal::from(1_000_000_000u64),
+            quote_target: Decimal::from(100_000_000_000u64),
             base_reserve: Decimal::from(1_000_000_000u64),
-            quote_reserve: Decimal::from(1_000_000_000u64),
+            quote_reserve: Decimal::from(100_000_000_000u64),
             multiplier: Multiplier::One,
         };
 
-        let mid_price = pool_state.get_mid_price().unwrap();
-        assert_eq!(mid_price, Decimal::from(100u64));
+        let calculated_deposit_amount = pool_state
+            .calculate_deposit_amount(100u64, 10000u64)
+            .unwrap();
+        assert_eq!(calculated_deposit_amount, (100u64, 10000u64));
     }
 
     #[test]
@@ -607,6 +719,30 @@ mod tests {
             Multiplier::try_from(3u8),
             Err(ProgramError::InvalidAccountData)
         );
+
+        let mut pool_state = PoolState {
+            market_price: default_market_price(),
+            slope: default_slope(),
+            base_target: Decimal::from(200_000u64),
+            quote_target: Decimal::from(100_000u64),
+            base_reserve: Decimal::from(100_000u64),
+            quote_reserve: Decimal::from(100_000u64),
+            multiplier: Multiplier::BelowOne,
+        };
+        assert!(pool_state.get_mid_price().is_err());
+        assert!(PoolState::new(pool_state).is_err());
+
+        let mut pool_state = PoolState {
+            market_price: default_market_price(),
+            slope: default_slope(),
+            base_target: Decimal::from(100_000u64),
+            quote_target: Decimal::from(200_000u64),
+            base_reserve: Decimal::from(100_000u64),
+            quote_reserve: Decimal::from(100_000u64),
+            multiplier: Multiplier::AboveOne,
+        };
+        assert!(pool_state.get_mid_price().is_err());
+        assert!(PoolState::new(pool_state).is_err());
 
         let mut pool_state = PoolState {
             market_price: default_market_price(),
