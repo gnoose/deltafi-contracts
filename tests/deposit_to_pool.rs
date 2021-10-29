@@ -5,8 +5,10 @@ mod utils;
 use deltafi_swap::{
     math::{Decimal, TryDiv},
     processor::process,
+    state::LiquidityProvider,
 };
 
+use solana_program::program_pack::Pack;
 use solana_program_test::*;
 use solana_sdk::{
     pubkey::Pubkey,
@@ -48,58 +50,84 @@ async fn test_success() {
         },
     );
 
+    let liquidity_owner = Keypair::new();
+    let liquidity_provider = add_liquidity_provider(&mut test, &liquidity_owner);
+
     let (mut banks_client, payer, _recent_blockhash) = test.start().await;
 
-    let user_account_owner = Keypair::new();
-    let sol_user_account = create_and_mint_to_token_account(
+    let sol_deposit_account = create_and_mint_to_token_account(
         &mut banks_client,
         spl_token::native_mint::id(),
         None,
         &payer,
-        user_account_owner.pubkey(),
+        liquidity_owner.pubkey(),
         10_000_000_000,
     )
     .await;
 
-    let srm_user_account = create_and_mint_to_token_account(
+    let srm_deposit_account = create_and_mint_to_token_account(
         &mut banks_client,
         srm_mint.pubkey,
         Some(&srm_mint.authority),
         &payer,
-        user_account_owner.pubkey(),
-        0,
+        liquidity_owner.pubkey(),
+        200_000_000_000,
     )
     .await;
 
-    let deltafi_user_account = create_and_mint_to_token_account(
+    let pool_token_account = create_and_mint_to_token_account(
         &mut banks_client,
-        swap_config.deltafi_mint,
+        swap_info.pool_mint,
         None,
         &payer,
-        user_account_owner.pubkey(),
+        liquidity_owner.pubkey(),
         0,
     )
     .await;
 
     swap_info
-        .swap(
+        .deposit(
             &mut banks_client,
-            &swap_config,
-            &user_account_owner,
-            sol_user_account,
-            srm_user_account,
-            deltafi_user_account,
-            2_000_000_000,
-            35_000_000_000,
+            &liquidity_provider,
+            &liquidity_owner,
+            sol_deposit_account,
+            srm_deposit_account,
+            pool_token_account,
+            8_000_000_000,
+            160_000_000_000,
             0,
             &payer,
         )
         .await;
 
     assert_eq!(
-        get_token_balance(&mut banks_client, sol_user_account).await,
-        8_000_000_000,
+        get_token_balance(&mut banks_client, sol_deposit_account).await,
+        2_000_000_000,
     );
-    assert!(get_token_balance(&mut banks_client, srm_user_account).await > 35_000_000_000);
-    assert!(get_token_balance(&mut banks_client, deltafi_user_account).await > 0);
+    assert_eq!(
+        get_token_balance(&mut banks_client, srm_deposit_account).await,
+        40_000_000_000
+    );
+    assert!(get_token_balance(&mut banks_client, pool_token_account).await > 0);
+    assert_eq!(
+        get_token_balance(&mut banks_client, swap_info.token_a).await,
+        50_000_000_000,
+    );
+    assert_eq!(
+        get_token_balance(&mut banks_client, swap_info.token_b).await,
+        960_000_000_000,
+    );
+
+    let lp = banks_client
+        .get_account(liquidity_provider.pubkey)
+        .await
+        .unwrap()
+        .unwrap();
+
+    let lp_state = LiquidityProvider::unpack(&lp.data[..]).unwrap();
+
+    assert_eq!(
+        lp_state.positions[0].liquidity_amount,
+        get_token_balance(&mut banks_client, pool_token_account).await
+    );
 }

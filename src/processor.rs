@@ -642,8 +642,9 @@ fn process_deposit(
         .cumulative_ticks
         .checked_add(clock.unix_timestamp.try_into().unwrap())
         .ok_or(SwapError::CalculationFailure)?
-        .checked_div(token_swap.block_timestamp_last)
+        .checked_sub(token_swap.block_timestamp_last)
         .ok_or(SwapError::CalculationFailure)?;
+
     token_swap.block_timestamp_last = clock.unix_timestamp.try_into().unwrap();
     token_swap.base_price_cumulative_last = base_price_cumulative_last;
     SwapInfo::pack(token_swap, &mut swap_info.data.borrow_mut())?;
@@ -794,7 +795,7 @@ fn process_withdraw(
         .cumulative_ticks
         .checked_add(clock.unix_timestamp.try_into().unwrap())
         .ok_or(SwapError::CalculationFailure)?
-        .checked_div(token_swap.block_timestamp_last)
+        .checked_sub(token_swap.block_timestamp_last)
         .ok_or(SwapError::CalculationFailure)?;
     token_swap.block_timestamp_last = clock.unix_timestamp.try_into().unwrap();
     token_swap.base_price_cumulative_last = base_price_cumulative_last;

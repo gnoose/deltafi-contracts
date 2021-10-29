@@ -4,10 +4,13 @@
 use assert_matches::*;
 use deltafi_swap::{
     curve::{Multiplier, PoolState},
-    instruction::{initialize, initialize_config, swap, InitializeData, SwapData},
+    instruction::{
+        deposit, init_liquidity_provider, initialize, initialize_config, swap, DepositData,
+        InitializeData, SwapData,
+    },
     math::Decimal,
     pyth,
-    state::{ConfigInfo, Fees, Rewards, SwapInfo, PROGRAM_VERSION},
+    state::{ConfigInfo, Fees, LiquidityProvider, Rewards, SwapInfo, PROGRAM_VERSION},
 };
 use solana_program::{program_option::COption, program_pack::Pack, pubkey::Pubkey};
 use solana_program_test::*;
@@ -316,6 +319,29 @@ pub fn add_swap_info(
         rewards: swap_config.rewards.clone(),
         oracle_a,
         oracle_b,
+    }
+}
+
+pub fn add_liquidity_provider(
+    test: &mut ProgramTest,
+    user_account_owner: &Keypair,
+) -> TestLiquidityProvider {
+    let liquidity_provider_pubkey = Pubkey::new_unique();
+    test.add_packable_account(
+        liquidity_provider_pubkey,
+        u32::MAX as u64,
+        &LiquidityProvider {
+            is_initialized: true,
+            owner: user_account_owner.pubkey(),
+            positions: vec![],
+        },
+        &deltafi_swap::id(),
+    );
+
+    TestLiquidityProvider {
+        pubkey: liquidity_provider_pubkey,
+        owner: user_account_owner.pubkey(),
+        positions: vec![],
     }
 }
 
@@ -645,6 +671,75 @@ impl TestSwapInfo {
         assert_matches!(banks_client.process_transaction(transaction).await, Ok(()));
     }
 
+    pub async fn deposit(
+        &self,
+        banks_client: &mut BanksClient,
+        liquidity_provider: &TestLiquidityProvider,
+        user_account_owner: &Keypair,
+        deposit_token_a_pubkey: Pubkey,
+        deposit_token_b_pubkey: Pubkey,
+        pool_token_pubkey: Pubkey,
+        token_a_amount: u64,
+        token_b_amount: u64,
+        min_mint_amount: u64,
+        payer: &Keypair,
+    ) {
+        let user_transfer_authority = Keypair::new();
+        let mut transaction = Transaction::new_with_payer(
+            &[
+                approve(
+                    &spl_token::id(),
+                    &deposit_token_a_pubkey,
+                    &user_transfer_authority.pubkey(),
+                    &user_account_owner.pubkey(),
+                    &[],
+                    token_a_amount,
+                )
+                .unwrap(),
+                approve(
+                    &spl_token::id(),
+                    &deposit_token_b_pubkey,
+                    &user_transfer_authority.pubkey(),
+                    &user_account_owner.pubkey(),
+                    &[],
+                    token_b_amount,
+                )
+                .unwrap(),
+                deposit(
+                    deltafi_swap::id(),
+                    self.pubkey,
+                    self.authority,
+                    user_transfer_authority.pubkey(),
+                    deposit_token_a_pubkey,
+                    deposit_token_b_pubkey,
+                    self.token_a,
+                    self.token_b,
+                    self.pool_mint,
+                    pool_token_pubkey,
+                    liquidity_provider.pubkey,
+                    liquidity_provider.owner,
+                    self.oracle_a,
+                    self.oracle_b,
+                    DepositData {
+                        token_a_amount,
+                        token_b_amount,
+                        min_mint_amount,
+                    },
+                )
+                .unwrap(),
+            ],
+            Some(&payer.pubkey()),
+        );
+
+        let recent_blockhash = banks_client.get_recent_blockhash().await.unwrap();
+        transaction.sign(
+            &[payer, user_account_owner, &user_transfer_authority],
+            recent_blockhash,
+        );
+
+        assert_matches!(banks_client.process_transaction(transaction).await, Ok(()));
+    }
+
     pub async fn get_state(&self, banks_client: &mut BanksClient) -> SwapInfo {
         let swap_account: Account = banks_client
             .get_account(self.pubkey)
@@ -667,6 +762,79 @@ impl TestSwapInfo {
         assert_eq!(swap_info.fees, self.fees);
         assert_eq!(swap_info.rewards, self.rewards);
     }
+}
+
+pub struct TestLiquidityProvider {
+    pub pubkey: Pubkey,
+    pub owner: Pubkey,
+    pub positions: Vec<TestLiquidityPosition>,
+}
+
+impl TestLiquidityProvider {
+    pub async fn init(
+        banks_client: &mut BanksClient,
+        user_account_owner: &Keypair,
+        payer: &Keypair,
+    ) -> Self {
+        let liquidity_provider = Keypair::new();
+        let liquidity_provider_pubkey = liquidity_provider.pubkey();
+
+        let rent = banks_client.get_rent().await.unwrap();
+        let mut transaction = Transaction::new_with_payer(
+            &[
+                create_account(
+                    &payer.pubkey(),
+                    &liquidity_provider_pubkey,
+                    rent.minimum_balance(LiquidityProvider::LEN),
+                    LiquidityProvider::LEN as u64,
+                    &deltafi_swap::id(),
+                ),
+                init_liquidity_provider(
+                    deltafi_swap::id(),
+                    liquidity_provider_pubkey,
+                    user_account_owner.pubkey(),
+                )
+                .unwrap(),
+            ],
+            Some(&payer.pubkey()),
+        );
+
+        let recent_blockhash = banks_client.get_recent_blockhash().await.unwrap();
+        transaction.sign(
+            &vec![payer, &liquidity_provider, user_account_owner],
+            recent_blockhash,
+        );
+
+        assert_matches!(banks_client.process_transaction(transaction).await, Ok(()));
+
+        Self {
+            pubkey: liquidity_provider_pubkey,
+            owner: user_account_owner.pubkey(),
+            positions: vec![],
+        }
+    }
+
+    pub async fn get_state(&self, banks_client: &mut BanksClient) -> LiquidityProvider {
+        let liquidity_provider: Account = banks_client
+            .get_account(self.pubkey)
+            .await
+            .unwrap()
+            .unwrap();
+        LiquidityProvider::unpack(&liquidity_provider.data[..]).unwrap()
+    }
+
+    pub async fn validate_state(&self, banks_client: &mut BanksClient) {
+        let liquidity_provider = self.get_state(banks_client).await;
+        assert!(liquidity_provider.is_initialized);
+        assert_eq!(liquidity_provider.owner, self.owner);
+    }
+}
+
+pub struct TestLiquidityPosition {
+    pub liquidity_user_pubkey: Pubkey,
+    pub pool: Pubkey,
+    pub rewards_owed: u64,
+    pub rewards_estimated: u64,
 }
 
 pub async fn create_and_mint_to_token_account(

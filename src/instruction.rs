@@ -597,13 +597,13 @@ impl SwapInstruction {
                 buf.extend_from_slice(&minimum_token_b_amount.to_le_bytes());
             }
             Self::InitializeLiquidityProvider => {
-                buf.push(0x5);
+                buf.push(0x4);
             }
             Self::ClaimLiquidityRewards => {
-                buf.push(0x6);
+                buf.push(0x5);
             }
             Self::RefreshLiquidityObligation => {
-                buf.push(0x7);
+                buf.push(0x6);
             }
         }
         buf
@@ -801,7 +801,7 @@ pub fn init_liquidity_provider(
     let data = SwapInstruction::InitializeLiquidityProvider.pack();
 
     let accounts = vec![
-        AccountMeta::new(liquidity_provider_pubkey, true),
+        AccountMeta::new(liquidity_provider_pubkey, false),
         AccountMeta::new_readonly(liquidity_owner_pubkey, true),
         AccountMeta::new_readonly(rent::id(), false),
     ];
