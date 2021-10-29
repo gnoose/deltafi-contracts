@@ -6,7 +6,7 @@ use solana_program::{
 };
 
 use super::*;
-use crate::{curve::PMMState, math::*};
+use crate::{curve::PoolState, math::*};
 
 /// Swap states.
 #[repr(C)]
@@ -47,8 +47,8 @@ pub struct SwapInfo {
     /// Rewards
     pub rewards: Rewards,
 
-    /// PMM object
-    pub pmm_state: PMMState,
+    /// Pool object
+    pub pool_state: PoolState,
     /// twap open flag
     pub is_open_twap: bool,
     /// block timestamp last - twap
@@ -86,7 +86,7 @@ impl Pack for SwapInfo {
             admin_fee_key_b,
             fees,
             rewards,
-            pmm_state,
+            pool_state,
             is_open_twap,
             block_timestamp_last,
             cumulative_ticks,
@@ -105,7 +105,7 @@ impl Pack for SwapInfo {
             PUBKEY_BYTES,
             Fees::LEN,
             Rewards::LEN,
-            PMMState::LEN,
+            PoolState::LEN,
             1,
             8,
             8,
@@ -124,7 +124,7 @@ impl Pack for SwapInfo {
             admin_fee_key_b: Pubkey::new_from_array(*admin_fee_key_b),
             fees: Fees::unpack_from_slice(fees)?,
             rewards: Rewards::unpack_from_slice(rewards)?,
-            pmm_state: PMMState::unpack_from_slice(pmm_state)?,
+            pool_state: PoolState::unpack_from_slice(pool_state)?,
             is_open_twap: unpack_bool(is_open_twap)?,
             block_timestamp_last: u64::from_le_bytes(*block_timestamp_last),
             cumulative_ticks: u64::from_le_bytes(*cumulative_ticks),
@@ -148,7 +148,7 @@ impl Pack for SwapInfo {
             admin_fee_key_b,
             fees,
             rewards,
-            pmm_state,
+            pool_state,
             is_open_twap,
             block_timestamp_last,
             cumulative_ticks,
@@ -167,7 +167,7 @@ impl Pack for SwapInfo {
             PUBKEY_BYTES,
             Fees::LEN,
             Rewards::LEN,
-            PMMState::LEN,
+            PoolState::LEN,
             1,
             8,
             8,
@@ -185,7 +185,7 @@ impl Pack for SwapInfo {
         admin_fee_key_b.copy_from_slice(self.admin_fee_key_b.as_ref());
         self.fees.pack_into_slice(&mut fees[..]);
         self.rewards.pack_into_slice(&mut rewards[..]);
-        self.pmm_state.pack_into_slice(&mut pmm_state[..]);
+        self.pool_state.pack_into_slice(&mut pool_state[..]);
         pack_bool(self.is_open_twap, is_open_twap);
         *block_timestamp_last = self.block_timestamp_last.to_le_bytes();
         *cumulative_ticks = self.cumulative_ticks.to_le_bytes();
@@ -199,7 +199,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        curve::{default_market_price, default_slope, PMMState, RState},
+        curve::{default_market_price, default_slope, Multiplier, PoolState},
         solana_program::clock::Clock,
     };
 
@@ -224,14 +224,14 @@ mod tests {
         let admin_fee_key_b = Pubkey::new_from_array(admin_fee_key_b_raw);
         let fees = DEFAULT_TEST_FEES;
         let rewards = DEFAULT_TEST_REWARDS;
-        let pmm_state = PMMState::new(PMMState {
+        let pool_state = PoolState::new(PoolState {
             market_price: default_market_price(),
             slope: default_slope(),
             base_target: Decimal::zero(),
             quote_target: Decimal::zero(),
             base_reserve: Decimal::zero(),
             quote_reserve: Decimal::zero(),
-            r: RState::One,
+            multiplier: Multiplier::One,
         })
         .unwrap();
         let is_open_twap = true;
@@ -255,7 +255,7 @@ mod tests {
             admin_fee_key_b,
             fees: fees.clone(),
             rewards: rewards.clone(),
-            pmm_state: pmm_state.clone(),
+            pool_state: pool_state.clone(),
             is_open_twap,
             block_timestamp_last,
             cumulative_ticks,
@@ -282,9 +282,9 @@ mod tests {
         let mut packed_rewards = [0u8; Rewards::LEN];
         rewards.pack_into_slice(&mut packed_rewards);
         packed.extend_from_slice(&packed_rewards);
-        let mut packed_pmm_state = [0u8; PMMState::LEN];
-        pmm_state.pack_into_slice(&mut packed_pmm_state);
-        packed.extend_from_slice(&packed_pmm_state);
+        let mut packed_pool_state = [0u8; PoolState::LEN];
+        pool_state.pack_into_slice(&mut packed_pool_state);
+        packed.extend_from_slice(&packed_pool_state);
         packed.extend_from_slice(&(is_open_twap as u8).to_le_bytes());
         packed.extend_from_slice(&block_timestamp_last.to_le_bytes());
         packed.extend_from_slice(&cumulative_ticks.to_le_bytes());

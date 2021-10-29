@@ -1,10 +1,10 @@
 //! Curve modules
 
 mod calc;
-mod pmm;
+mod pool;
 
 pub use calc::*;
-pub use pmm::*;
+pub use pool::*;
 
 #[cfg(test)]
 use crate::math::{Decimal, HALF_WAD};

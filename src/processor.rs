@@ -21,7 +21,7 @@ use spl_token::{
 
 use crate::{
     admin::process_admin_instruction,
-    curve::{PMMState, RState},
+    curve::{Multiplier, PoolState},
     error::SwapError,
     instruction::{
         DepositData, InitializeData, InstructionType, SwapData, SwapInstruction, WithdrawData,
@@ -211,17 +211,17 @@ fn process_initialize(
     let market_price = get_pyth_price(pyth_price_info, clock)
         .unwrap_or_else(|_| Decimal::from_scaled_val(mid_price));
 
-    let mut pmm_state = PMMState::new(PMMState {
+    let mut pool_state = PoolState::new(PoolState {
         market_price,
         slope: Decimal::from_scaled_val(slope.into()),
         base_target: Decimal::zero(),
         quote_target: Decimal::zero(),
         base_reserve: Decimal::zero(),
         quote_reserve: Decimal::zero(),
-        r: RState::One,
+        multiplier: Multiplier::One,
     })?;
 
-    let mint_amount = pmm_state.buy_shares(token_a.amount, token_b.amount, pool_mint.supply)?;
+    let mint_amount = pool_state.buy_shares(token_a.amount, token_b.amount, pool_mint.supply)?;
 
     let block_timestamp_last: u64 = clock.unix_timestamp.try_into().unwrap();
     let config = ConfigInfo::unpack(&config_info.data.borrow())?;
@@ -240,7 +240,7 @@ fn process_initialize(
             admin_fee_key_b: *admin_fee_b_info.key,
             fees: config.fees,
             rewards: config.rewards,
-            pmm_state,
+            pool_state,
             is_open_twap,
             block_timestamp_last,
             cumulative_ticks: 0,
@@ -383,12 +383,12 @@ fn process_swap(
     let (new_market_price, base_price_cumulative_last) =
         get_new_market_price(&mut token_swap, pyth_price_info, clock)?;
 
-    let state = PMMState::new(PMMState {
+    let state = PoolState::new(PoolState {
         market_price: new_market_price,
-        ..token_swap.pmm_state
+        ..token_swap.pool_state
     })?;
 
-    let (receive_amount, new_r) = match swap_direction {
+    let (receive_amount, new_multiplier) = match swap_direction {
         SWAP_DIRECTION_SELL_BASE => state.sell_base_token(amount_in)?,
         SWAP_DIRECTION_SELL_QUOTE => state.sell_quote_token(amount_in)?,
         _ => {
@@ -435,10 +435,10 @@ fn process_swap(
         }
     };
 
-    token_swap.pmm_state = PMMState::new(PMMState {
+    token_swap.pool_state = PoolState::new(PoolState {
         base_reserve: Decimal::from(base_balance),
         quote_reserve: Decimal::from(quote_balance),
-        r: new_r,
+        multiplier: new_multiplier,
         ..state
     })?;
     token_swap.block_timestamp_last = clock.unix_timestamp.try_into().unwrap();
@@ -603,9 +603,9 @@ fn process_deposit(
     let (new_market_price, base_price_cumulative_last) =
         get_new_market_price(&mut token_swap, pyth_price_info, clock)?;
 
-    let mut state = PMMState::new(PMMState {
+    let mut state = PoolState::new(PoolState {
         market_price: new_market_price,
-        ..token_swap.pmm_state
+        ..token_swap.pool_state
     })?;
 
     let base_balance = token_a_amount
@@ -629,7 +629,7 @@ fn process_deposit(
         &mut liquidity_provider_info.data.borrow_mut(),
     )?;
 
-    token_swap.pmm_state = state;
+    token_swap.pool_state = state;
     token_swap.block_timestamp_last = clock.unix_timestamp.try_into().unwrap();
     token_swap.base_price_cumulative_last = base_price_cumulative_last;
     SwapInfo::pack(token_swap, &mut swap_info.data.borrow_mut())?;
@@ -742,9 +742,9 @@ fn process_withdraw(
     let (new_market_price, base_price_cumulative_last) =
         get_new_market_price(&mut token_swap, pyth_price_info, clock)?;
 
-    let mut state = PMMState::new(PMMState {
+    let mut state = PoolState::new(PoolState {
         market_price: new_market_price,
-        ..token_swap.pmm_state
+        ..token_swap.pool_state
     })?;
 
     let (base_out_amount, quote_out_amount) = state.sell_shares(
@@ -774,7 +774,7 @@ fn process_withdraw(
         &mut liquidity_provider_info.data.borrow_mut(),
     )?;
 
-    token_swap.pmm_state = state;
+    token_swap.pool_state = state;
     token_swap.block_timestamp_last = clock.unix_timestamp.try_into().unwrap();
     token_swap.base_price_cumulative_last = base_price_cumulative_last;
     SwapInfo::pack(token_swap, &mut swap_info.data.borrow_mut())?;
@@ -926,7 +926,7 @@ fn process_refresh_liquidity_obligation(
 
     let mut token_swap = SwapInfo::unpack(&swap_info.data.borrow())?;
 
-    let lp_price = token_swap.pmm_state.get_mid_price()?;
+    let lp_price = token_swap.pool_state.get_mid_price()?;
     let _deltafi_price = Decimal::one().try_div(10)?; // Temp value
     let reward_ratio = lp_price.try_div(_deltafi_price)?;
 
@@ -950,15 +950,15 @@ fn get_new_market_price(
     pyth_price_info: &AccountInfo,
     clock: &Clock,
 ) -> Result<(Decimal, Decimal), ProgramError> {
-    let pmm_state = &mut token_swap.pmm_state;
-    let mid_price = pmm_state.get_mid_price()?;
+    let pool_state = &mut token_swap.pool_state;
+    let mid_price = pool_state.get_mid_price()?;
     let block_timestamp_last: u64 = clock.unix_timestamp.try_into().unwrap();
     let mut base_price_cumulative_last = token_swap.base_price_cumulative_last;
     if token_swap.is_open_twap {
         let time_elapsed = block_timestamp_last - token_swap.block_timestamp_last;
         if time_elapsed > 0
-            && !pmm_state.base_reserve.is_zero()
-            && !pmm_state.quote_reserve.is_zero()
+            && !pool_state.base_reserve.is_zero()
+            && !pool_state.quote_reserve.is_zero()
         {
             base_price_cumulative_last =
                 base_price_cumulative_last.try_add(mid_price.try_mul(time_elapsed as u64)?)?;

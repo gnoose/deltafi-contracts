@@ -19,40 +19,40 @@ use std::{
     convert::{TryFrom, TryInto},
 };
 
-/// RStatus enum
+/// Multiplier status enum
 #[derive(Clone, Copy, PartialEq, Debug, Hash)]
-pub enum RState {
-    /// r = 1
+pub enum Multiplier {
+    /// multiplier = 1
     One,
-    /// r > 1
+    /// multiplier > 1
     AboveOne,
-    /// r < 1
+    /// multiplier < 1
     BelowOne,
 }
 
-impl Default for RState {
+impl Default for Multiplier {
     fn default() -> Self {
         Self::One
     }
 }
 
-impl TryFrom<u8> for RState {
+impl TryFrom<u8> for Multiplier {
     type Error = ProgramError;
 
-    fn try_from(r: u8) -> Result<Self, Self::Error> {
-        match r {
-            0 => Ok(RState::One),
-            1 => Ok(RState::AboveOne),
-            2 => Ok(RState::BelowOne),
+    fn try_from(multiplier: u8) -> Result<Self, Self::Error> {
+        match multiplier {
+            0 => Ok(Multiplier::One),
+            1 => Ok(Multiplier::AboveOne),
+            2 => Ok(Multiplier::BelowOne),
             _ => Err(ProgramError::InvalidAccountData),
         }
     }
 }
 
-/// PMMState struct
+/// PoolState struct
 #[repr(C)]
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct PMMState {
+pub struct PoolState {
     /// market price
     pub market_price: Decimal,
     /// slope
@@ -65,33 +65,36 @@ pub struct PMMState {
     pub base_reserve: Decimal,
     /// quote token reserve
     pub quote_reserve: Decimal,
-    /// R status
-    pub r: RState,
+    /// Multiplier status
+    pub multiplier: Multiplier,
 }
 
-impl PMMState {
-    /// Create new PMM state
-    pub fn new(params: PMMState) -> Result<Self, ProgramError> {
-        let mut pmm = Self::default();
-        pmm.init(params);
-        pmm.adjust_target()?;
-        Ok(pmm)
+impl PoolState {
+    /// Create new pool state
+    pub fn new(params: PoolState) -> Result<Self, ProgramError> {
+        let mut pool = Self::default();
+        pool.init(params);
+        pool.adjust_target()?;
+        Ok(pool)
     }
 
-    /// Init PMM state
-    pub fn init(&mut self, params: PMMState) {
+    /// Init pool state
+    pub fn init(&mut self, params: PoolState) {
         self.market_price = params.market_price;
         self.slope = params.slope;
         self.base_target = params.base_target;
         self.base_reserve = params.base_reserve;
         self.quote_target = params.quote_target;
         self.quote_reserve = params.quote_reserve;
-        self.r = params.r;
+        self.multiplier = params.multiplier;
     }
 
-    // ================================ R = 1 case ====================================
+    // ================================ multiplier = 1 case ====================================
 
-    fn r_one_sell_base_token(&self, base_amount: Decimal) -> Result<Decimal, ProgramError> {
+    fn sell_base_token_with_multiplier_one(
+        &self,
+        base_amount: Decimal,
+    ) -> Result<Decimal, ProgramError> {
         get_target_amount_reverse_direction(
             self.quote_target,
             self.quote_target,
@@ -101,7 +104,10 @@ impl PMMState {
         )
     }
 
-    fn r_one_sell_quote_token(&self, quote_amount: Decimal) -> Result<Decimal, ProgramError> {
+    fn sell_quote_token_with_multiplier_one(
+        &self,
+        quote_amount: Decimal,
+    ) -> Result<Decimal, ProgramError> {
         get_target_amount_reverse_direction(
             self.base_target,
             self.base_target,
@@ -111,9 +117,12 @@ impl PMMState {
         )
     }
 
-    // ================================ R < 1 case ====================================
+    // ================================ multiplier < 1 case ====================================
 
-    fn r_below_sell_base_token(&self, base_amount: Decimal) -> Result<Decimal, ProgramError> {
+    fn sell_base_token_with_multiplier_belowone(
+        &self,
+        base_amount: Decimal,
+    ) -> Result<Decimal, ProgramError> {
         get_target_amount_reverse_direction(
             self.quote_target,
             self.quote_reserve,
@@ -123,7 +132,10 @@ impl PMMState {
         )
     }
 
-    fn r_below_sell_quote_token(&self, quote_amount: Decimal) -> Result<Decimal, ProgramError> {
+    fn sell_quote_token_with_multiplier_belowone(
+        &self,
+        quote_amount: Decimal,
+    ) -> Result<Decimal, ProgramError> {
         get_target_amount(
             self.quote_target,
             self.quote_reserve.try_add(quote_amount)?,
@@ -133,9 +145,12 @@ impl PMMState {
         )
     }
 
-    // ================================ R > 1 case ====================================
+    // ================================ multiplier > 1 case ====================================
 
-    fn r_above_sell_base_token(&self, base_amount: Decimal) -> Result<Decimal, ProgramError> {
+    fn sell_base_token_with_multiplier_aboveone(
+        &self,
+        base_amount: Decimal,
+    ) -> Result<Decimal, ProgramError> {
         get_target_amount(
             self.base_target,
             self.base_reserve.try_add(base_amount)?,
@@ -145,7 +160,10 @@ impl PMMState {
         )
     }
 
-    fn r_above_sell_quote_token(&self, quote_amount: Decimal) -> Result<Decimal, ProgramError> {
+    fn sell_quote_token_with_multiplier_aboveone(
+        &self,
+        quote_amount: Decimal,
+    ) -> Result<Decimal, ProgramError> {
         get_target_amount_reverse_direction(
             self.base_target,
             self.base_reserve,
@@ -157,10 +175,14 @@ impl PMMState {
 
     // ==================== Helper functions ========================
 
-    /// Perform adjustment target value
+    /// Adjust pool token target.
+    ///
+    /// # Return value
+    ///
+    /// adjusted token target.
     pub fn adjust_target(&mut self) -> ProgramResult {
-        match self.r {
-            RState::AboveOne => {
+        match self.multiplier {
+            Multiplier::AboveOne => {
                 self.quote_target = get_target_reserve(
                     self.quote_reserve,
                     self.base_reserve.try_sub(self.base_target)?,
@@ -168,7 +190,7 @@ impl PMMState {
                     self.slope,
                 )?
             }
-            RState::BelowOne => {
+            Multiplier::BelowOne => {
                 self.base_target = get_target_reserve(
                     self.base_reserve,
                     self.quote_reserve.try_sub(self.quote_target)?,
@@ -181,108 +203,139 @@ impl PMMState {
         Ok(())
     }
 
-    /// Get mid prixe of the current PMM status
+    /// Get adjusted market price based on the current pool status and intelligent
+    /// market making curve.
+    ///
+    /// # Return value
+    ///
+    /// adjusted market price.
     pub fn get_mid_price(&mut self) -> Result<Decimal, ProgramError> {
         self.adjust_target()?;
-        match self.r {
-            RState::BelowOne => {
-                let r = self
+        match self.multiplier {
+            Multiplier::BelowOne => {
+                let multiplier = self
                     .quote_target
                     .try_mul(self.quote_target)?
                     .try_div(self.quote_reserve)?
                     .try_div(self.quote_reserve)?;
-                let r = r
+                let multiplier = multiplier
                     .try_mul(self.slope)?
                     .try_add(Decimal::one())?
                     .try_sub(self.slope)?;
-                self.market_price.try_div(r)
+                self.market_price.try_div(multiplier)
             }
             _ => {
-                let r = self
+                let multiplier = self
                     .base_target
                     .try_mul(self.base_target)?
                     .try_div(self.base_reserve)?
                     .try_div(self.base_reserve)?;
-                let r = r
+                let multiplier = multiplier
                     .try_mul(self.slope)?
                     .try_add(Decimal::one())?
                     .try_sub(self.slope)?;
-                self.market_price.try_mul(r)
+                self.market_price.try_mul(multiplier)
             }
         }
     }
 
-    /// Sell base token
-    pub fn sell_base_token(&self, base_amount: u64) -> Result<(u64, RState), ProgramError> {
-        let (quote_amount, new_r) = match self.r {
-            RState::One => (
-                self.r_one_sell_base_token(base_amount.into())?,
-                RState::BelowOne,
+    /// Sell base token for quote token.
+    ///
+    /// # Arguments
+    ///
+    /// * base_amount - base amount to sell.
+    ///
+    /// # Return value
+    ///
+    /// purchased quote token amount, updated multiplier.
+    pub fn sell_base_token(&self, base_amount: u64) -> Result<(u64, Multiplier), ProgramError> {
+        let (quote_amount, new_multiplier) = match self.multiplier {
+            Multiplier::One => (
+                self.sell_base_token_with_multiplier_one(base_amount.into())?,
+                Multiplier::BelowOne,
             ),
-            RState::BelowOne => (
-                self.r_below_sell_base_token(base_amount.into())?,
-                RState::BelowOne,
+            Multiplier::BelowOne => (
+                self.sell_base_token_with_multiplier_belowone(base_amount.into())?,
+                Multiplier::BelowOne,
             ),
-            RState::AboveOne => {
+            Multiplier::AboveOne => {
                 let back_to_one_pay_base = self.base_target.try_sub(self.base_reserve)?;
                 let back_to_one_receive_quote = self.quote_reserve.try_sub(self.quote_target)?;
 
                 match back_to_one_pay_base.cmp(&Decimal::from(base_amount)) {
                     Ordering::Greater => (
-                        self.r_above_sell_base_token(base_amount.into())?
+                        self.sell_base_token_with_multiplier_aboveone(base_amount.into())?
                             .min(back_to_one_receive_quote),
-                        RState::AboveOne,
+                        Multiplier::AboveOne,
                     ),
-                    Ordering::Equal => (back_to_one_receive_quote, RState::One),
+                    Ordering::Equal => (back_to_one_receive_quote, Multiplier::One),
                     Ordering::Less => (
-                        self.r_one_sell_base_token(
+                        self.sell_base_token_with_multiplier_one(
                             Decimal::from(base_amount).try_sub(back_to_one_pay_base)?,
                         )?
                         .try_add(back_to_one_receive_quote)?,
-                        RState::BelowOne,
+                        Multiplier::BelowOne,
                     ),
                 }
             }
         };
-        Ok((quote_amount.try_floor_u64()?, new_r))
+        Ok((quote_amount.try_floor_u64()?, new_multiplier))
     }
 
-    /// Sell quote token
-    pub fn sell_quote_token(&self, quote_amount: u64) -> Result<(u64, RState), ProgramError> {
-        let (base_amount, new_r) = match self.r {
-            RState::One => (
-                self.r_one_sell_quote_token(quote_amount.into())?,
-                RState::AboveOne,
+    /// Sell quote token for base token.
+    ///
+    /// # Arguments
+    ///
+    /// * quote_amount - quote amount to sell.
+    ///
+    /// # Return value
+    ///
+    /// purchased base token amount, updated multiplier.
+    pub fn sell_quote_token(&self, quote_amount: u64) -> Result<(u64, Multiplier), ProgramError> {
+        let (base_amount, new_multiplier) = match self.multiplier {
+            Multiplier::One => (
+                self.sell_quote_token_with_multiplier_one(quote_amount.into())?,
+                Multiplier::AboveOne,
             ),
-            RState::AboveOne => (
-                self.r_above_sell_quote_token(quote_amount.into())?,
-                RState::AboveOne,
+            Multiplier::AboveOne => (
+                self.sell_quote_token_with_multiplier_aboveone(quote_amount.into())?,
+                Multiplier::AboveOne,
             ),
-            RState::BelowOne => {
+            Multiplier::BelowOne => {
                 let back_to_one_pay_quote = self.quote_target.try_sub(self.quote_reserve)?;
                 let back_to_one_receive_base = self.base_reserve.try_sub(self.base_target)?;
 
                 match back_to_one_pay_quote.cmp(&Decimal::from(quote_amount)) {
                     Ordering::Greater => (
-                        self.r_below_sell_quote_token(quote_amount.into())?
+                        self.sell_quote_token_with_multiplier_belowone(quote_amount.into())?
                             .min(back_to_one_receive_base),
-                        RState::BelowOne,
+                        Multiplier::BelowOne,
                     ),
-                    Ordering::Equal => (back_to_one_receive_base, RState::One),
+                    Ordering::Equal => (back_to_one_receive_base, Multiplier::One),
                     Ordering::Less => (
-                        self.r_one_sell_quote_token(
+                        self.sell_quote_token_with_multiplier_one(
                             Decimal::from(quote_amount).try_sub(back_to_one_pay_quote)?,
                         )?
                         .try_add(back_to_one_receive_base)?,
-                        RState::AboveOne,
+                        Multiplier::AboveOne,
                     ),
                 }
             }
         };
-        Ok((base_amount.try_floor_u64()?, new_r))
+        Ok((base_amount.try_floor_u64()?, new_multiplier))
     }
 
-    /// Buy shares [round down]
+    /// Buy shares [round down]: deposit and calculate shares.
+    ///
+    /// # Arguments
+    ///
+    /// * base_balance - base amount to sell.
+    /// * quote_balance - quote amount to sell.
+    /// * total_supply - total shares amount.
+    ///
+    /// # Return value
+    ///
+    /// purchased shares.
     pub fn buy_shares(
         &mut self,
         base_balance: u64,
@@ -333,7 +386,18 @@ impl PMMState {
         shares.try_floor_u64()
     }
 
-    /// Sell shares [round down]
+    /// Sell shares [round down]: withdraw shares and calculate the withdrawn amount.
+    ///
+    /// # Arguments
+    ///
+    /// * share_amount - share amount to sell.
+    /// * base_min_amount - base min amount.
+    /// * quote_min_amount - quote min amount.
+    /// * total_supply - total shares amount.
+    ///
+    /// # Return value
+    ///
+    /// base amount, quote amount.
     pub fn sell_shares(
         &mut self,
         share_amount: u64,
@@ -370,10 +434,20 @@ impl PMMState {
         Ok((base_amount.try_floor_u64()?, quote_amount.try_floor_u64()?))
     }
 
-    /// Calculate deposit amount according to the reserve amount
-    ///      a_reserve = 0 & b_reserve = 0 => (a_amount, b_amount)
-    ///      a_reserve > 0 & b_reserve = 0 => (a_amount, 0)
-    ///      a_reserve > 0 & b_reserve > 0 => (a_amount*ratio1, b_amount*ratio2)
+    /// Calculate deposit amount according to the reserve.
+    ///
+    /// a_reserve = 0 & b_reserve = 0 => (a_amount, b_amount)
+    /// a_reserve > 0 & b_reserve = 0 => (a_amount, 0)
+    /// a_reserve > 0 & b_reserve > 0 => (a_amount*ratio1, b_amount*ratio2)
+    ///
+    /// # Arguments
+    ///
+    /// * base_in_amount - base in amount.
+    /// * quote_in_amount - quote in amount.
+    ///
+    /// # Return value
+    ///
+    /// base deposit amount, quote deposit amount.
     pub fn calculate_deposit_amount(
         &self,
         base_in_amount: u64,
@@ -419,30 +493,44 @@ impl PMMState {
     }
 }
 
-impl Sealed for PMMState {}
+impl Sealed for PoolState {}
 
-/// PMMState packed size
-pub const PMM_STATE_SIZE: usize = 97; // 16 + 16 + 16 + 16 + 16 + 16 +1
-impl Pack for PMMState {
-    const LEN: usize = PMM_STATE_SIZE;
+/// PoolState packed size
+pub const POOL_STATE_SIZE: usize = 97; // 16 + 16 + 16 + 16 + 16 + 16 +1
+impl Pack for PoolState {
+    const LEN: usize = POOL_STATE_SIZE;
     fn pack_into_slice(&self, output: &mut [u8]) {
-        let output = array_mut_ref![output, 0, PMM_STATE_SIZE];
-        let (market_price, slope, base_reserve, quote_reserve, base_target, quote_target, r) =
-            mut_array_refs![output, 16, 16, 16, 16, 16, 16, 1];
+        let output = array_mut_ref![output, 0, POOL_STATE_SIZE];
+        let (
+            market_price,
+            slope,
+            base_reserve,
+            quote_reserve,
+            base_target,
+            quote_target,
+            multiplier,
+        ) = mut_array_refs![output, 16, 16, 16, 16, 16, 16, 1];
         pack_decimal(self.market_price, market_price);
         pack_decimal(self.slope, slope);
         pack_decimal(self.base_reserve, base_reserve);
         pack_decimal(self.quote_reserve, quote_reserve);
         pack_decimal(self.base_target, base_target);
         pack_decimal(self.quote_target, quote_target);
-        r[0] = self.r as u8;
+        multiplier[0] = self.multiplier as u8;
     }
 
     fn unpack_from_slice(input: &[u8]) -> Result<Self, ProgramError> {
-        let input = array_ref![input, 0, PMM_STATE_SIZE];
+        let input = array_ref![input, 0, POOL_STATE_SIZE];
         #[allow(clippy::ptr_offset_with_cast)]
-        let (market_price, slope, base_reserve, quote_reserve, base_target, quote_target, r) =
-            array_refs![input, 16, 16, 16, 16, 16, 16, 1];
+        let (
+            market_price,
+            slope,
+            base_reserve,
+            quote_reserve,
+            base_target,
+            quote_target,
+            multiplier,
+        ) = array_refs![input, 16, 16, 16, 16, 16, 16, 1];
         Ok(Self {
             market_price: unpack_decimal(market_price),
             slope: unpack_decimal(slope),
@@ -450,7 +538,7 @@ impl Pack for PMMState {
             quote_reserve: unpack_decimal(quote_reserve),
             base_target: unpack_decimal(base_target),
             quote_target: unpack_decimal(quote_target),
-            r: r[0].try_into()?,
+            multiplier: multiplier[0].try_into()?,
         })
     }
 }
@@ -461,83 +549,86 @@ mod tests {
 
     #[test]
     fn test_init() {
-        let pmm_state = PMMState {
+        let pool_state = PoolState {
             market_price: default_market_price(),
             slope: default_slope(),
             base_target: Decimal::from(1_000_000_000u64),
             quote_target: Decimal::from(500_000_000u64),
             base_reserve: Decimal::from(1_000_000_000u64),
             quote_reserve: Decimal::from(500_000_000u64),
-            r: RState::One,
+            multiplier: Multiplier::One,
         };
 
-        let mut new_pmm_state = PMMState::default();
-        new_pmm_state.init(pmm_state.clone());
-        assert_eq!(new_pmm_state, pmm_state);
+        let mut new_pool_state = PoolState::default();
+        new_pool_state.init(pool_state.clone());
+        assert_eq!(new_pool_state, pool_state);
     }
 
     #[test]
     fn test_one_sell_token() {
-        let pmm_state = PMMState {
+        let pool_state = PoolState {
             market_price: default_market_price(),
             slope: default_slope(),
             base_target: Decimal::from(1_000_000_000u64),
             quote_target: Decimal::from(1_000_000_000u64),
             base_reserve: Decimal::from(1_000_000_000u64),
             quote_reserve: Decimal::from(1_000_000_000u64),
-            r: RState::One,
+            multiplier: Multiplier::One,
         };
 
-        let quote_token = pmm_state.sell_base_token(100u64).unwrap();
-        assert_eq!(quote_token, (10000u64, RState::BelowOne));
+        let quote_token = pool_state.sell_base_token(100u64).unwrap();
+        assert_eq!(quote_token, (10000u64, Multiplier::BelowOne));
 
-        let base_token = pmm_state.sell_quote_token(100u64).unwrap();
-        assert_eq!(base_token, (1u64, RState::AboveOne));
+        let base_token = pool_state.sell_quote_token(100u64).unwrap();
+        assert_eq!(base_token, (1u64, Multiplier::AboveOne));
     }
 
     #[test]
     fn test_get_mid_price() {
-        let mut pmm_state = PMMState {
+        let mut pool_state = PoolState {
             market_price: default_market_price(),
             slope: default_slope(),
             base_target: Decimal::from(1_000_000_000u64),
             quote_target: Decimal::from(1_000_000_000u64),
             base_reserve: Decimal::from(1_000_000_000u64),
             quote_reserve: Decimal::from(1_000_000_000u64),
-            r: RState::One,
+            multiplier: Multiplier::One,
         };
 
-        let mid_price = pmm_state.get_mid_price().unwrap();
+        let mid_price = pool_state.get_mid_price().unwrap();
         assert_eq!(mid_price, Decimal::from(100u64));
     }
 
     #[test]
     fn test_failure() {
-        assert_eq!(RState::try_from(3u8), Err(ProgramError::InvalidAccountData));
+        assert_eq!(
+            Multiplier::try_from(3u8),
+            Err(ProgramError::InvalidAccountData)
+        );
 
-        let mut pmm_state = PMMState {
+        let mut pool_state = PoolState {
             market_price: default_market_price(),
             slope: default_slope(),
             base_target: Decimal::from(1_000_000_000u64),
             quote_target: Decimal::from(500_000_000u64),
             base_reserve: Decimal::from(1_000_000_000u64),
             quote_reserve: Decimal::from(500_000_000u64),
-            r: RState::One,
+            multiplier: Multiplier::One,
         };
         assert_eq!(
-            pmm_state.buy_shares(1_000_000_000u64, 500_000_000u64, 1_000_000_000u64),
+            pool_state.buy_shares(1_000_000_000u64, 500_000_000u64, 1_000_000_000u64),
             Err(SwapError::InsufficientFunds.into())
         );
 
-        pmm_state.base_reserve = Decimal::from(0u64);
+        pool_state.base_reserve = Decimal::from(0u64);
         assert_eq!(
-            pmm_state.buy_shares(500_000_000u64, 1_000_000_000u64, 1_000_000_000u64),
+            pool_state.buy_shares(500_000_000u64, 1_000_000_000u64, 1_000_000_000u64),
             Err(SwapError::IncorrectMint.into())
         );
 
-        pmm_state.base_reserve = Decimal::from(1_000_000_000u64);
+        pool_state.base_reserve = Decimal::from(1_000_000_000u64);
         assert_eq!(
-            pmm_state.sell_shares(
+            pool_state.sell_shares(
                 500_000_000u64,
                 1_000_000_000u64,
                 1_000_000_000u64,
@@ -548,20 +639,20 @@ mod tests {
     }
 
     #[test]
-    fn test_packing_pmm() {
-        let pmm_state = PMMState {
+    fn test_packing_pool() {
+        let pool_state = PoolState {
             market_price: default_market_price(),
             slope: default_slope(),
             base_target: Decimal::from(1_000_000_000u64),
             quote_target: Decimal::from(500_000_000u64),
             base_reserve: Decimal::from(1_000_000_000u64),
             quote_reserve: Decimal::from(500_000_000u64),
-            r: RState::One,
+            multiplier: Multiplier::One,
         };
 
-        let mut packed = [0u8; PMMState::LEN];
-        PMMState::pack_into_slice(&pmm_state, &mut packed);
-        let unpacked = PMMState::unpack_from_slice(&packed).unwrap();
-        assert_eq!(pmm_state, unpacked);
+        let mut packed = [0u8; PoolState::LEN];
+        PoolState::pack_into_slice(&pool_state, &mut packed);
+        let unpacked = PoolState::unpack_from_slice(&packed).unwrap();
+        assert_eq!(pool_state, unpacked);
     }
 }

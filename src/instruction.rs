@@ -379,7 +379,7 @@ pub fn set_new_rewards(
     })
 }
 
-/// Instructions supported by the pmm SwapInfo program.
+/// Instructions supported by the pool SwapInfo program.
 #[repr(C)]
 #[derive(Debug, PartialEq)]
 pub enum SwapInstruction {
@@ -452,7 +452,7 @@ pub enum SwapInstruction {
     // ///   9. `[]` Clock sysvar
     // WithdrawOne(WithdrawOneData),
 
-    // ///   Calc the receive amount in the pool - pmm.
+    // ///   Calc the receive amount in the pool.
     // ///
     // ///   0. `[]` Token-swap
     // ///   1. `[]` $authority
