@@ -5,12 +5,14 @@ use assert_matches::*;
 use deltafi_swap::{
     curve::{Multiplier, PoolState},
     instruction::{
-        deposit, init_liquidity_provider, initialize, initialize_config, swap, DepositData,
-        InitializeData, SwapData,
+        deposit, init_liquidity_provider, initialize, initialize_config, swap, withdraw,
+        DepositData, InitializeData, SwapData, WithdrawData,
     },
     math::Decimal,
     pyth,
-    state::{ConfigInfo, Fees, LiquidityProvider, Rewards, SwapInfo, PROGRAM_VERSION},
+    state::{
+        ConfigInfo, Fees, LiquidityPosition, LiquidityProvider, Rewards, SwapInfo, PROGRAM_VERSION,
+    },
 };
 use solana_program::{program_option::COption, program_pack::Pack, pubkey::Pubkey};
 use solana_program_test::*;
@@ -201,7 +203,7 @@ pub fn add_swap_info(
             decimals: DECIMALS,
             mint_authority: COption::Some(swap_authority_pubkey),
             freeze_authority: COption::None,
-            supply: 0,
+            supply: pool_mint_amount,
             ..Mint::default()
         },
         &spl_token::id(),
@@ -342,6 +344,38 @@ pub fn add_liquidity_provider(
         pubkey: liquidity_provider_pubkey,
         owner: user_account_owner.pubkey(),
         positions: vec![],
+    }
+}
+
+pub fn add_position(
+    test: &mut ProgramTest,
+    swap_info: &TestSwapInfo,
+    user_account_owner: &Keypair,
+    liquidity_amount: u64,
+) -> TestLiquidityProvider {
+    let liquidity_provider_pubkey = Pubkey::new_unique();
+    let mut liquidity_provider = LiquidityProvider {
+        is_initialized: true,
+        owner: user_account_owner.pubkey(),
+        positions: vec![],
+    };
+    liquidity_provider
+        .find_or_add_position(swap_info.pubkey, 0)
+        .unwrap()
+        .deposit(liquidity_amount)
+        .unwrap();
+
+    test.add_packable_account(
+        liquidity_provider_pubkey,
+        u32::MAX as u64,
+        &liquidity_provider,
+        &deltafi_swap::id(),
+    );
+
+    TestLiquidityProvider {
+        pubkey: liquidity_provider_pubkey,
+        owner: user_account_owner.pubkey(),
+        positions: liquidity_provider.positions,
     }
 }
 
@@ -740,6 +774,68 @@ impl TestSwapInfo {
         assert_matches!(banks_client.process_transaction(transaction).await, Ok(()));
     }
 
+    pub async fn withdraw(
+        &self,
+        banks_client: &mut BanksClient,
+        liquidity_provider: &TestLiquidityProvider,
+        user_account_owner: &Keypair,
+        token_a_pubkey: Pubkey,
+        token_b_pubkey: Pubkey,
+        pool_token_pubkey: Pubkey,
+        pool_token_amount: u64,
+        minimum_token_a_amount: u64,
+        minimum_token_b_amount: u64,
+        payer: &Keypair,
+    ) {
+        let user_transfer_authority = Keypair::new();
+        let mut transaction = Transaction::new_with_payer(
+            &[
+                approve(
+                    &spl_token::id(),
+                    &pool_token_pubkey,
+                    &user_transfer_authority.pubkey(),
+                    &user_account_owner.pubkey(),
+                    &[],
+                    pool_token_amount,
+                )
+                .unwrap(),
+                withdraw(
+                    deltafi_swap::id(),
+                    self.pubkey,
+                    self.authority,
+                    user_transfer_authority.pubkey(),
+                    self.pool_mint,
+                    pool_token_pubkey,
+                    self.token_a,
+                    self.token_b,
+                    token_a_pubkey,
+                    token_b_pubkey,
+                    self.admin_fee_a_key,
+                    self.admin_fee_b_key,
+                    liquidity_provider.pubkey,
+                    liquidity_provider.owner,
+                    self.oracle_a,
+                    self.oracle_b,
+                    WithdrawData {
+                        pool_token_amount,
+                        minimum_token_a_amount,
+                        minimum_token_b_amount,
+                    },
+                )
+                .unwrap(),
+            ],
+            Some(&payer.pubkey()),
+        );
+
+        let recent_blockhash = banks_client.get_recent_blockhash().await.unwrap();
+        transaction.sign(
+            &[payer, user_account_owner, &user_transfer_authority],
+            recent_blockhash,
+        );
+
+        assert_matches!(banks_client.process_transaction(transaction).await, Ok(()));
+    }
+
     pub async fn get_state(&self, banks_client: &mut BanksClient) -> SwapInfo {
         let swap_account: Account = banks_client
             .get_account(self.pubkey)
@@ -767,7 +863,7 @@ impl TestSwapInfo {
 pub struct TestLiquidityProvider {
     pub pubkey: Pubkey,
     pub owner: Pubkey,
-    pub positions: Vec<TestLiquidityPosition>,
+    pub positions: Vec<LiquidityPosition>,
 }
 
 impl TestLiquidityProvider {
@@ -828,13 +924,6 @@ impl TestLiquidityProvider {
         assert!(liquidity_provider.is_initialized);
         assert_eq!(liquidity_provider.owner, self.owner);
     }
-}
-
-pub struct TestLiquidityPosition {
-    pub liquidity_user_pubkey: Pubkey,
-    pub pool: Pubkey,
-    pub rewards_owed: u64,
-    pub rewards_estimated: u64,
 }
 
 pub async fn create_and_mint_to_token_account(
