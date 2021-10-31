@@ -460,13 +460,10 @@ impl PoolState {
 
         let (base_in_amount, quote_in_amount) =
             if self.base_reserve.is_zero() && self.quote_reserve.is_zero() {
-                let shares = match self
-                    .market_price
-                    .try_mul(base_in_amount)?
-                    .cmp(&quote_in_amount)
-                {
-                    Ordering::Greater => quote_in_amount.try_div(self.market_price)?,
-                    _ => base_in_amount,
+                let shares = if self.market_price.try_mul(base_in_amount)? > quote_in_amount {
+                    quote_in_amount.try_div(self.market_price)?
+                } else {
+                    base_in_amount
                 };
                 (shares, shares.try_mul(self.market_price)?)
             } else if self.base_reserve > Decimal::zero() && self.quote_reserve > Decimal::zero() {
@@ -565,7 +562,116 @@ mod tests {
         }
     }
 
+    prop_compose! {
+        fn get_token_with_multiplier_range()(
+            next_value in 2..=u16::MAX-1
+        )(
+            multiplier_index in 0..=2usize,
+            new_multiplier_index in 0..=2usize,
+            amount in 1..=u16::MAX,
+            base_target in 1..=next_value,
+            quote_target in 1..=next_value,
+            base_reserve in next_value..=u16::MAX,
+            quote_reserve in next_value..=u16::MAX
+        ) -> (Multiplier, Multiplier, Decimal, Decimal, Decimal, Decimal, Decimal) {
+            let multiplier_arry = [Multiplier::One, Multiplier::AboveOne, Multiplier::BelowOne];
+            (multiplier_arry[multiplier_index], multiplier_arry[new_multiplier_index], Decimal::from(amount as u64), Decimal::from(base_target as u64), Decimal::from(quote_target as u64), Decimal::from(base_reserve as u64), Decimal::from(quote_reserve as u64))
+        }
+    }
+
+    prop_compose! {
+        fn get_buy_shares_range()(
+            prev_value in 2..=u16::MAX/2-1,
+            next_value in u16::MAX/2..=u16::MAX-1,
+        )(
+            multiplier_index in 0..=2usize,
+            base_balance in next_value..=u16::MAX,
+            quote_balance in next_value..=u16::MAX,
+            total_supply in 0..=u16::MAX,
+            base_target in 1..=prev_value,
+            quote_target in 1..=prev_value,
+            base_reserve in prev_value..=u16::MAX/2-1,
+            quote_reserve in prev_value..=u16::MAX/2-1
+        ) -> (Multiplier, u64, u64, u64, Decimal, Decimal, Decimal, Decimal) {
+            let multiplier_arry = [Multiplier::One, Multiplier::AboveOne, Multiplier::BelowOne];
+            (multiplier_arry[multiplier_index], base_balance as u64, quote_balance as u64, total_supply as u64, Decimal::from(base_target as u64), Decimal::from(quote_target as u64), Decimal::from(base_reserve as u64), Decimal::from(quote_reserve as u64))
+        }
+    }
+
+    prop_compose! {
+        fn get_sell_shares_range()(
+            next_value in 1..=u16::MAX,
+        )(
+            multiplier_index in 0..=2usize,
+            share_amount in 1..=next_value,
+            base_min_amount in 1..=next_value,
+            quote_min_amount in 1..=next_value,
+            total_supply in next_value..=u16::MAX,
+            base_target in 1..=next_value,
+            quote_target in 1..=next_value,
+            base_reserve in next_value..=u16::MAX,
+            quote_reserve in next_value..=u16::MAX
+        ) -> (Multiplier, u64, u64, u64, u64, Decimal, Decimal, Decimal, Decimal) {
+            let multiplier_arry = [Multiplier::One, Multiplier::AboveOne, Multiplier::BelowOne];
+            (multiplier_arry[multiplier_index], share_amount as u64, base_min_amount as u64, quote_min_amount as u64, total_supply as u64, Decimal::from(base_target as u64), Decimal::from(quote_target as u64), Decimal::from(base_reserve as u64), Decimal::from(quote_reserve as u64))
+        }
+    }
+
+    prop_compose! {
+        fn get_calculate_deposit_range()(
+            next_value in 1..=u16::MAX,
+        )(
+            multiplier_index in 0..=2usize,
+            base_in_amount in 1..=u16::MAX,
+            quote_in_amount in 1..=u16::MAX,
+            base_target in 1..=next_value,
+            quote_target in 1..=next_value,
+            base_reserve in next_value..=u16::MAX,
+            quote_reserve in next_value..=u16::MAX
+        ) -> (Multiplier, u64, u64, Decimal, Decimal, Decimal, Decimal) {
+            let multiplier_arry = [Multiplier::One, Multiplier::AboveOne, Multiplier::BelowOne];
+            (multiplier_arry[multiplier_index], base_in_amount as u64, quote_in_amount as u64, Decimal::from(base_target as u64), Decimal::from(quote_target as u64), Decimal::from(base_reserve as u64), Decimal::from(quote_reserve as u64))
+        }
+    }
+
     proptest! {
+        #[test]
+        fn test_init(
+            (multiplier, base_target, quote_target, base_reserve, quote_reserve) in get_pool_argument_range()
+        ) {
+            let initial_state = PoolState {
+                market_price: default_market_price(),
+                slope: default_slope(),
+                base_target,
+                quote_target,
+                base_reserve,
+                quote_reserve,
+                multiplier,
+            };
+            let mut new_pool_state = PoolState::default();
+            new_pool_state.init(initial_state.clone());
+            assert_eq!(new_pool_state, initial_state);
+        }
+
+        #[test]
+        fn test_new(
+            (multiplier, base_target, quote_target, base_reserve, quote_reserve) in get_pool_argument_range()
+        ) {
+            let mut initial_state = PoolState {
+                market_price: default_market_price(),
+                slope: default_slope(),
+                base_target,
+                quote_target,
+                base_reserve,
+                quote_reserve,
+                multiplier,
+            };
+            let pool_state = PoolState::new(initial_state.clone()).unwrap();
+            initial_state.adjust_target()?;
+
+            assert_eq!(pool_state, initial_state);
+        }
+
         #[test]
         fn test_get_mid_price(
             (multiplier, base_target, quote_target, base_reserve, quote_reserve) in get_pool_argument_range()
@@ -609,71 +715,254 @@ mod tests {
                 initial_state.get_mid_price()?,
                 expected_mid_price
             );
-
         }
-    }
 
-    #[test]
-    fn test_init() {
-        let pool_state = PoolState {
-            market_price: default_market_price(),
-            slope: default_slope(),
-            base_target: Decimal::from(1_000_000_000u64),
-            quote_target: Decimal::from(500_000_000u64),
-            base_reserve: Decimal::from(1_000_000_000u64),
-            quote_reserve: Decimal::from(500_000_000u64),
-            multiplier: Multiplier::One,
-        };
+        #[test]
+        fn test_adjust_target(
+            (multiplier, base_target, quote_target, base_reserve, quote_reserve) in get_pool_argument_range()
+        ) {
+            let initial_state = PoolState {
+                market_price: default_market_price(),
+                slope: default_slope(),
+                base_target,
+                quote_target,
+                base_reserve,
+                quote_reserve,
+                multiplier,
+            };
+            let mut pool_state = initial_state.clone();
+            pool_state.adjust_target().unwrap();
+            if pool_state.multiplier == Multiplier::One {
+                assert_eq!(pool_state, initial_state);
+            } else if pool_state.multiplier == Multiplier::BelowOne {
+                let expected_quote_target = get_target_reserve(
+                    initial_state.quote_reserve,
+                    initial_state
+                        .base_reserve
+                        .try_sub(initial_state.base_target)
+                        .unwrap(),
+                    initial_state.market_price,
+                    initial_state.slope,
+                )
+                .unwrap();
+                assert_eq!(pool_state.quote_target, expected_quote_target);
+            } else {
+                let expected_base_target = get_target_reserve(
+                    initial_state.base_reserve,
+                    initial_state
+                        .quote_reserve
+                        .try_sub(initial_state.quote_target)
+                        .unwrap(),
+                    initial_state.market_price.reciprocal().unwrap(),
+                    initial_state.slope,
+                )
+                .unwrap();
+                assert_eq!(pool_state.base_target, expected_base_target);
+            }
+        }
 
-        let mut new_pool_state = PoolState::default();
-        new_pool_state.init(pool_state.clone());
-        assert_eq!(new_pool_state, pool_state);
-    }
+        #[test]
+        fn test_sell_base_token_with_multiplier(
+            (multiplier, new_multiplier, base_amount, base_target, quote_target, base_reserve, quote_reserve) in get_token_with_multiplier_range()
+        ) {
+            let initial_state = PoolState {
+                market_price: default_market_price(),
+                slope: default_slope(),
+                base_target,
+                quote_target,
+                base_reserve,
+                quote_reserve,
+                multiplier,
+            };
 
-    #[test]
-    fn test_adjust_target() {
-        let initial_state = PoolState {
-            market_price: default_market_price(),
-            slope: default_slope(),
-            base_target: Decimal::from(1_000_000_000u64),
-            quote_target: Decimal::from(100_000_000_000u64),
-            base_reserve: Decimal::from(1_000_000_000u64),
-            quote_reserve: Decimal::from(100_000_000_000u64),
-            multiplier: Multiplier::One,
-        };
-        let mut pool_state = initial_state.clone();
-        pool_state.adjust_target().unwrap();
-        assert_eq!(pool_state, initial_state);
+            if new_multiplier != Multiplier::AboveOne || initial_state.base_reserve.try_add(base_amount)? < initial_state.base_target {
+                let purchased_quote_token_amount = initial_state.sell_base_token_with_multiplier(base_amount, new_multiplier)?;
+                let expected_quote_token_amount = if new_multiplier == Multiplier::One {
+                    get_target_amount_reverse_direction(
+                        initial_state.quote_target,
+                        initial_state.quote_target,
+                        base_amount,
+                        initial_state.market_price,
+                        initial_state.slope,
+                    )?
+                } else if new_multiplier == Multiplier::AboveOne {
+                    get_target_amount(
+                        initial_state.base_target,
+                        initial_state.base_reserve.try_add(base_amount)?,
+                        initial_state.base_reserve,
+                        initial_state.market_price,
+                        initial_state.slope,
+                    )?
+                } else {
+                    get_target_amount_reverse_direction(
+                        initial_state.quote_target,
+                        initial_state.quote_reserve,
+                        base_amount,
+                        initial_state.market_price,
+                        initial_state.slope,
+                    )?
+                };
 
-        pool_state.multiplier = Multiplier::AboveOne;
-        pool_state.adjust_target().unwrap();
+                assert_eq!(purchased_quote_token_amount, expected_quote_token_amount);
+            }
+        }
 
-        let expected_quote_target = get_target_reserve(
-            initial_state.quote_reserve,
-            initial_state
-                .base_reserve
-                .try_sub(initial_state.base_target)
-                .unwrap(),
-            initial_state.market_price,
-            initial_state.slope,
-        )
-        .unwrap();
-        assert_eq!(pool_state.quote_target, expected_quote_target);
+        #[test]
+        fn test_sell_quote_token_with_multiplier(
+            (multiplier, new_multiplier, quote_amount, base_target, quote_target, base_reserve, quote_reserve) in get_token_with_multiplier_range()
+        ) {
+            let initial_state = PoolState {
+                market_price: default_market_price(),
+                slope: default_slope(),
+                base_target,
+                quote_target,
+                base_reserve,
+                quote_reserve,
+                multiplier,
+            };
+            if new_multiplier != Multiplier::BelowOne || initial_state.quote_reserve.try_add(quote_amount)? < initial_state.quote_target {
+                let purchased_base_token_amount = initial_state.sell_quote_token_with_multiplier(quote_amount, new_multiplier).unwrap();
+                let expected_base_token_amount = if new_multiplier == Multiplier::One {
+                    get_target_amount_reverse_direction(
+                        initial_state.base_target,
+                        initial_state.base_target,
+                        quote_amount,
+                        initial_state.market_price.reciprocal()?,
+                        initial_state.slope,
+                    )?
+                } else if new_multiplier == Multiplier::AboveOne {
+                    get_target_amount_reverse_direction(
+                        initial_state.base_target,
+                        initial_state.base_reserve,
+                        quote_amount,
+                        initial_state.market_price.reciprocal()?,
+                        initial_state.slope,
+                    )?
+                } else {
+                    get_target_amount(
+                        initial_state.quote_target,
+                        initial_state.quote_reserve.try_add(quote_amount)?,
+                        initial_state.quote_reserve,
+                        initial_state.market_price.reciprocal()?,
+                        initial_state.slope,
+                    )?
+                };
 
-        pool_state.multiplier = Multiplier::BelowOne;
-        pool_state.adjust_target().unwrap();
+                assert_eq!(purchased_base_token_amount, expected_base_token_amount);
+            }
+        }
 
-        let expected_base_target = get_target_reserve(
-            initial_state.base_reserve,
-            initial_state
-                .quote_reserve
-                .try_sub(expected_quote_target)
-                .unwrap(),
-            initial_state.market_price.reciprocal().unwrap(),
-            initial_state.slope,
-        )
-        .unwrap();
-        assert_eq!(pool_state.base_target, expected_base_target);
+        #[test]
+        fn test_buy_shares(
+            (multiplier, base_balance, quote_balance, total_supply, base_target, quote_target, base_reserve, quote_reserve) in get_buy_shares_range()
+        ) {
+            let initial_state = PoolState {
+                market_price: default_market_price(),
+                slope: default_slope(),
+                base_target,
+                quote_target,
+                base_reserve,
+                quote_reserve,
+                multiplier,
+            };
+            let mut pool_state = initial_state.clone();
+            let buy_shares_amount = pool_state.buy_shares(base_balance, quote_balance, total_supply)?;
+            let base_balance = Decimal::from(base_balance);
+            let quote_balance = Decimal::from(quote_balance);
+            let base_input = base_balance.try_sub(initial_state.base_reserve)?;
+            let quote_input = quote_balance.try_sub(initial_state.quote_reserve)?;
+            let expected_shares_amount = if total_supply == 0 {
+                if initial_state.market_price.try_mul(base_balance)? > quote_balance {
+                    quote_balance.try_div(initial_state.market_price)?
+                } else {
+                    base_balance
+                }
+            } else if initial_state.base_reserve > Decimal::zero() && initial_state.quote_reserve > Decimal::zero() {
+                let base_input_ratio = base_input.try_div(initial_state.base_reserve)?;
+                let quote_input_ratio = quote_input.try_div(initial_state.quote_reserve)?;
+                let mint_ratio = base_input_ratio.min(quote_input_ratio);
+                mint_ratio.try_mul(total_supply)?
+            } else {
+                Decimal::zero()
+            };
+
+            assert_eq!(buy_shares_amount, expected_shares_amount.try_floor_u64()?);
+        }
+
+        #[test]
+        fn test_sell_shares(
+            (multiplier, share_amount, base_min_amount, quote_min_amount, total_supply, base_target, quote_target, base_reserve, quote_reserve) in get_sell_shares_range()
+        ) {
+            let initial_state = PoolState {
+                market_price: default_market_price(),
+                slope: default_slope(),
+                base_target,
+                quote_target,
+                base_reserve,
+                quote_reserve,
+                multiplier,
+            };
+            let mut pool_state = initial_state.clone();
+            let base_balance = initial_state.base_reserve;
+            let quote_balance = initial_state.quote_reserve;
+            let base_amount = base_balance.try_mul(share_amount)?.try_div(total_supply)?;
+            let quote_amount = quote_balance.try_mul(share_amount)?.try_div(total_supply)?;
+            if base_amount >= Decimal::from(base_min_amount) && quote_amount >= Decimal::from(quote_min_amount) {
+                let sell_shares_amount = pool_state.sell_shares(share_amount, base_min_amount, quote_min_amount, total_supply)?;
+                let expected_sell_shares_amount = (base_amount.try_floor_u64()?, quote_amount.try_floor_u64()?);
+
+                assert_eq!(sell_shares_amount, expected_sell_shares_amount);
+            }
+        }
+
+        #[test]
+        fn test_calculate_deposit_amount (
+            (multiplier, base_in_amount, quote_in_amount, base_target, quote_target, base_reserve, quote_reserve) in get_calculate_deposit_range()
+        ) {
+            let initial_state = PoolState {
+                market_price: default_market_price(),
+                slope: default_slope(),
+                base_target,
+                quote_target,
+                base_reserve,
+                quote_reserve,
+                multiplier,
+            };
+            let calculate_deposit_amount = initial_state.calculate_deposit_amount(base_in_amount, quote_in_amount)?;
+            let base_in_amount = Decimal::from(base_in_amount);
+            let quote_in_amount = Decimal::from(quote_in_amount);
+
+            let (base_in_amount, quote_in_amount) =
+                if initial_state.base_reserve.is_zero() && initial_state.quote_reserve.is_zero() {
+                    let shares = if initial_state.market_price.try_mul(base_in_amount)? > quote_in_amount {
+                        quote_in_amount.try_div(initial_state.market_price)?
+                    } else {
+                        base_in_amount
+                    };
+                    (shares, shares.try_mul(initial_state.market_price)?)
+                } else if initial_state.base_reserve > Decimal::zero() && initial_state.quote_reserve > Decimal::zero() {
+                    let base_increase_ratio = base_in_amount.try_div(initial_state.base_reserve)?;
+                    let quote_increase_ratio = quote_in_amount.try_div(initial_state.quote_reserve)?;
+                    if base_increase_ratio < quote_increase_ratio {
+                        (
+                            base_in_amount,
+                            initial_state.quote_reserve.try_mul(base_increase_ratio)?,
+                        )
+                    } else {
+                        (
+                            initial_state.base_reserve.try_mul(quote_increase_ratio)?,
+                            quote_in_amount,
+                        )
+                    }
+                } else {
+                    (base_in_amount, quote_in_amount)
+                };
+
+            assert_eq!(
+                calculate_deposit_amount,
+                (base_in_amount.try_floor_u64()?,quote_in_amount.try_floor_u64()?)
+            );
+        }
     }
 
     #[test]
@@ -696,24 +985,6 @@ mod tests {
     }
 
     #[test]
-    fn test_calculate_deposit_amount() {
-        let pool_state = PoolState {
-            market_price: default_market_price(),
-            slope: default_slope(),
-            base_target: Decimal::from(1_000_000_000u64),
-            quote_target: Decimal::from(100_000_000_000u64),
-            base_reserve: Decimal::from(1_000_000_000u64),
-            quote_reserve: Decimal::from(100_000_000_000u64),
-            multiplier: Multiplier::One,
-        };
-
-        let calculated_deposit_amount = pool_state
-            .calculate_deposit_amount(100u64, 10000u64)
-            .unwrap();
-        assert_eq!(calculated_deposit_amount, (100u64, 10000u64));
-    }
-
-    #[test]
     fn test_failure() {
         assert_eq!(
             Multiplier::try_from(3u8),
@@ -724,24 +995,13 @@ mod tests {
             market_price: default_market_price(),
             slope: default_slope(),
             base_target: Decimal::from(200_000u64),
-            quote_target: Decimal::from(100_000u64),
+            quote_target: Decimal::from(200_000u64),
             base_reserve: Decimal::from(100_000u64),
             quote_reserve: Decimal::from(100_000u64),
             multiplier: Multiplier::BelowOne,
         };
         assert!(pool_state.get_mid_price().is_err());
-        assert!(PoolState::new(pool_state).is_err());
-
-        let mut pool_state = PoolState {
-            market_price: default_market_price(),
-            slope: default_slope(),
-            base_target: Decimal::from(100_000u64),
-            quote_target: Decimal::from(200_000u64),
-            base_reserve: Decimal::from(100_000u64),
-            quote_reserve: Decimal::from(100_000u64),
-            multiplier: Multiplier::AboveOne,
-        };
-        assert!(pool_state.get_mid_price().is_err());
+        assert!(pool_state.adjust_target().is_err());
         assert!(PoolState::new(pool_state).is_err());
 
         let mut pool_state = PoolState {
