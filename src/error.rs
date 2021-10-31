@@ -146,6 +146,11 @@ pub enum SwapError {
     /// Mint initialization failed
     #[error("Mint initialization failed")]
     TokenInitializeMintFailed,
+
+    // 40
+    /// Invalid slope, slope must be in range [0.0,1.0]
+    #[error("Invalid slope")]
+    InvalidSlope,
 }
 impl From<SwapError> for ProgramError {
     fn from(e: SwapError) -> Self {
@@ -236,6 +241,9 @@ impl PrintProgramError for SwapError {
             SwapError::InsufficientFunds => msg!("Error: Insufficient funds to trade"),
             SwapError::WithdrawNotEnough => msg!("Error: Exceeded number of liquidity to withdraw"),
             SwapError::TokenInitializeMintFailed => msg!("Error: Mint initialization failed"),
+            SwapError::InvalidSlope => {
+                msg!("Error: Invalid slope. Slope must be in range [0.0,1.0]")
+            }
         }
     }
 }

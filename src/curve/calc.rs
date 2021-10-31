@@ -40,6 +40,11 @@ pub fn get_target_amount(
     let fair_amount = future_reserve
         .try_sub(current_reserve)?
         .try_mul(market_price)?;
+
+    if slope.lt(&Decimal::zero()) || slope.gt(&Decimal::one()) {
+        return Err(SwapError::InvalidSlope.into());
+    }
+
     if slope.is_zero() {
         return Ok(fair_amount);
     }
@@ -77,6 +82,10 @@ pub fn get_target_amount_reverse_direction(
 
     if quote_amount.is_zero() {
         return Ok(Decimal::zero());
+    }
+
+    if slope.lt(&Decimal::zero()) || slope.gt(&Decimal::one()) {
+        return Err(SwapError::InvalidSlope.into());
     }
 
     let fair_amount = quote_amount.try_mul(market_price)?;
@@ -170,6 +179,10 @@ pub fn get_target_reserve(
     }
     if slope.is_zero() {
         return quote_amount.try_mul(market_price)?.try_add(current_reserve);
+    }
+
+    if slope.lt(&Decimal::zero()) || slope.gt(&Decimal::one()) {
+        return Err(SwapError::InvalidSlope.into());
     }
 
     let price_offset = market_price.try_mul(slope)?.try_mul(4)?;

@@ -207,6 +207,11 @@ fn process_initialize(
     if pool_mint.supply != 0 {
         return Err(SwapError::InvalidSupply.into());
     }
+    if Decimal::from_scaled_val(slope as u128).lt(&Decimal::zero())
+        || Decimal::from_scaled_val(slope as u128).gt(&Decimal::one())
+    {
+        return Err(SwapError::InvalidSlope.into());
+    }
 
     // getting price from pyth or initial mid_price
     let market_price = get_market_price_from_pyth(pyth_a_price_info, pyth_b_price_info, clock)
