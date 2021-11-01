@@ -53,6 +53,16 @@ pub struct InitializeData {
     pub is_open_twap: bool,
 }
 
+/// Swap direction
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SwapDirection {
+    /// sell base
+    SellBase,
+    /// sell quote
+    SellQuote,
+}
+
 /// Swap instruction data
 #[repr(C)]
 #[derive(Clone, Debug, PartialEq)]
@@ -62,7 +72,7 @@ pub struct SwapData {
     /// Minimum amount of DESTINATION token to output, prevents excessive slippage
     pub minimum_amount_out: u64,
     /// Swap direction 0 -> Sell Base Token, 1 -> Sell Quote Token
-    pub swap_direction: u8,
+    pub swap_direction: SwapDirection,
 }
 
 /// Deposit instruction data
@@ -516,7 +526,7 @@ impl SwapInstruction {
             0x1 => {
                 let (amount_in, rest) = unpack_u64(rest)?;
                 let (minimum_amount_out, rest) = unpack_u64(rest)?;
-                let (swap_direction, _) = unpack_u8(rest)?;
+                let (swap_direction, _) = unpack_swap_direction(rest)?;
                 Self::Swap(SwapData {
                     amount_in,
                     minimum_amount_out,
@@ -574,7 +584,7 @@ impl SwapInstruction {
                 buf.push(0x1);
                 buf.extend_from_slice(&amount_in.to_le_bytes());
                 buf.extend_from_slice(&minimum_amount_out.to_le_bytes());
-                buf.extend_from_slice(&swap_direction.to_le_bytes());
+                buf.extend_from_slice(&(swap_direction as u8).to_le_bytes());
             }
             Self::Deposit(DepositData {
                 token_a_amount,
@@ -932,6 +942,16 @@ fn unpack_bool(input: &[u8]) -> Result<(bool, &[u8]), ProgramError> {
     Ok((value, rest))
 }
 
+fn unpack_swap_direction(input: &[u8]) -> Result<(SwapDirection, &[u8]), ProgramError> {
+    let (value, rest) = unpack_u8(input)?;
+    let value = match u8::from_le(value) {
+        0 => SwapDirection::SellBase,
+        1 => SwapDirection::SellQuote,
+        _ => return Err(SwapError::InstructionUnpackError.into()),
+    };
+    Ok((value, rest))
+}
+
 #[allow(dead_code)]
 fn unpack_bytes32(input: &[u8]) -> Result<(&[u8; 32], &[u8]), ProgramError> {
     if input.len() < 32 {
@@ -1054,7 +1074,7 @@ mod tests {
     fn test_pack_swap() {
         let amount_in: u64 = 1_000_000;
         let minimum_amount_out: u64 = 500_000;
-        let swap_direction: u8 = 0;
+        let swap_direction: SwapDirection = SwapDirection::SellBase;
         let check = SwapInstruction::Swap(SwapData {
             amount_in,
             minimum_amount_out,
@@ -1064,7 +1084,7 @@ mod tests {
         let mut expect = vec![1];
         expect.extend_from_slice(&amount_in.to_le_bytes());
         expect.extend_from_slice(&minimum_amount_out.to_le_bytes());
-        expect.extend_from_slice(&swap_direction.to_le_bytes());
+        expect.extend_from_slice(&(swap_direction as u8).to_le_bytes());
         assert_eq!(packed, expect);
         let unpacked = SwapInstruction::unpack(&expect).unwrap();
         assert_eq!(unpacked, check);

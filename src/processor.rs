@@ -24,18 +24,13 @@ use crate::{
     curve::{Multiplier, PoolState},
     error::SwapError,
     instruction::{
-        DepositData, InitializeData, InstructionType, SwapData, SwapInstruction, WithdrawData,
+        DepositData, InitializeData, InstructionType, SwapData, SwapDirection, SwapInstruction,
+        WithdrawData,
     },
     math::{Decimal, TryAdd, TryDiv, TryMul, TrySub},
     pyth,
     state::{ConfigInfo, LiquidityProvider, SwapInfo},
 };
-
-/// swap directions - sell base
-pub const SWAP_DIRECTION_SELL_BASE: u8 = 0;
-
-/// swap directions - sell quote
-pub const SWAP_DIRECTION_SELL_QUOTE: u8 = 1;
 
 /// Processes an [Instruction](enum.Instruction.html).
 pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], input: &[u8]) -> ProgramResult {
@@ -272,7 +267,7 @@ fn process_swap(
     program_id: &Pubkey,
     amount_in: u64,
     minimum_amount_out: u64,
-    swap_direction: u8,
+    swap_direction: SwapDirection,
     accounts: &[AccountInfo],
 ) -> ProgramResult {
     let account_info_iter = &mut accounts.iter();
@@ -351,7 +346,7 @@ fn process_swap(
     }
 
     match swap_direction {
-        SWAP_DIRECTION_SELL_BASE => {
+        SwapDirection::SellBase => {
             if *swap_destination_info.key == token_swap.token_a
                 && *admin_destination_info.key != token_swap.admin_fee_key_a
             {
@@ -366,7 +361,7 @@ fn process_swap(
                 return Err(SwapError::InsufficientFunds.into());
             }
         }
-        SWAP_DIRECTION_SELL_QUOTE => {
+        SwapDirection::SellQuote => {
             if *swap_destination_info.key == token_swap.token_a
                 && *admin_destination_info.key != token_swap.admin_fee_key_b
             {
@@ -381,9 +376,6 @@ fn process_swap(
                 return Err(SwapError::InsufficientFunds.into());
             }
         }
-        _ => {
-            return Err(SwapError::InvalidInstruction.into());
-        }
     }
 
     let (new_market_price, base_price_cumulative_last) =
@@ -395,11 +387,8 @@ fn process_swap(
     })?;
 
     let (receive_amount, new_multiplier) = match swap_direction {
-        SWAP_DIRECTION_SELL_BASE => state.sell_base_token(amount_in)?,
-        SWAP_DIRECTION_SELL_QUOTE => state.sell_quote_token(amount_in)?,
-        _ => {
-            return Err(SwapError::InvalidInstruction.into());
-        }
+        SwapDirection::SellBase => state.sell_base_token(amount_in)?,
+        SwapDirection::SellQuote => state.sell_quote_token(amount_in)?,
     };
     let fees = &token_swap.fees;
     let trade_fee = fees.trade_fee(receive_amount)?;
@@ -415,7 +404,7 @@ fn process_swap(
     }
 
     let (base_balance, quote_balance) = match swap_direction {
-        SWAP_DIRECTION_SELL_BASE => (
+        SwapDirection::SellBase => (
             token_a
                 .amount
                 .checked_add(amount_in)
@@ -425,7 +414,7 @@ fn process_swap(
                 .checked_sub(amount_out)
                 .ok_or(SwapError::CalculationFailure)?,
         ),
-        SWAP_DIRECTION_SELL_QUOTE => (
+        SwapDirection::SellQuote => (
             token_a
                 .amount
                 .checked_sub(amount_out)
@@ -435,9 +424,6 @@ fn process_swap(
                 .checked_add(amount_in)
                 .ok_or(SwapError::CalculationFailure)?,
         ),
-        _ => {
-            return Err(SwapError::InvalidInstruction.into());
-        }
     };
 
     token_swap.pool_state = PoolState::new(PoolState {
@@ -458,7 +444,7 @@ fn process_swap(
     SwapInfo::pack(token_swap, &mut swap_info.data.borrow_mut())?;
 
     match swap_direction {
-        SWAP_DIRECTION_SELL_BASE => {
+        SwapDirection::SellBase => {
             token_transfer(
                 swap_info.key,
                 token_program_info.clone(),
@@ -496,7 +482,7 @@ fn process_swap(
                 amount_to_reward,
             )?;
         }
-        SWAP_DIRECTION_SELL_QUOTE => {
+        SwapDirection::SellQuote => {
             token_transfer(
                 swap_info.key,
                 token_program_info.clone(),
@@ -533,9 +519,6 @@ fn process_swap(
                 market_nonce,
                 amount_to_reward,
             )?;
-        }
-        _ => {
-            return Err(SwapError::InvalidInstruction.into());
         }
     };
 

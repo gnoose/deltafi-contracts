@@ -6,7 +6,7 @@ use deltafi_swap::{
     curve::{Multiplier, PoolState},
     instruction::{
         deposit, init_liquidity_provider, initialize, initialize_config, swap, withdraw,
-        DepositData, InitializeData, SwapData, WithdrawData,
+        DepositData, InitializeData, SwapData, SwapDirection, WithdrawData,
     },
     math::Decimal,
     pyth,
@@ -654,7 +654,7 @@ impl TestSwapInfo {
         reward_token_pubkey: Pubkey,
         amount_in: u64,
         minimum_amount_out: u64,
-        swap_direction: u8,
+        swap_direction: SwapDirection,
         payer: &Keypair,
     ) {
         let user_transfer_authority = Keypair::new();

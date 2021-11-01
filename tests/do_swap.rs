@@ -3,6 +3,7 @@
 mod utils;
 
 use deltafi_swap::{
+    instruction::SwapDirection,
     math::{Decimal, TryDiv},
     processor::process,
 };
@@ -91,7 +92,7 @@ async fn test_success() {
             deltafi_user_account,
             2_000_000_000,
             35_000_000_000,
-            0,
+            SwapDirection::SellBase,
             &payer,
         )
         .await;
